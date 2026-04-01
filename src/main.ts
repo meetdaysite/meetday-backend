@@ -1,0 +1,46 @@
+import { NestFactory, Reflector } from '@nestjs/core';
+import { ValidationPipe, Logger } from '@nestjs/common';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { AppModule } from './app.module';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+
+async function bootstrap() {
+  const logger = new Logger('Bootstrap');
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  app.useLogger(app.get(Logger));
+
+  // CORS
+  app.enableCors();
+
+  // Global validation pipe
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  );
+
+  // Global exception filter
+  app.useGlobalFilters(new AllExceptionsFilter());
+
+  // Swagger (dev only)
+  if (process.env.NODE_ENV !== 'production') {
+    const config = new DocumentBuilder()
+      .setTitle('Meetday API')
+      .setDescription('Meetday backend API documentation')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api/docs', app, document);
+  }
+
+  const port = process.env.PORT ?? 3000;
+  await app.listen(port);
+  logger.log(`Application is running on: http://localhost:${port}`);
+  if (process.env.NODE_ENV !== 'production') {
+    logger.log(`Swagger docs: http://localhost:${port}/api/docs`);
+  }
+}
+bootstrap();
