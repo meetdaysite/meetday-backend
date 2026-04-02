@@ -3,6 +3,7 @@ import { ValidationPipe, Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -24,13 +25,19 @@ async function bootstrap() {
   // Global exception filter
   app.useGlobalFilters(new AllExceptionsFilter());
 
+  // Global response transform
+  app.useGlobalInterceptors(new TransformInterceptor());
+
   // Swagger (dev only)
   if (process.env.NODE_ENV !== 'production') {
     const config = new DocumentBuilder()
       .setTitle('Meetday API')
       .setDescription('Meetday backend API documentation')
       .setVersion('1.0')
-      .addBearerAuth()
+      .addBearerAuth(
+        { type: 'http', scheme: 'bearer', bearerFormat: 'Firebase JWT' },
+        'firebase-token',
+      )
       .build();
     const document = SwaggerModule.createDocument(app, config);
     SwaggerModule.setup('api/docs', app, document);
