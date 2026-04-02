@@ -13,6 +13,7 @@ import { TicketsModule } from './modules/tickets/tickets.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { FirebaseAuthGuard } from './common/guards/firebase-auth.guard';
+import { RedisHealthService } from './common/health/redis-health.service';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { FirebaseAuthGuard } from './common/guards/firebase-auth.guard';
   ],
   providers: [
     Logger,
+    RedisHealthService,
     {
       provide: APP_GUARD,
       useClass: FirebaseAuthGuard,
