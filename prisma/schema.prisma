@@ -31,13 +31,75 @@ model User {
   firstName   String
   lastName    String
   avatarUrl   String?
-  isActive    Boolean @default(true)
+  isActive      Boolean @default(true)
+  isKycVerified Boolean @default(false)
 
   roleId String
   role   Role   @relation(fields: [roleId], references: [id])
+
+  userProfile UserProfile?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("users")
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  NON_BINARY
+  PREFER_NOT_TO_SAY
+}
+
+enum ProfileVisibility {
+  PUBLIC
+  MEMBERS_ONLY
+  PRIVATE
+}
+
+model UserProfile {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  bio         String?
+  dateOfBirth DateTime?
+  gender      Gender?
+  city        String?
+  languages   String[]
+  visibility  ProfileVisibility @default(MEMBERS_ONLY)
+
+  interests UserInterest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([city])
+  @@index([languages(ops: ArrayOps)], type: Gin)
+  @@map("user_profiles")
+}
+
+model Category {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  description String?
+
+  userInterests UserInterest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("categories")
+}
+
+model UserInterest {
+  userProfileId String
+  categoryId    String
+
+  userProfile UserProfile @relation(fields: [userProfileId], references: [id])
+  category    Category    @relation(fields: [categoryId], references: [id])
+
+  @@id([userProfileId, categoryId])
+  @@map("user_interests")
 }
