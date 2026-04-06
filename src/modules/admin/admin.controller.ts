@@ -6,7 +6,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 
 @ApiTags('Admin')
-@ApiBearerAuth()
+@ApiBearerAuth('firebase-token')
 @UseGuards(RolesGuard)
 @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
 @Controller('admin')
