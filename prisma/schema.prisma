@@ -137,7 +137,6 @@ model Category {
 
   userInterests            UserInterest[]
   hostExperienceCategories HostExperienceCategory[]
-  hostProfiles             HostProfile[]            @relation("HostCategory")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -170,12 +169,8 @@ model HostProfile {
   languages   String[]
   socialLinks Json?    // { instagram, linkedin, youtube, website }
 
-  // Host Category (single - what type of host they are)
-  hostCategoryId String?
-  hostCategory   Category? @relation("HostCategory", fields: [hostCategoryId], references: [id])
-
-  // Experience Categories (multi - what types of experiences they host)
-  experienceCategories HostExperienceCategory[]
+  // Categories (multi - what types of experiences they host)
+  categories HostExperienceCategory[]
 
   // KYC
   kycStatus        KycStatus @default(NOT_SUBMITTED)
