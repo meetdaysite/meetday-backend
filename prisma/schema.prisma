@@ -31,19 +31,27 @@ model User {
   firstName   String
   lastName    String
   avatarUrl   String?
-  isActive      Boolean @default(true)
-  isKycVerified Boolean @default(false)
+  isActive    Boolean @default(true)
 
   roleId String
   role   Role   @relation(fields: [roleId], references: [id])
 
   userProfile UserProfile?
+  hostProfile HostProfile? @relation("HostUser")
+
+  // Back-relations for admin audit trails
+  approvedHostProfiles    HostProfile[]              @relation("HostApprovedBy")
+  subscriptionPlanChanges SubscriptionPlanHistory[]  @relation("PlanChangedBy")
+  verifiedPayoutAccounts  HostPayoutAccount[]        @relation("PayoutAccountVerifiedBy")
+  payoutAccountChanges    HostPayoutAccountHistory[] @relation("PayoutAccountChangedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("users")
 }
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
 
 enum Gender {
   MALE
@@ -57,6 +65,48 @@ enum ProfileVisibility {
   MEMBERS_ONLY
   PRIVATE
 }
+
+enum HostPlan {
+  DISCOVER
+  SELL
+  COMMUNITY
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  EXPIRED
+  PAST_DUE
+}
+
+enum BillingCycle {
+  MONTHLY
+  YEARLY
+}
+
+enum HostApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum KycStatus {
+  NOT_SUBMITTED
+  PENDING
+  VERIFIED
+  FAILED
+}
+
+enum PayoutAccountStatus {
+  PENDING_PENNY_DROP    // Fund account created in Razorpay, awaiting penny drop result
+  PENNY_DROP_FAILED     // Razorpay penny drop failed — account invalid or unreachable
+  PENDING_ADMIN_REVIEW  // Penny drop passed, awaiting admin sign-off
+  APPROVED              // Admin approved — host can receive payouts
+  REJECTED              // Admin rejected (mismatch, fraud, compliance failure)
+  DEACTIVATED           // Soft-deleted — account closed or replaced
+}
+
+// ─── User Profile ─────────────────────────────────────────────────────────────
 
 model UserProfile {
   id     String @id @default(uuid())
@@ -85,7 +135,9 @@ model Category {
   name        String  @unique
   description String?
 
-  userInterests UserInterest[]
+  userInterests            UserInterest[]
+  hostExperienceCategories HostExperienceCategory[]
+  hostProfiles             HostProfile[]            @relation("HostCategory")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -102,4 +154,227 @@ model UserInterest {
 
   @@id([userProfileId, categoryId])
   @@map("user_interests")
+}
+
+// ─── Host Profile ─────────────────────────────────────────────────────────────
+
+model HostProfile {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation("HostUser", fields: [userId], references: [id])
+
+  // Identity & Credibility
+  hostBio     String?
+  tagline     String?
+  city        String?
+  languages   String[]
+  socialLinks Json?    // { instagram, linkedin, youtube, website }
+
+  // Host Category (single - what type of host they are)
+  hostCategoryId String?
+  hostCategory   Category? @relation("HostCategory", fields: [hostCategoryId], references: [id])
+
+  // Experience Categories (multi - what types of experiences they host)
+  experienceCategories HostExperienceCategory[]
+
+  // KYC
+  kycStatus        KycStatus @default(NOT_SUBMITTED)
+  kycVerifiedAt    DateTime?
+  kycFailureReason String?
+
+  // Admin Approval
+  approvalStatus  HostApprovalStatus @default(PENDING)
+  approvedAt      DateTime?
+  approvedBy      String?
+  approvedByUser  User?              @relation("HostApprovedBy", fields: [approvedBy], references: [id])
+  rejectionReason String?
+
+  // Plan (denormalized — keep in sync via subscription lifecycle events)
+  currentPlan HostPlan @default(DISCOVER)
+
+  // Payout
+  payoutAccount HostPayoutAccount?
+
+  // Platform Metrics (denormalized)
+  totalEventsHosted Int    @default(0)
+  averageRating     Float?
+  totalReviews      Int    @default(0)
+
+  subscriptions HostSubscription[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("host_profiles")
+}
+
+model HostExperienceCategory {
+  hostProfileId String
+  categoryId    String
+
+  hostProfile HostProfile @relation(fields: [hostProfileId], references: [id])
+  category    Category    @relation(fields: [categoryId], references: [id])
+
+  @@id([hostProfileId, categoryId])
+  @@map("host_experience_categories")
+}
+
+// ─── Payout ───────────────────────────────────────────────────────────────────
+
+model HostPayoutAccount {
+  id            String      @id @default(uuid())
+  hostProfileId String      @unique
+  hostProfile   HostProfile @relation(fields: [hostProfileId], references: [id])
+
+  // Razorpay gateway identifiers (not sensitive)
+  razorpayContactId     String?
+  razorpayFundAccountId String?
+
+  // Display-safe bank details (raw account number NEVER stored — PCI-DSS)
+  maskedAccountNumber String?  // Last 4 digits only, e.g. "XXXX1234"
+  bankName            String?  // e.g. "HDFC Bank"
+  accountHolderName   String?  // Name as registered on bank account
+  accountType         String?  // "SAVINGS" | "CURRENT"
+
+  // Verification lifecycle
+  status PayoutAccountStatus @default(PENDING_PENNY_DROP)
+
+  // Penny drop (automated Razorpay verification)
+  pennyDropReference   String?
+  pennyDropInitiatedAt DateTime?
+  pennyDropCompletedAt DateTime?
+  pennyDropFailReason  String?
+
+  // Admin review (mirrors HostProfile.approvedBy pattern)
+  verifiedBy      String?
+  verifiedByUser  User?     @relation("PayoutAccountVerifiedBy", fields: [verifiedBy], references: [id])
+  adminReviewedAt DateTime?
+  rejectionReason String?
+
+  // KYC snapshot at submission time (audit — not live KYC source)
+  kycStatusAtSubmission KycStatus?
+
+  // Soft-delete — financial records must not be hard-deleted (PMLA 2002)
+  deactivatedAt      DateTime?
+  deactivationReason String?
+
+  // Audit trail
+  history HostPayoutAccountHistory[]
+
+  // Deprecated — kept for zero-downtime migration; remove after data migration
+  isVerified Boolean   @default(false)
+  verifiedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([verifiedBy])
+  @@map("host_payout_accounts")
+}
+
+model HostPayoutAccountHistory {
+  id                  String            @id @default(uuid())
+  hostPayoutAccountId String
+  hostPayoutAccount   HostPayoutAccount @relation(fields: [hostPayoutAccountId], references: [id])
+
+  // Actor — null means system/webhook-driven change (e.g. Razorpay callback)
+  changedBy     String?
+  changedByUser User?   @relation("PayoutAccountChangedBy", fields: [changedBy], references: [id])
+
+  // Status delta
+  previousStatus PayoutAccountStatus?
+  newStatus      PayoutAccountStatus?
+
+  // Display-field deltas (only non-sensitive fields logged — DPDP data minimisation)
+  previousMaskedAccountNumber String?
+  newMaskedAccountNumber      String?
+  previousBankName            String?
+  newBankName                 String?
+  previousAccountHolderName   String?
+  newAccountHolderName        String?
+
+  // Change context (RBI audit requirement)
+  changeReason String   // e.g. "ADMIN_APPROVED", "PENNY_DROP_FAILED", "BANK_ACCOUNT_UPDATED"
+  ipAddress    String?
+  userAgent    String?
+
+  createdAt DateTime @default(now())
+
+  @@index([hostPayoutAccountId])
+  @@index([changedBy])
+  @@map("host_payout_account_history")
+}
+
+// ─── Subscriptions ────────────────────────────────────────────────────────────
+
+model HostSubscription {
+  id            String      @id @default(uuid())
+  hostProfileId String
+  hostProfile   HostProfile @relation(fields: [hostProfileId], references: [id])
+
+  plan         HostPlan
+  status       SubscriptionStatus
+  billingCycle BillingCycle?
+
+  // Price locked at time of subscription
+  lockedYearlyPrice  Float?
+  lockedMonthlyPrice Float?
+  lockedFeeRate      Float
+
+  // Razorpay
+  razorpaySubscriptionId String? @unique
+  razorpayPlanId         String?
+
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+
+  cancelledAt  DateTime?
+  cancelReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([hostProfileId])
+  @@map("host_subscriptions")
+}
+
+model SubscriptionPlan {
+  id              String   @id @default(uuid())
+  plan            HostPlan @unique
+  yearlyPrice     Float?
+  monthlyPrice    Float?
+  platformFeeRate Float
+  isActive        Boolean  @default(true)
+
+  priceHistory SubscriptionPlanHistory[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("subscription_plans")
+}
+
+model SubscriptionPlanHistory {
+  id                 String           @id @default(uuid())
+  subscriptionPlanId String
+  subscriptionPlan   SubscriptionPlan @relation(fields: [subscriptionPlanId], references: [id])
+
+  changedBy     String
+  changedByUser User   @relation("PlanChangedBy", fields: [changedBy], references: [id])
+
+  previousYearlyPrice  Float?
+  previousMonthlyPrice Float?
+  previousFeeRate      Float?
+  newYearlyPrice       Float?
+  newMonthlyPrice      Float?
+  newFeeRate           Float?
+
+  changeReason       String   // mandatory, internal only
+  effectiveDate      DateTime
+  notificationSentAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@map("subscription_plan_history")
 }
