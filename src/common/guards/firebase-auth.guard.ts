@@ -32,11 +32,22 @@ export class FirebaseAuthGuard implements CanActivate {
     const token = authHeader.split(' ')[1];
 
     try {
-      const decodedToken = await firebaseAdmin.auth().verifyIdToken(token);
+      const decoded = await firebaseAdmin.auth().verifyIdToken(token);
+
+      // Normalise the provider so downstream code can branch on it
+      const provider = (decoded.firebase?.sign_in_provider ?? 'unknown') as string;
+
       request.user = {
-        uid: decodedToken.uid,
-        email: decodedToken.email,
+        uid: decoded.uid,
+        // Identity fields — may be undefined depending on provider
+        email: decoded.email,                     // present: email/password, Google, Apple
+        phone: decoded.phone_number,              // present: phone auth
+        displayName: decoded.name,                // present: Google, Apple
+        avatarUrl: decoded.picture,               // present: Google, Apple
+        provider,                                 // 'password' | 'phone' | 'google.com' | 'apple.com'
+        emailVerified: decoded.email_verified ?? false,
       };
+
       return true;
     } catch {
       throw new UnauthorizedException('Invalid or expired token');

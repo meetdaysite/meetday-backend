@@ -26,8 +26,8 @@ model Role {
 model User {
   id          String  @id @default(uuid())
   firebaseUid String  @unique
-  email       String  @unique
-  phone       String?
+  email       String? @unique  // null for phone-only accounts
+  phone       String? @unique  // null for email-only accounts; token-verified for phone auth
   firstName   String
   lastName    String
   avatarUrl   String?
@@ -97,6 +97,11 @@ enum KycStatus {
   FAILED
 }
 
+enum HostType {
+  INDIVIDUAL
+  BUSINESS
+}
+
 enum PayoutAccountStatus {
   PENDING_PENNY_DROP    // Fund account created in Razorpay, awaiting penny drop result
   PENNY_DROP_FAILED     // Razorpay penny drop failed — account invalid or unreachable
@@ -162,12 +167,30 @@ model HostProfile {
   userId String @unique
   user   User   @relation("HostUser", fields: [userId], references: [id])
 
-  // Identity & Credibility
-  hostBio     String?
-  tagline     String?
-  city        String?
-  languages   String[]
-  socialLinks Json?    // { instagram, linkedin, youtube, website }
+  // Identity & Type
+  hostType    HostType?
+  displayName String?   // Public-facing name shown to attendees
+  legalName   String?   // Full legal name or registered company name
+
+  // Legal / Compliance (encrypted or masked)
+  panEncrypted  String?  // AES-256-GCM encrypted PAN — required for TDS on payouts
+  maskedAadhaar String?  // Set after KYC verification, e.g. "XXXX XXXX 1234" — full number never stored
+  gstin         String?  // GST number — collected when applicable (not required at onboarding)
+
+  // Credibility & Bio
+  hostBio                     String?
+  tagline                     String?
+  languages                   String[]
+  socialLinks                 Json?     // { instagram, linkedin, youtube, website }
+  yearsOfExperience           Int?
+  totalEventsPreviouslyHosted Int?
+  portfolioLinks              String[]  // URLs to past events, press coverage, etc.
+
+  // Reach
+  operatingCities String[]  // Cities the host is willing to operate in
+
+  // Address (structured, separate table)
+  address HostAddress?
 
   // Categories (multi - what types of experiences they host)
   categories HostExperienceCategory[]
@@ -212,6 +235,24 @@ model HostExperienceCategory {
 
   @@id([hostProfileId, categoryId])
   @@map("host_experience_categories")
+}
+
+model HostAddress {
+  id            String      @id @default(uuid())
+  hostProfileId String      @unique
+  hostProfile   HostProfile @relation(fields: [hostProfileId], references: [id])
+
+  addressLine1 String
+  addressLine2 String?
+  city         String
+  state        String
+  pincode      String
+  country      String @default("India")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("host_addresses")
 }
 
 // ─── Payout ───────────────────────────────────────────────────────────────────

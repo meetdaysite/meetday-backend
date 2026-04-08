@@ -14,6 +14,8 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { FirebaseAuthGuard } from './common/guards/firebase-auth.guard';
 import { RedisHealthService } from './common/health/redis-health.service';
+import { MailModule } from './common/mail/mail.module';
+import { CryptoModule } from './common/crypto/crypto.module';
 
 @Module({
   imports: [
@@ -34,6 +36,8 @@ import { RedisHealthService } from './common/health/redis-health.service';
       inject: [ConfigService],
     }),
     PrismaModule,
+    MailModule,
+    CryptoModule,
     AuthModule,
     UsersModule,
     HostsModule,

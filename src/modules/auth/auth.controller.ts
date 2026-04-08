@@ -1,0 +1,194 @@
+import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConflictResponse,
+  ApiCreatedResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+  ApiUnauthorizedResponse,
+} from '@nestjs/swagger';
+import { AuthService } from './auth.service';
+import { RegisterDto } from './dto/register.dto';
+import { GetUser } from '../../common/decorators/get-user.decorator';
+
+@ApiTags('Auth')
+@ApiBearerAuth('firebase-token')
+@ApiUnauthorizedResponse({ description: 'Missing or invalid Firebase JWT' })
+@Controller('auth')
+export class AuthController {
+  constructor(private readonly authService: AuthService) {}
+
+  @Post('register')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Register after Firebase signup',
+    description:
+      'Called once by the client immediately after a successful Firebase signup. ' +
+      'Identity fields (uid, email, phone, displayName, avatarUrl) are extracted from the verified JWT — never pass them in the body.\n\n' +
+      '**Supported providers:**\n' +
+      '- `password` (email/password) — email from token, firstName + lastName required in body\n' +
+      '- `phone` — phone from token, firstName + lastName required in body\n' +
+      '- `google.com` / `apple.com` — email + displayName from token, firstName + lastName optional (token name used as fallback)\n\n' +
+      '**accountType: USER** — Creates a standard attendee account.\n\n' +
+      '**accountType: HOST** — Creates the user with the HOST role and atomically creates a ' +
+      'HostProfile (kycStatus: NOT_SUBMITTED, approvalStatus: PENDING). ' +
+      '`categoryIds` and `hostType` are required for host registration.',
+  })
+  @ApiBody({
+    type: RegisterDto,
+    examples: {
+      registerAsUser: {
+        summary: 'Register as a regular user',
+        value: {
+          firstName: 'Rahul',
+          lastName: 'Sharma',
+          phone: '+919876543210',
+          accountType: 'USER',
+        },
+      },
+      registerAsHost: {
+        summary: 'Register as a host',
+        value: {
+          firstName: 'Priya',
+          lastName: 'Nair',
+          phone: '+919876543211',
+          accountType: 'HOST',
+          hostType: 'INDIVIDUAL',
+          displayName: 'Mumbai Walks by Priya',
+          legalName: 'Priya Nair',
+          pan: 'ABCDE1234F',
+          categoryIds: ['11111111-1111-1111-1111-111111111111'],
+          hostBio: 'I run weekly photography walks across Mumbai exploring hidden heritage.',
+          tagline: 'Discover Mumbai through a lens',
+          languages: ['English', 'Hindi', 'Marathi'],
+          yearsOfExperience: 3,
+          totalEventsPreviouslyHosted: 15,
+          operatingCities: ['Mumbai', 'Pune'],
+          socialLinks: {
+            instagram: 'https://instagram.com/mumbaiwalks',
+          },
+          address: {
+            addressLine1: '12, Linking Road',
+            addressLine2: 'Bandra West',
+            city: 'Mumbai',
+            state: 'Maharashtra',
+            pincode: '400050',
+          },
+        },
+      },
+    },
+  })
+  @ApiCreatedResponse({
+    description: 'User registered. For HOST accountType, response includes the created hostProfile.',
+    schema: {
+      examples: {
+        userResponse: {
+          summary: 'USER registration response',
+          value: {
+            success: true,
+            timestamp: '2026-04-08T10:00:00.000Z',
+            data: {
+              id: 'user-uuid',
+              email: 'rahul.sharma@example.com',
+              firstName: 'Rahul',
+              lastName: 'Sharma',
+              phone: '+919876543210',
+              avatarUrl: null,
+              isActive: true,
+              role: { name: 'USER' },
+              createdAt: '2026-04-08T10:00:00.000Z',
+            },
+          },
+        },
+        hostResponse: {
+          summary: 'HOST registration response',
+          value: {
+            success: true,
+            timestamp: '2026-04-08T10:00:00.000Z',
+            data: {
+              id: 'user-uuid',
+              email: 'priya.nair@example.com',
+              firstName: 'Priya',
+              lastName: 'Nair',
+              phone: '+919876543211',
+              avatarUrl: null,
+              isActive: true,
+              role: { name: 'HOST' },
+              createdAt: '2026-04-08T10:00:00.000Z',
+              hostProfile: {
+                id: 'hp-uuid',
+                hostType: 'INDIVIDUAL',
+                displayName: 'Mumbai Walks by Priya',
+                legalName: 'Priya Nair',
+                kycStatus: 'NOT_SUBMITTED',
+                approvalStatus: 'PENDING',
+                currentPlan: 'DISCOVER',
+                operatingCities: ['Mumbai', 'Pune'],
+                address: {
+                  addressLine1: '12, Linking Road',
+                  addressLine2: 'Bandra West',
+                  city: 'Mumbai',
+                  state: 'Maharashtra',
+                  pincode: '400050',
+                  country: 'India',
+                },
+                categories: [{ category: { id: 'cat-uuid', name: 'Outdoor Adventures' } }],
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiConflictResponse({ description: 'Firebase UID is already registered.' })
+  register(
+    @GetUser() tokenUser: {
+      uid: string;
+      email?: string;
+      phone?: string;
+      displayName?: string;
+      avatarUrl?: string;
+      provider: string;
+    },
+    @Body() dto: RegisterDto,
+  ) {
+    return this.authService.register(tokenUser, dto);
+  }
+
+  @Get('me')
+  @ApiOperation({
+    summary: 'Get current user profile',
+    description:
+      'Returns the full profile of the authenticated user including their role and user profile. ' +
+      'Useful for bootstrapping the client app on login.',
+  })
+  @ApiOkResponse({
+    description: 'Authenticated user profile.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-04-08T10:00:00.000Z',
+        data: {
+          id: 'user-uuid',
+          email: 'rahul.sharma@example.com',
+          firstName: 'Rahul',
+          lastName: 'Sharma',
+          phone: '+919876543210',
+          avatarUrl: null,
+          isActive: true,
+          role: { name: 'USER' },
+          userProfile: null,
+          createdAt: '2026-04-08T10:00:00.000Z',
+          updatedAt: '2026-04-08T10:00:00.000Z',
+        },
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'No DB record found. User must register first.' })
+  getMe(@GetUser('uid') firebaseUid: string) {
+    return this.authService.getMe(firebaseUid);
+  }
+}

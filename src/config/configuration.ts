@@ -20,5 +20,19 @@ export default () => {
       clientEmail: env.FIREBASE_CLIENT_EMAIL,
       privateKey: env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
     },
+    mail: {
+      host: env.MAIL_HOST,
+      port: env.MAIL_PORT,
+      user: env.MAIL_USER,
+      pass: env.MAIL_PASS,
+      from: env.MAIL_FROM,
+    },
+    razorpay: {
+      keyId: env.RAZORPAY_KEY_ID,
+      keySecret: env.RAZORPAY_KEY_SECRET,
+    },
+    crypto: {
+      encryptionKey: env.ENCRYPTION_KEY,
+    },
   };
 };

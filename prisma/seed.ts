@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { seedRoles } from './seeders/role.seeder';
 import { seedCategories } from './seeders/category.seeder';
 import { seedSuperAdmin } from './seeders/super-admin.seeder';
+import { seedSubscriptionPlans } from './seeders/subscription-plan.seeder';
 
 const prisma = new PrismaClient();
 
@@ -9,6 +10,7 @@ async function main() {
   await seedRoles(prisma);
   await seedCategories(prisma);
   await seedSuperAdmin(prisma);
+  await seedSubscriptionPlans(prisma);
 }
 
 main()

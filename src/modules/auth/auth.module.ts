@@ -1,8 +1,13 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as firebaseAdmin from 'firebase-admin';
+import { AuthController } from './auth.controller';
+import { AuthService } from './auth.service';
 
-@Module({})
+@Module({
+  controllers: [AuthController],
+  providers: [AuthService],
+})
 export class AuthModule {
   constructor(private readonly configService: ConfigService) {
     if (!firebaseAdmin.apps.length) {
