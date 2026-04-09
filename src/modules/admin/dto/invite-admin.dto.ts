@@ -1,5 +1,5 @@
-import { IsEmail, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsArray, IsEmail, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class InviteAdminDto {
   @ApiProperty({ example: 'citymanager@meetday.in', description: 'Email address of the admin to invite.' })
@@ -26,4 +26,14 @@ export class InviteAdminDto {
   })
   @IsUUID('4')
   roleId: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['Mumbai', 'Pune'],
+    description: 'Required when role is CITY_ADMIN. Cities this admin will manage.',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  managedCities?: string[];
 }

@@ -74,6 +74,9 @@ export class AdminService {
     if (role.name === 'SUPER_ADMIN') {
       throw new BadRequestException('SUPER_ADMIN cannot be granted via this endpoint');
     }
+    if (role.name === 'CITY_ADMIN' && (!dto.managedCities || dto.managedCities.length === 0)) {
+      throw new BadRequestException('managedCities is required for CITY_ADMIN');
+    }
 
     // Create DB user — inactive until they complete profile
     await this.prisma.user.create({
@@ -85,6 +88,9 @@ export class AdminService {
         isActive: false,
         mustCompleteProfile: true,
         role: { connect: { id: role.id } },
+        ...(role.name === 'CITY_ADMIN' && {
+          adminProfile: { create: { managedCities: dto.managedCities } },
+        }),
       },
     });
 

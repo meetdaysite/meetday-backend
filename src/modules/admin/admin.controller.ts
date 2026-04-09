@@ -107,7 +107,7 @@ export class AdminController {
     examples: {
       inviteCityAdmin: {
         summary: 'Invite a city admin',
-        value: { email: 'citymanager@meetday.in', firstName: 'Rahul', lastName: 'Sharma', roleId: 'a3f2c1d4-0000-0000-0000-000000000001' },
+        value: { email: 'citymanager@meetday.in', firstName: 'Rahul', lastName: 'Sharma', roleId: 'a3f2c1d4-0000-0000-0000-000000000001', managedCities: ['Mumbai', 'Pune'] },
       },
       inviteModerator: {
         summary: 'Invite a moderator',
