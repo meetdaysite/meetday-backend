@@ -30,6 +30,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { RejectHostDto } from './dto/reject-host.dto';
 import { ListHostsQueryDto } from './dto/list-hosts-query.dto';
+import { ListAdminsQueryDto } from './dto/list-admins-query.dto';
 import { ListRolesQueryDto } from './dto/list-roles-query.dto';
 import { InviteAdminDto } from './dto/invite-admin.dto';
 
@@ -42,6 +43,54 @@ import { InviteAdminDto } from './dto/invite-admin.dto';
 @Controller('admin')
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
+
+  @Get('admins')
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({
+    summary: 'List all admin users',
+    description:
+      'Returns a paginated list of all admin users (excludes USER and HOST roles). ' +
+      'Filter by role name or active status. Only SUPER_ADMIN can call this endpoint.',
+  })
+  @ApiOkResponse({
+    description: 'Paginated list of admins.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-04-09T10:00:00.000Z',
+        data: {
+          admins: [
+            {
+              id: 'user-uuid',
+              firstName: 'Rahul',
+              lastName: 'Sharma',
+              email: 'citymanager@meetday.in',
+              isActive: true,
+              createdAt: '2026-04-08T10:00:00.000Z',
+              role: { name: 'CITY_ADMIN' },
+              adminProfile: { managedCities: ['Mumbai', 'Pune'] },
+            },
+            {
+              id: 'user-uuid-2',
+              firstName: 'Priya',
+              lastName: 'Nair',
+              email: 'mod@meetday.in',
+              isActive: false,
+              createdAt: '2026-04-07T10:00:00.000Z',
+              role: { name: 'MODERATOR' },
+              adminProfile: null,
+            },
+          ],
+          total: 2,
+          page: 1,
+          limit: 20,
+        },
+      },
+    },
+  })
+  listAdmins(@Query() query: ListAdminsQueryDto) {
+    return this.adminService.listAdmins(query);
+  }
 
   @Get('roles')
   @ApiOperation({

@@ -11,6 +11,7 @@ import * as crypto from 'crypto';
 import * as firebaseAdmin from 'firebase-admin';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ListHostsQueryDto } from './dto/list-hosts-query.dto';
+import { ListAdminsQueryDto } from './dto/list-admins-query.dto';
 import { ListRolesQueryDto } from './dto/list-roles-query.dto';
 import { RejectHostDto } from './dto/reject-host.dto';
 import { InviteAdminDto } from './dto/invite-admin.dto';
@@ -22,6 +23,41 @@ export class AdminService {
     private readonly configService: ConfigService,
     @InjectQueue('mail') private readonly mailQueue: Queue,
   ) {}
+
+  async listAdmins(query: ListAdminsQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const END_USER_ROLES = ['USER', 'HOST'];
+
+    const where: any = {
+      role: { name: { notIn: END_USER_ROLES } },
+    };
+
+    if (query.role) where.role = { name: query.role };
+    if (query.isActive !== undefined) where.isActive = query.isActive;
+
+    const [admins, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          isActive: true,
+          createdAt: true,
+          role: { select: { name: true } },
+          adminProfile: { select: { managedCities: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return { admins, total, page, limit };
+  }
 
   async getRoles(query: ListRolesQueryDto) {
     const END_USER_ROLES = ['USER', 'HOST', 'SUPER_ADMIN'];
