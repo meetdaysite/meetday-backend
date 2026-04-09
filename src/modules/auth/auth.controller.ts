@@ -1,5 +1,6 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiBody,
   ApiConflictResponse,
@@ -12,6 +13,7 @@ import {
 } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
+import { CompleteProfileDto } from './dto/complete-profile.dto';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 
 @ApiTags('Auth')
@@ -156,6 +158,57 @@ export class AuthController {
     @Body() dto: RegisterDto,
   ) {
     return this.authService.register(tokenUser, dto);
+  }
+
+  @Post('complete-profile')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Complete profile after admin invite',
+    description:
+      'Called by an invited admin after they have set their password via the Firebase reset link. ' +
+      'Fills in `firstName`, `lastName`, and optionally `phone`, then sets `isActive=true` and ' +
+      '`mustCompleteProfile=false` so the account becomes fully operational.\n\n' +
+      'No `RolesGuard` is applied here — the invited admin\'s `isActive` is `false` at this point, ' +
+      'which would otherwise block them. Only a valid Firebase JWT is required.',
+  })
+  @ApiBody({
+    type: CompleteProfileDto,
+    examples: {
+      default: {
+        summary: 'Admin completing profile',
+        value: { firstName: 'Aishik', lastName: 'Sikdar', phone: '+919876543210' },
+      },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Profile completed. Account is now active.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-04-08T10:00:00.000Z',
+        data: {
+          id: 'user-uuid',
+          email: 'citymanager@meetday.in',
+          phone: '+919876543210',
+          firstName: 'Aishik',
+          lastName: 'Sikdar',
+          avatarUrl: null,
+          isActive: true,
+          mustCompleteProfile: false,
+          role: { name: 'CITY_ADMIN' },
+          createdAt: '2026-04-08T10:00:00.000Z',
+          updatedAt: '2026-04-08T10:05:00.000Z',
+        },
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'No user record found for this Firebase UID.' })
+  @ApiBadRequestResponse({ description: 'Profile is already complete.' })
+  completeProfile(
+    @GetUser('uid') firebaseUid: string,
+    @Body() dto: CompleteProfileDto,
+  ) {
+    return this.authService.completeProfile(firebaseUid, dto);
   }
 
   @Get('me')

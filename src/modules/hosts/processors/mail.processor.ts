@@ -60,4 +60,13 @@ export class MailProcessor {
       this.logger.error(`Failed to process subscription-lapsed mail job: ${(error as Error).message}`);
     }
   }
+
+  @Process('admin-invite')
+  async handleAdminInvite(job: Job<{ to: string; roleName: string; resetLink: string }>) {
+    try {
+      await this.mailService.sendAdminInvite(job.data.to, job.data.roleName, job.data.resetLink);
+    } catch (error) {
+      this.logger.error(`Failed to process admin-invite mail job: ${(error as Error).message}`);
+    }
+  }
 }

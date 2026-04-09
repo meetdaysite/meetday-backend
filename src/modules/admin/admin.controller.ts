@@ -14,6 +14,8 @@ import {
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiBody,
+  ApiConflictResponse,
+  ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -28,6 +30,8 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { RejectHostDto } from './dto/reject-host.dto';
 import { ListHostsQueryDto } from './dto/list-hosts-query.dto';
+import { ListRolesQueryDto } from './dto/list-roles-query.dto';
+import { InviteAdminDto } from './dto/invite-admin.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth('firebase-token')
@@ -38,6 +42,93 @@ import { ListHostsQueryDto } from './dto/list-hosts-query.dto';
 @Controller('admin')
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
+
+  @Get('roles')
+  @ApiOperation({
+    summary: 'List roles',
+    description:
+      'Returns all roles. Pass `adminOnly=true` to exclude end-user roles (`USER`, `HOST`) ' +
+      'and get only admin-assignable roles — use this to populate the invite admin role dropdown.',
+  })
+  @ApiOkResponse({
+    description: 'List of roles.',
+    schema: {
+      examples: {
+        all: {
+          summary: 'All roles',
+          value: {
+            success: true,
+            timestamp: '2026-04-09T10:00:00.000Z',
+            data: [
+              { id: 'uuid-1', name: 'CITY_ADMIN', description: null },
+              { id: 'uuid-2', name: 'HOST', description: null },
+              { id: 'uuid-3', name: 'MODERATOR', description: null },
+              { id: 'uuid-4', name: 'SUPER_ADMIN', description: null },
+              { id: 'uuid-5', name: 'SUPPORT', description: null },
+              { id: 'uuid-6', name: 'USER', description: null },
+            ],
+          },
+        },
+        adminOnly: {
+          summary: 'Admin roles only (adminOnly=true)',
+          value: {
+            success: true,
+            timestamp: '2026-04-09T10:00:00.000Z',
+            data: [
+              { id: 'uuid-1', name: 'CITY_ADMIN', description: null },
+              { id: 'uuid-3', name: 'MODERATOR', description: null },
+              { id: 'uuid-5', name: 'SUPPORT', description: null },
+            ],
+          },
+        },
+      },
+    },
+  })
+  getRoles(@Query() query: ListRolesQueryDto) {
+    return this.adminService.getRoles(query);
+  }
+
+  @Post('invite')
+  @Roles('SUPER_ADMIN')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Invite a new admin user',
+    description:
+      'Creates a Firebase account and a DB user for the invited admin, then sends an email ' +
+      'with a password reset link pointing to the frontend reset-password page. ' +
+      'The invited admin **cannot log in** until they click the link and set a password. ' +
+      'After setting their password they must call `POST /auth/complete-profile` to fill in ' +
+      'their name and activate their account.\n\n' +
+      '**Assignable roles:** `CITY_ADMIN`, `MODERATOR`, `SUPPORT` — `SUPER_ADMIN` cannot be granted here.\n\n' +
+      'Only `SUPER_ADMIN` can call this endpoint.',
+  })
+  @ApiBody({
+    type: InviteAdminDto,
+    examples: {
+      inviteCityAdmin: {
+        summary: 'Invite a city admin',
+        value: { email: 'citymanager@meetday.in', firstName: 'Rahul', lastName: 'Sharma', roleId: 'a3f2c1d4-0000-0000-0000-000000000001' },
+      },
+      inviteModerator: {
+        summary: 'Invite a moderator',
+        value: { email: 'mod@meetday.in', firstName: 'Priya', lastName: 'Nair', roleId: 'a3f2c1d4-0000-0000-0000-000000000002' },
+      },
+    },
+  })
+  @ApiCreatedResponse({
+    description: 'Invitation email sent. DB user created with isActive=false, mustCompleteProfile=true.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-04-08T10:00:00.000Z',
+        data: { message: 'Invitation sent' },
+      },
+    },
+  })
+  @ApiConflictResponse({ description: 'A user with this email already exists in DB or Firebase.' })
+  inviteAdmin(@Body() dto: InviteAdminDto) {
+    return this.adminService.inviteAdmin(dto);
+  }
 
   @Get('me')
   @ApiOperation({

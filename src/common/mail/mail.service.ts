@@ -6,6 +6,7 @@ import { hostApprovedTemplate } from './templates/host-approved.template';
 import { hostRejectedTemplate } from './templates/host-rejected.template';
 import { subscriptionActivatedTemplate } from './templates/subscription-activated.template';
 import { subscriptionLapsedTemplate } from './templates/subscription-lapsed.template';
+import { adminInviteTemplate } from './templates/admin-invite.template';
 
 @Injectable()
 export class MailService {
@@ -62,5 +63,9 @@ export class MailService {
 
   async sendSubscriptionLapsed(to: string, hostName: string, plan: string): Promise<void> {
     await this.sendMail(to, 'Your Meetday subscription has expired', subscriptionLapsedTemplate(hostName, plan));
+  }
+
+  async sendAdminInvite(to: string, roleName: string, resetLink: string): Promise<void> {
+    await this.sendMail(to, `You've been invited to Meetday as ${roleName}`, adminInviteTemplate(to, roleName, resetLink));
   }
 }

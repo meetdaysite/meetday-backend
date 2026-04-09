@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
 import { RegisterDto } from './dto/register.dto';
+import { CompleteProfileDto } from './dto/complete-profile.dto';
 
 export interface TokenUser {
   uid: string;
@@ -190,6 +191,41 @@ export class AuthService {
     };
   }
 
+  async completeProfile(firebaseUid: string, dto: CompleteProfileDto) {
+    const user = await this.prisma.user.findUnique({ where: { firebaseUid } });
+
+    if (!user) {
+      throw new NotFoundException('User not found. Please register first.');
+    }
+    if (!user.mustCompleteProfile) {
+      throw new BadRequestException('Profile already complete');
+    }
+
+    return this.prisma.user.update({
+      where: { firebaseUid },
+      data: {
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        phone: dto.phone,
+        isActive: true,
+        mustCompleteProfile: false,
+      },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        firstName: true,
+        lastName: true,
+        avatarUrl: true,
+        isActive: true,
+        mustCompleteProfile: true,
+        role: { select: { name: true } },
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  }
+
   async getMe(firebaseUid: string) {
     const user = await this.prisma.user.findUnique({
       where: { firebaseUid },
@@ -201,6 +237,7 @@ export class AuthService {
         lastName: true,
         avatarUrl: true,
         isActive: true,
+        mustCompleteProfile: true,
         role: { select: { name: true } },
         userProfile: true,
         createdAt: true,

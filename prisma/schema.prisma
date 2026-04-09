@@ -30,8 +30,9 @@ model User {
   phone       String? @unique  // null for email-only accounts; token-verified for phone auth
   firstName   String
   lastName    String
-  avatarUrl   String?
-  isActive    Boolean @default(true)
+  avatarUrl           String?
+  isActive            Boolean @default(true)
+  mustCompleteProfile Boolean @default(false)
 
   roleId String
   role   Role   @relation(fields: [roleId], references: [id])

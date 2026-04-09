@@ -23,6 +23,8 @@ export const envSchema = z.object({
   RAZORPAY_KEY_SECRET: z.string().min(1, 'RAZORPAY_KEY_SECRET is required'),
 
   ENCRYPTION_KEY: z.string().length(64, 'ENCRYPTION_KEY must be a 64-char hex string (32 bytes) — generate with: openssl rand -hex 32'),
+
+  FRONTEND_URL: z.string().url('FRONTEND_URL must be a valid URL'),
 });
 
 export type Env = z.infer<typeof envSchema>;

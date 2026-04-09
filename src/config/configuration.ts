@@ -34,5 +34,6 @@ export default () => {
     crypto: {
       encryptionKey: env.ENCRYPTION_KEY,
     },
+    frontendUrl: env.FRONTEND_URL,
   };
 };

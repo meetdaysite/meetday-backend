@@ -1,16 +1,102 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
+import { ConfigService } from '@nestjs/config';
+import * as crypto from 'crypto';
+import * as firebaseAdmin from 'firebase-admin';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ListHostsQueryDto } from './dto/list-hosts-query.dto';
+import { ListRolesQueryDto } from './dto/list-roles-query.dto';
 import { RejectHostDto } from './dto/reject-host.dto';
+import { InviteAdminDto } from './dto/invite-admin.dto';
 
 @Injectable()
 export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
     @InjectQueue('mail') private readonly mailQueue: Queue,
   ) {}
+
+  async getRoles(query: ListRolesQueryDto) {
+    const END_USER_ROLES = ['USER', 'HOST', 'SUPER_ADMIN'];
+
+    return this.prisma.role.findMany({
+      where: query.adminOnly ? { name: { notIn: END_USER_ROLES } } : undefined,
+      select: { id: true, name: true, description: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async inviteAdmin(dto: InviteAdminDto) {
+    // Check DB for existing user with this email
+    const existingInDb = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    if (existingInDb) {
+      throw new ConflictException(`A user with email ${dto.email} already exists`);
+    }
+
+    // Check Firebase for existing user
+    try {
+      await firebaseAdmin.auth().getUserByEmail(dto.email);
+      throw new ConflictException(`A Firebase user with email ${dto.email} already exists`);
+    } catch (error: any) {
+      if (error?.errorInfo?.code !== 'auth/user-not-found') {
+        throw error;
+      }
+      // auth/user-not-found — safe to proceed
+    }
+
+    // Generate a temp password that meets Firebase complexity requirements — never sent to invitee
+    const tempPassword = crypto.randomBytes(16).toString('hex') + '!A1';
+
+    // Create Firebase user
+    const firebaseUser = await firebaseAdmin.auth().createUser({
+      email: dto.email,
+      password: tempPassword,
+    });
+
+    // Generate password reset link pointing to the frontend reset page
+    const frontendUrl = this.configService.get<string>('frontendUrl');
+    const resetLink = await firebaseAdmin.auth().generatePasswordResetLink(dto.email, {
+      url: `${frontendUrl}/reset-password`,
+    });
+
+    // Look up the role and guard against SUPER_ADMIN escalation
+    const role = await this.prisma.role.findUnique({ where: { id: dto.roleId } });
+    if (!role) {
+      throw new BadRequestException('Invalid roleId');
+    }
+    if (role.name === 'SUPER_ADMIN') {
+      throw new BadRequestException('SUPER_ADMIN cannot be granted via this endpoint');
+    }
+
+    // Create DB user — inactive until they complete profile
+    await this.prisma.user.create({
+      data: {
+        firebaseUid: firebaseUser.uid,
+        email: dto.email,
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        isActive: false,
+        mustCompleteProfile: true,
+        role: { connect: { id: role.id } },
+      },
+    });
+
+    // Dispatch invite email asynchronously
+    void this.mailQueue.add('admin-invite', {
+      to: dto.email,
+      roleName: role.name,
+      resetLink,
+    });
+
+    return { message: 'Invitation sent' };
+  }
 
   async getOwnProfile(userId: string) {
     const admin = await this.prisma.user.findUnique({
