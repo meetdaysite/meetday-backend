@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -259,6 +260,76 @@ export class AdminService {
     });
 
     return { message: 'Host approved successfully' };
+  }
+
+  async deactivateAdmin(targetAdminId: string, requestingAdminId: string) {
+    if (targetAdminId === requestingAdminId) {
+      throw new BadRequestException('You cannot deactivate your own account');
+    }
+
+    const END_USER_ROLES = ['USER', 'HOST'];
+
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetAdminId },
+      select: { id: true, firebaseUid: true, isActive: true, role: { select: { name: true } } },
+    });
+
+    if (!target) throw new NotFoundException('Admin user not found');
+
+    if (END_USER_ROLES.includes(target.role.name)) {
+      throw new BadRequestException('Target user is not an admin account');
+    }
+
+    if (target.role.name === 'SUPER_ADMIN') {
+      throw new ForbiddenException('A SUPER_ADMIN account cannot be deactivated via this endpoint');
+    }
+
+    if (!target.isActive) {
+      throw new BadRequestException('Admin account is already inactive');
+    }
+
+    await Promise.all([
+      this.prisma.user.update({
+        where: { id: targetAdminId },
+        data: { isActive: false },
+      }),
+      firebaseAdmin.auth().updateUser(target.firebaseUid, { disabled: true }),
+    ]);
+
+    return { message: 'Admin account deactivated successfully' };
+  }
+
+  async reactivateAdmin(targetAdminId: string, requestingAdminId: string) {
+    if (targetAdminId === requestingAdminId) {
+      throw new BadRequestException('You cannot reactivate your own account via this endpoint');
+    }
+
+    const END_USER_ROLES = ['USER', 'HOST'];
+
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetAdminId },
+      select: { id: true, firebaseUid: true, isActive: true, role: { select: { name: true } } },
+    });
+
+    if (!target) throw new NotFoundException('Admin user not found');
+
+    if (END_USER_ROLES.includes(target.role.name)) {
+      throw new BadRequestException('Target user is not an admin account');
+    }
+
+    if (target.isActive) {
+      throw new BadRequestException('Admin account is already active');
+    }
+
+    await Promise.all([
+      this.prisma.user.update({
+        where: { id: targetAdminId },
+        data: { isActive: true },
+      }),
+      firebaseAdmin.auth().updateUser(target.firebaseUid, { disabled: false }),
+    ]);
+
+    return { message: 'Admin account reactivated successfully' };
   }
 
   async rejectHost(hostProfileId: string, _adminId: string, dto: RejectHostDto) {

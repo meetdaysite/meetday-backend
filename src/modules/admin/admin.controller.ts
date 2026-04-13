@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -177,6 +178,67 @@ export class AdminController {
   @ApiConflictResponse({ description: 'A user with this email already exists in DB or Firebase.' })
   inviteAdmin(@Body() dto: InviteAdminDto) {
     return this.adminService.inviteAdmin(dto);
+  }
+
+  @Patch('admins/:id/deactivate')
+  @Roles('SUPER_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Deactivate an admin account',
+    description:
+      'Sets the target admin\'s `isActive` to `false` in the database and disables their Firebase account, ' +
+      'preventing any further logins. Cannot be used to deactivate a `SUPER_ADMIN` or the calling user\'s own account. ' +
+      'Only `SUPER_ADMIN` can call this endpoint.',
+  })
+  @ApiParam({ name: 'id', description: 'User UUID of the admin to deactivate', example: 'user-uuid-1234' })
+  @ApiOkResponse({
+    description: 'Admin account deactivated.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-04-13T10:00:00.000Z',
+        data: { message: 'Admin account deactivated successfully' },
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'No admin user found with the given ID.' })
+  @ApiBadRequestResponse({ description: 'User is not an admin, is already inactive, or is the calling user.' })
+  @ApiForbiddenResponse({ description: 'Target account is a SUPER_ADMIN and cannot be deactivated.' })
+  deactivateAdmin(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') requestingAdminId: string,
+  ) {
+    return this.adminService.deactivateAdmin(id, requestingAdminId);
+  }
+
+  @Patch('admins/:id/reactivate')
+  @Roles('SUPER_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reactivate a deactivated admin account',
+    description:
+      'Sets the target admin\'s `isActive` to `true` in the database and re-enables their Firebase account, ' +
+      'restoring login access. Only works on previously deactivated admin accounts. ' +
+      'Only `SUPER_ADMIN` can call this endpoint.',
+  })
+  @ApiParam({ name: 'id', description: 'User UUID of the admin to reactivate', example: 'user-uuid-1234' })
+  @ApiOkResponse({
+    description: 'Admin account reactivated.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-04-13T10:00:00.000Z',
+        data: { message: 'Admin account reactivated successfully' },
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'No admin user found with the given ID.' })
+  @ApiBadRequestResponse({ description: 'User is not an admin, is already active, or is the calling user.' })
+  reactivateAdmin(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') requestingAdminId: string,
+  ) {
+    return this.adminService.reactivateAdmin(id, requestingAdminId);
   }
 
   @Get('me')
