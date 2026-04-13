@@ -7,6 +7,6 @@ export interface KycInitiationResult {
 export interface KycProvider {
   initiateVerification(
     hostProfileId: string,
-    aadhaarNumber: string,
+    panNumber: string,
   ): Promise<KycInitiationResult>;
 }

@@ -160,6 +160,41 @@ export class AuthController {
     return this.authService.register(tokenUser, dto);
   }
 
+  @Post('activate')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Activate account after password reset',
+    description:
+      'Called by an invited admin immediately after they have set their password via the Firebase reset link. ' +
+      'No request body required — a valid Firebase JWT is sufficient proof that the password was set. ' +
+      'Sets `isActive=true` and `mustCompleteProfile=false` so the account becomes fully operational. ' +
+      'No `RolesGuard` is applied — the account is inactive at this point and would otherwise be blocked.',
+  })
+  @ApiOkResponse({
+    description: 'Account activated.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-04-13T10:00:00.000Z',
+        data: {
+          id: 'user-uuid',
+          email: 'citymanager@meetday.in',
+          firstName: 'Rahul',
+          lastName: 'Sharma',
+          isActive: true,
+          mustCompleteProfile: false,
+          role: { name: 'CITY_ADMIN' },
+          updatedAt: '2026-04-13T10:05:00.000Z',
+        },
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'No user record found for this Firebase UID.' })
+  @ApiBadRequestResponse({ description: 'Account is already active.' })
+  activate(@GetUser('uid') firebaseUid: string) {
+    return this.authService.activateAccount(firebaseUid);
+  }
+
   @Post('complete-profile')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

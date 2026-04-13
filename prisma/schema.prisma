@@ -99,6 +99,13 @@ enum KycStatus {
   FAILED
 }
 
+enum PanVerificationStatus {
+  NOT_SUBMITTED
+  PENDING
+  VERIFIED
+  FAILED
+}
+
 enum HostType {
   INDIVIDUAL
   BUSINESS
@@ -189,7 +196,6 @@ model HostProfile {
 
   // Legal / Compliance (encrypted or masked)
   panEncrypted  String?  // AES-256-GCM encrypted PAN — required for TDS on payouts
-  maskedAadhaar String?  // Set after KYC verification, e.g. "XXXX XXXX 1234" — full number never stored
   gstin         String?  // GST number — collected when applicable (not required at onboarding)
 
   // Credibility & Bio
@@ -211,9 +217,12 @@ model HostProfile {
   categories HostExperienceCategory[]
 
   // KYC
-  kycStatus        KycStatus @default(NOT_SUBMITTED)
-  kycVerifiedAt    DateTime?
-  kycFailureReason String?
+  kycStatus                KycStatus             @default(NOT_SUBMITTED)
+  kycVerifiedAt            DateTime?
+  kycFailureReason         String?
+  panVerificationStatus    PanVerificationStatus @default(NOT_SUBMITTED)
+  panVerificationReference String?               // referenceId from KYC provider initiation
+  bankVerificationStatus   PanVerificationStatus @default(NOT_SUBMITTED)
 
   // Admin Approval
   approvalStatus  HostApprovalStatus @default(PENDING)

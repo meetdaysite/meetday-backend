@@ -29,7 +29,8 @@ import { Public } from '../../common/decorators/public.decorator';
 import { ApplyHostDto } from './dto/apply-host.dto';
 import { UpdateHostProfileDto } from './dto/update-host-profile.dto';
 import { SubmitKycDto } from './dto/submit-kyc.dto';
-import { KycWebhookDto } from './dto/kyc-webhook.dto';
+import { PanWebhookDto } from './dto/pan-webhook.dto';
+import { BankWebhookDto } from './dto/bank-webhook.dto';
 import { UpgradeSubscriptionDto } from './dto/upgrade-subscription.dto';
 
 @ApiTags('Hosts')
@@ -175,8 +176,9 @@ export class HostsController {
           hostType: 'INDIVIDUAL',
           displayName: 'Mumbai Walks by Rahul',
           legalName: 'Rahul Sharma',
-          maskedAadhaar: 'XXXX XXXX 1234',
           kycStatus: 'VERIFIED',
+          panVerificationStatus: 'VERIFIED',
+          bankVerificationStatus: 'VERIFIED',
           approvalStatus: 'APPROVED',
           currentPlan: 'SELL',
           yearsOfExperience: 3,
@@ -273,26 +275,37 @@ export class HostsController {
   @ApiOperation({
     summary: 'Submit KYC for verification',
     description:
-      'Initiates Aadhaar KYC verification via the configured KYC provider. ' +
-      'The Aadhaar number is passed directly to the provider and is never stored. ' +
-      'The profile kycStatus becomes PENDING. The provider calls the webhook once verification completes.',
+      'Initiates PAN verification (via KYC provider) and bank account penny drop (via Razorpay) simultaneously. ' +
+      'Raw account number is never stored — only the last 4 digits are persisted. ' +
+      'kycStatus becomes PENDING. Both verifications must succeed for kycStatus to become VERIFIED. ' +
+      'Results are delivered asynchronously via POST /hosts/kyc/pan-webhook and POST /hosts/kyc/bank-webhook.',
   })
   @ApiBody({
     type: SubmitKycDto,
     examples: {
       default: {
-        summary: 'Submit Aadhaar number',
-        value: { aadhaarNumber: '123456789012' },
+        summary: 'Submit bank account for verification',
+        value: {
+          bankAccount: {
+            accountNumber: '1234567890',
+            ifscCode: 'HDFC0001234',
+            accountHolderName: 'Rahul Sharma',
+            accountType: 'SAVINGS',
+          },
+        },
       },
     },
   })
   @ApiOkResponse({
-    description: 'KYC initiated. Poll host profile or wait for webhook.',
+    description: 'KYC initiated. Awaiting PAN and bank verification webhooks.',
     schema: {
       example: {
         success: true,
-        timestamp: '2026-04-07T10:00:00.000Z',
-        data: { referenceId: 'KYC-STUB-a1b2c3d4-e5f6-7890-abcd-ef1234567890' },
+        timestamp: '2026-04-13T10:00:00.000Z',
+        data: {
+          panReferenceId: 'KYC-PAN-STUB-a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+          pennyDropReference: 'PENNY-STUB-b2c3d4e5-f6a7-8901-bcde-f12345678901',
+        },
       },
     },
   })
@@ -302,43 +315,83 @@ export class HostsController {
     return this.hostsService.submitKyc(userId, dto);
   }
 
-  @Post('kyc/webhook')
+  @Post('kyc/pan-webhook')
   @Public()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'KYC provider webhook',
+    summary: 'PAN KYC provider webhook',
     description:
-      'Called by the KYC provider when verification completes. This endpoint is public (no auth). ' +
+      'Called by the KYC provider when PAN verification completes. This endpoint is public (no auth). ' +
       'In production this must be secured with an HMAC signature check from the provider. ' +
-      'On VERIFIED: kycStatus is set to VERIFIED. ' +
+      'On VERIFIED: panVerificationStatus is set to VERIFIED. If penny drop has also succeeded, kycStatus becomes VERIFIED. ' +
       'On FAILED: kycStatus is set to FAILED and a failure email is sent to the host.',
   })
   @ApiBody({
-    type: KycWebhookDto,
+    type: PanWebhookDto,
     examples: {
       verified: {
-        summary: 'KYC passed',
+        summary: 'PAN verification passed',
         value: {
-          referenceId: 'KYC-STUB-a1b2c3d4',
+          referenceId: 'KYC-PAN-STUB-a1b2c3d4',
           hostProfileId: 'hp-uuid',
           status: 'VERIFIED',
         },
       },
       failed: {
-        summary: 'KYC failed',
+        summary: 'PAN verification failed',
         value: {
-          referenceId: 'KYC-STUB-a1b2c3d4',
+          referenceId: 'KYC-PAN-STUB-a1b2c3d4',
           hostProfileId: 'hp-uuid',
           status: 'FAILED',
-          failureReason: 'Document image unclear',
+          failureReason: 'PAN not found in ITD database',
         },
       },
     },
   })
-  @ApiOkResponse({ description: 'Webhook processed. No response body.' })
+  @ApiOkResponse({ description: 'Webhook processed.' })
   @ApiNotFoundResponse({ description: 'hostProfileId does not match any host profile.' })
-  handleKycWebhook(@Body() dto: KycWebhookDto) {
-    return this.hostsService.handleKycWebhook(dto);
+  handlePanWebhook(@Body() dto: PanWebhookDto) {
+    return this.hostsService.handlePanWebhook(dto);
+  }
+
+  @Post('kyc/bank-webhook')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Razorpay penny drop webhook',
+    description:
+      'Called by Razorpay when the penny drop verification for a bank account completes. This endpoint is public (no auth). ' +
+      'In production this must be secured with Razorpay webhook signature validation. ' +
+      'On SUCCESS: payoutAccount.status becomes PENDING_ADMIN_REVIEW. If PAN has also been verified, kycStatus becomes VERIFIED. ' +
+      'On FAILED: payoutAccount.status becomes PENNY_DROP_FAILED, kycStatus becomes FAILED and a failure email is sent.',
+  })
+  @ApiBody({
+    type: BankWebhookDto,
+    examples: {
+      success: {
+        summary: 'Penny drop passed',
+        value: {
+          pennyDropReference: 'penny_abc123xyz',
+          hostPayoutAccountId: 'payout-uuid',
+          status: 'SUCCESS',
+          bankName: 'HDFC Bank',
+        },
+      },
+      failed: {
+        summary: 'Penny drop failed',
+        value: {
+          pennyDropReference: 'penny_abc123xyz',
+          hostPayoutAccountId: 'payout-uuid',
+          status: 'FAILED',
+          failureReason: 'Account not found',
+        },
+      },
+    },
+  })
+  @ApiOkResponse({ description: 'Webhook processed.' })
+  @ApiNotFoundResponse({ description: 'hostPayoutAccountId does not match any payout account.' })
+  handleBankWebhook(@Body() dto: BankWebhookDto) {
+    return this.hostsService.handleBankWebhook(dto);
   }
 
   @Post('reapply')
@@ -361,6 +414,8 @@ export class HostsController {
         data: {
           id: 'hp-uuid',
           kycStatus: 'NOT_SUBMITTED',
+          panVerificationStatus: 'NOT_SUBMITTED',
+          bankVerificationStatus: 'NOT_SUBMITTED',
           approvalStatus: 'PENDING',
           kycFailureReason: null,
           rejectionReason: null,

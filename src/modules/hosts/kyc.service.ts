@@ -8,13 +8,13 @@ export class KycService implements KycProvider {
 
   async initiateVerification(
     hostProfileId: string,
-    // aadhaarNumber is passed to the real provider — never assign to a persistent variable
-    _aadhaarNumber: string,
+    // panNumber is passed to the real provider — never assign to a persistent variable
+    _panNumber: string,
   ): Promise<KycInitiationResult> {
-    const referenceId = `KYC-STUB-${uuid()}`;
-    this.logger.log(`[STUB] KYC initiation called for hostProfileId: ${hostProfileId} — referenceId: ${referenceId}`);
-    // TODO: Replace with real KYC provider (Digio / Signzy / KARZA) call
-    // Pass _aadhaarNumber to the provider API here and discard immediately after the call
+    const referenceId = `KYC-PAN-STUB-${uuid()}`;
+    this.logger.log(`[STUB] PAN KYC initiation called for hostProfileId: ${hostProfileId} — referenceId: ${referenceId}`);
+    // TODO: Replace with real KYC provider (KARZA / Digio / Signzy) call
+    // Pass _panNumber to the provider API here and discard immediately after the call
     return { referenceId };
   }
 }

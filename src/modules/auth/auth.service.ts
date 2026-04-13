@@ -191,6 +191,35 @@ export class AuthService {
     };
   }
 
+  async activateAccount(firebaseUid: string) {
+    const user = await this.prisma.user.findUnique({ where: { firebaseUid } });
+
+    if (!user) {
+      throw new NotFoundException('User not found. Please register first.');
+    }
+    if (!user.mustCompleteProfile) {
+      throw new BadRequestException('Account is already active.');
+    }
+
+    return this.prisma.user.update({
+      where: { firebaseUid },
+      data: {
+        isActive: true,
+        mustCompleteProfile: false,
+      },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        isActive: true,
+        mustCompleteProfile: true,
+        role: { select: { name: true } },
+        updatedAt: true,
+      },
+    });
+  }
+
   async completeProfile(firebaseUid: string, dto: CompleteProfileDto) {
     const user = await this.prisma.user.findUnique({ where: { firebaseUid } });
 

@@ -4,6 +4,7 @@ import { HostsController } from './hosts.controller';
 import { HostsService } from './hosts.service';
 import { KycService } from './kyc.service';
 import { SubscriptionService } from './subscription.service';
+import { PennyDropService } from './penny-drop.service';
 import { MailProcessor } from './processors/mail.processor';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { KYC_PROVIDER } from './interfaces/kyc-provider.interface';
@@ -14,6 +15,7 @@ import { KYC_PROVIDER } from './interfaces/kyc-provider.interface';
   providers: [
     HostsService,
     SubscriptionService,
+    PennyDropService,
     RolesGuard,
     { provide: KYC_PROVIDER, useClass: KycService },
     MailProcessor,
