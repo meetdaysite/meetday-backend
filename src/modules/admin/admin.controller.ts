@@ -34,6 +34,8 @@ import { ListHostsQueryDto } from './dto/list-hosts-query.dto';
 import { ListAdminsQueryDto } from './dto/list-admins-query.dto';
 import { ListRolesQueryDto } from './dto/list-roles-query.dto';
 import { InviteAdminDto } from './dto/invite-admin.dto';
+import { CreateCouponDto } from './dto/create-coupon.dto';
+import { ListCouponsQueryDto } from './dto/list-coupons-query.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth('firebase-token')
@@ -501,5 +503,169 @@ export class AdminController {
     @Body() dto: RejectHostDto,
   ) {
     return this.adminService.rejectHost(id, adminId, dto);
+  }
+
+  // ─── Coupon endpoints ────────────────────────────────────────────────────────
+
+  @Post('coupons')
+  @Roles('SUPER_ADMIN')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Create a coupon',
+    description:
+      'Creates a new coupon code redeemable by the specified target audience (HOST, ATTENDEE, VENDOR). ' +
+      'Supports PERCENTAGE and FLAT discount types applied to the platform fee rate. ' +
+      'Only SUPER_ADMIN can create coupons.',
+  })
+  @ApiBody({
+    type: CreateCouponDto,
+    examples: {
+      foundingHost: {
+        summary: 'Founding host — 50% off platform fee',
+        value: {
+          code: 'FOUNDING50',
+          description: '50% off platform fee for founding hosts',
+          target: 'HOST',
+          discountType: 'PERCENTAGE',
+          discountValue: 50,
+          maxUsagesPerUser: 1,
+        },
+      },
+      flatDiscount: {
+        summary: 'Flat 5-point fee reduction with expiry',
+        value: {
+          code: 'LAUNCH5',
+          description: 'Flat 5% fee reduction for launch period',
+          target: 'HOST',
+          discountType: 'FLAT',
+          discountValue: 5,
+          maxUsages: 200,
+          validUntil: '2026-12-31T23:59:59.000Z',
+        },
+      },
+    },
+  })
+  @ApiCreatedResponse({
+    description: 'Coupon created.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-04-14T10:00:00.000Z',
+        data: {
+          id: 'coupon-uuid',
+          code: 'FOUNDING50',
+          target: 'HOST',
+          discountType: 'PERCENTAGE',
+          discountValue: 50,
+          usageCount: 0,
+          isActive: true,
+        },
+      },
+    },
+  })
+  @ApiConflictResponse({ description: 'A coupon with this code already exists.' })
+  @ApiBadRequestResponse({ description: 'validFrom must be before validUntil.' })
+  createCoupon(@Body() dto: CreateCouponDto, @GetUser('id') adminId: string) {
+    return this.adminService.createCoupon(dto, adminId);
+  }
+
+  @Get('coupons')
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({
+    summary: 'List coupons',
+    description: 'Returns a paginated list of coupons. Filter by target audience or active status.',
+  })
+  @ApiOkResponse({
+    description: 'Paginated list of coupons.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-04-14T10:00:00.000Z',
+        data: {
+          coupons: [
+            {
+              id: 'coupon-uuid',
+              code: 'FOUNDING50',
+              target: 'HOST',
+              discountType: 'PERCENTAGE',
+              discountValue: 50,
+              usageCount: 12,
+              maxUsages: null,
+              isActive: true,
+              _count: { redemptions: 12 },
+            },
+          ],
+          total: 1,
+          page: 1,
+          limit: 20,
+        },
+      },
+    },
+  })
+  listCoupons(@Query() query: ListCouponsQueryDto) {
+    return this.adminService.listCoupons(query);
+  }
+
+  @Get('coupons/:id')
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({
+    summary: 'Get coupon detail',
+    description: 'Returns a single coupon with full redemption history.',
+  })
+  @ApiParam({ name: 'id', description: 'Coupon UUID', example: 'coupon-uuid-1234' })
+  @ApiOkResponse({
+    description: 'Coupon detail with redemptions.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-04-14T10:00:00.000Z',
+        data: {
+          id: 'coupon-uuid',
+          code: 'FOUNDING50',
+          target: 'HOST',
+          discountType: 'PERCENTAGE',
+          discountValue: 50,
+          usageCount: 1,
+          isActive: true,
+          redemptions: [
+            {
+              id: 'redemption-uuid',
+              originalFeeRate: 0.15,
+              discountedFeeRate: 0.075,
+              createdAt: '2026-04-14T10:00:00.000Z',
+              user: { id: 'user-uuid', firstName: 'Rahul', lastName: 'Sharma', email: 'host@example.com' },
+            },
+          ],
+        },
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Coupon not found.' })
+  getCouponDetail(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.getCouponDetail(id);
+  }
+
+  @Patch('coupons/:id/disable')
+  @Roles('SUPER_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Disable a coupon',
+    description: 'Sets the coupon isActive to false. Any further redemption attempts will be rejected.',
+  })
+  @ApiParam({ name: 'id', description: 'Coupon UUID', example: 'coupon-uuid-1234' })
+  @ApiOkResponse({
+    description: 'Coupon disabled.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-04-14T10:00:00.000Z',
+        data: { message: 'Coupon disabled successfully' },
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Coupon not found.' })
+  @ApiBadRequestResponse({ description: 'Coupon is already inactive.' })
+  disableCoupon(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.disableCoupon(id);
   }
 }

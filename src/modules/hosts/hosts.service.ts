@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
-import { BillingCycle, HostPlan, SubscriptionStatus } from '@prisma/client';
+import { BillingCycle, CouponTarget, DiscountType, HostPlan, SubscriptionStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
 import { KYC_PROVIDER, KycProvider } from './interfaces/kyc-provider.interface';
@@ -493,6 +493,51 @@ export class HostsService {
       throw new BadRequestException(`No ${dto.billingCycle.toLowerCase()} price for this plan`);
     }
 
+    // ── Coupon validation ──────────────────────────────────────────────────────
+    let effectiveFeeRate = planRecord.platformFeeRate;
+    let appliedCoupon: { id: string; originalFeeRate: number; discountedFeeRate: number } | null = null;
+
+    if (dto.couponCode) {
+      const coupon = await this.prisma.coupon.findUnique({ where: { code: dto.couponCode } });
+
+      if (!coupon || !coupon.isActive) {
+        throw new BadRequestException('Invalid or inactive coupon code');
+      }
+      if (coupon.target !== CouponTarget.HOST) {
+        throw new BadRequestException('This coupon is not applicable for host subscriptions');
+      }
+
+      const now = new Date();
+      if (coupon.validFrom && now < coupon.validFrom) {
+        throw new BadRequestException('This coupon is not yet valid');
+      }
+      if (coupon.validUntil && now > coupon.validUntil) {
+        throw new BadRequestException('This coupon has expired');
+      }
+      if (coupon.maxUsages !== null && coupon.usageCount >= coupon.maxUsages) {
+        throw new BadRequestException('This coupon has reached its maximum usage limit');
+      }
+
+      if (coupon.maxUsagesPerUser !== null) {
+        const userRedemptions = await this.prisma.couponRedemption.count({
+          where: { couponId: coupon.id, userId: profile.userId },
+        });
+        if (userRedemptions >= coupon.maxUsagesPerUser) {
+          throw new BadRequestException('You have already used this coupon the maximum number of times');
+        }
+      }
+
+      const originalRate = planRecord.platformFeeRate;
+      const discountedRate =
+        coupon.discountType === DiscountType.PERCENTAGE
+          ? originalRate * (1 - coupon.discountValue / 100)
+          : Math.max(0, originalRate - coupon.discountValue);
+
+      effectiveFeeRate = discountedRate;
+      appliedCoupon = { id: coupon.id, originalFeeRate: originalRate, discountedFeeRate: discountedRate };
+    }
+    // ──────────────────────────────────────────────────────────────────────────
+
     const amountInPaise = Math.round(price * 100);
 
     const razorpayResult = await this.subscriptionService.createPlanAndSubscription({
@@ -521,7 +566,7 @@ export class HostsService {
           billingCycle: dto.billingCycle,
           lockedYearlyPrice: planRecord.yearlyPrice,
           lockedMonthlyPrice: planRecord.monthlyPrice,
-          lockedFeeRate: planRecord.platformFeeRate,
+          lockedFeeRate: effectiveFeeRate,
           razorpaySubscriptionId: razorpayResult.razorpaySubscriptionId,
           razorpayPlanId: razorpayResult.razorpayPlanId,
           currentPeriodStart: razorpayResult.currentPeriodStart,
@@ -533,6 +578,22 @@ export class HostsService {
         where: { id: profile.id },
         data: { currentPlan: dto.plan },
       });
+
+      if (appliedCoupon) {
+        await tx.couponRedemption.create({
+          data: {
+            couponId: appliedCoupon.id,
+            userId: profile.userId,
+            hostSubscriptionId: subscription.id,
+            originalFeeRate: appliedCoupon.originalFeeRate,
+            discountedFeeRate: appliedCoupon.discountedFeeRate,
+          },
+        });
+        await tx.coupon.update({
+          where: { id: appliedCoupon.id },
+          data: { usageCount: { increment: 1 } },
+        });
+      }
 
       return subscription;
     });

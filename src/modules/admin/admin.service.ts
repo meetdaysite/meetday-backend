@@ -16,6 +16,8 @@ import { ListAdminsQueryDto } from './dto/list-admins-query.dto';
 import { ListRolesQueryDto } from './dto/list-roles-query.dto';
 import { RejectHostDto } from './dto/reject-host.dto';
 import { InviteAdminDto } from './dto/invite-admin.dto';
+import { CreateCouponDto } from './dto/create-coupon.dto';
+import { ListCouponsQueryDto } from './dto/list-coupons-query.dto';
 
 @Injectable()
 export class AdminService {
@@ -330,6 +332,86 @@ export class AdminService {
     ]);
 
     return { message: 'Admin account reactivated successfully' };
+  }
+
+  async createCoupon(dto: CreateCouponDto, creatingAdminId: string) {
+    const existing = await this.prisma.coupon.findUnique({ where: { code: dto.code } });
+    if (existing) {
+      throw new ConflictException(`Coupon code "${dto.code}" is already taken`);
+    }
+
+    if (dto.validFrom && dto.validUntil && new Date(dto.validFrom) >= new Date(dto.validUntil)) {
+      throw new BadRequestException('validFrom must be before validUntil');
+    }
+
+    return this.prisma.coupon.create({
+      data: {
+        code: dto.code,
+        description: dto.description,
+        target: dto.target,
+        discountType: dto.discountType,
+        discountValue: dto.discountValue,
+        maxUsages: dto.maxUsages,
+        maxUsagesPerUser: dto.maxUsagesPerUser,
+        isActive: true,
+        validFrom: dto.validFrom ? new Date(dto.validFrom) : undefined,
+        validUntil: dto.validUntil ? new Date(dto.validUntil) : undefined,
+        createdBy: creatingAdminId,
+      },
+    });
+  }
+
+  async listCoupons(query: ListCouponsQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const where: any = {};
+    if (query.target !== undefined) where.target = query.target;
+    if (query.isActive !== undefined) where.isActive = query.isActive;
+
+    const [coupons, total] = await Promise.all([
+      this.prisma.coupon.findMany({
+        where,
+        include: {
+          _count: { select: { redemptions: true } },
+          createdByUser: { select: { id: true, firstName: true, lastName: true, email: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.coupon.count({ where }),
+    ]);
+
+    return { coupons, total, page, limit };
+  }
+
+  async getCouponDetail(couponId: string) {
+    const coupon = await this.prisma.coupon.findUnique({
+      where: { id: couponId },
+      include: {
+        _count: { select: { redemptions: true } },
+        createdByUser: { select: { id: true, firstName: true, lastName: true, email: true } },
+        redemptions: {
+          orderBy: { createdAt: 'desc' },
+          include: {
+            user: { select: { id: true, firstName: true, lastName: true, email: true } },
+          },
+        },
+      },
+    });
+
+    if (!coupon) throw new NotFoundException('Coupon not found');
+    return coupon;
+  }
+
+  async disableCoupon(couponId: string) {
+    const coupon = await this.prisma.coupon.findUnique({ where: { id: couponId } });
+    if (!coupon) throw new NotFoundException('Coupon not found');
+    if (!coupon.isActive) throw new BadRequestException('Coupon is already inactive');
+
+    await this.prisma.coupon.update({ where: { id: couponId }, data: { isActive: false } });
+    return { message: 'Coupon disabled successfully' };
   }
 
   async rejectHost(hostProfileId: string, _adminId: string, dto: RejectHostDto) {

@@ -1,5 +1,5 @@
-import { IsEnum, IsIn } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsEnum, IsIn, IsOptional, IsString, Matches } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { HostPlan, BillingCycle } from '@prisma/client';
 
 export class UpgradeSubscriptionDto {
@@ -11,4 +11,13 @@ export class UpgradeSubscriptionDto {
   @ApiProperty({ enum: BillingCycle })
   @IsEnum(BillingCycle)
   billingCycle: BillingCycle;
+
+  @ApiPropertyOptional({
+    example: 'FOUNDING50',
+    description: 'Optional coupon code to apply a discount on the platform fee rate.',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Z0-9_-]+$/, { message: 'couponCode must be uppercase alphanumeric (A-Z, 0-9, _ -)' })
+  couponCode?: string;
 }
