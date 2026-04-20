@@ -31,6 +31,11 @@ export default () => {
       keyId: env.RAZORPAY_KEY_ID,
       keySecret: env.RAZORPAY_KEY_SECRET,
     },
+    sandbox: {
+      host: env.SANDBOX_HOST,
+      apiKey: env.SANDBOX_API_KEY,
+      apiSecret: env.SANDBOX_API_SECRET,
+    },
     crypto: {
       encryptionKey: env.ENCRYPTION_KEY,
     },

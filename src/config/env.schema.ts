@@ -22,6 +22,10 @@ export const envSchema = z.object({
   RAZORPAY_KEY_ID: z.string().min(1, 'RAZORPAY_KEY_ID is required'),
   RAZORPAY_KEY_SECRET: z.string().min(1, 'RAZORPAY_KEY_SECRET is required'),
 
+  SANDBOX_HOST: z.string().url('SANDBOX_HOST must be a valid URL'),
+  SANDBOX_API_KEY: z.string().min(1, 'SANDBOX_API_KEY is required'),
+  SANDBOX_API_SECRET: z.string().min(1, 'SANDBOX_API_SECRET is required'),
+
   ENCRYPTION_KEY: z.string().length(64, 'ENCRYPTION_KEY must be a 64-char hex string (32 bytes) — generate with: openssl rand -hex 32'),
 
   FRONTEND_URL: z.string().url('FRONTEND_URL must be a valid URL'),

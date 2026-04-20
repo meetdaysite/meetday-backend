@@ -319,12 +319,13 @@ export class HostsController {
   @Public()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'PAN KYC provider webhook',
+    summary: 'PAN KYC provider async webhook',
     description:
-      'Called by the KYC provider when PAN verification completes. This endpoint is public (no auth). ' +
-      'In production this must be secured with an HMAC signature check from the provider. ' +
+      'Not invoked by the current Sandbox integration (synchronous — result processed inline). ' +
+      'Retained for async provider compatibility. ' +
       'On VERIFIED: panVerificationStatus is set to VERIFIED. If penny drop has also succeeded, kycStatus becomes VERIFIED. ' +
       'On FAILED: kycStatus is set to FAILED and a failure email is sent to the host.',
+    deprecated: true,
   })
   @ApiBody({
     type: PanWebhookDto,

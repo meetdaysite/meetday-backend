@@ -74,7 +74,7 @@ export class AdminService {
 
   async inviteAdmin(dto: InviteAdminDto) {
     // Check DB for existing user with this email
-    const existingInDb = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    const existingInDb = await this.prisma.user.findFirst({ where: { email: dto.email } });
     if (existingInDb) {
       throw new ConflictException(`A user with email ${dto.email} already exists`);
     }

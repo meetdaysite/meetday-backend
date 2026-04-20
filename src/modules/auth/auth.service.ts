@@ -27,6 +27,11 @@ export class AuthService {
   ) {}
 
   async register(tokenUser: TokenUser, dto: RegisterDto) {
+    // Pass `deletedAt: undefined` as an explicit own property to bypass the soft-delete
+    // middleware (which uses hasOwnProperty to detect the bypass signal). Prisma ignores
+    // undefined values in queries, so this returns all users — active and soft-deleted.
+    // We must check both: a soft-deleted account still holds the firebaseUid unique
+    // constraint at the DB level and a create would fail if we miss it.
     const existing = await this.prisma.user.findUnique({
       where: { firebaseUid: tokenUser.uid },
     });

@@ -26,13 +26,14 @@ model Role {
 model User {
   id          String  @id @default(uuid())
   firebaseUid String  @unique
-  email       String? @unique  // null for phone-only accounts
-  phone       String? @unique  // null for email-only accounts; token-verified for phone auth
+  email       String? // null for phone-only accounts — uniqueness enforced by partial index (see migration)
+  phone       String? // null for email-only accounts — uniqueness enforced by partial index (see migration)
   firstName   String
   lastName    String
   avatarUrl           String?
-  isActive            Boolean @default(true)
-  mustCompleteProfile Boolean @default(false)
+  isActive            Boolean   @default(true)
+  mustCompleteProfile Boolean   @default(false)
+  deletedAt           DateTime? // soft delete — set instead of hard-deleting
 
   roleId String
   role   Role   @relation(fields: [roleId], references: [id])
@@ -140,7 +141,7 @@ enum DiscountType {
 model UserProfile {
   id     String @id @default(uuid())
   userId String @unique
-  user   User   @relation(fields: [userId], references: [id])
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   bio         String?
   dateOfBirth DateTime?
@@ -162,7 +163,7 @@ model UserProfile {
 model AdminProfile {
   id     String @id @default(uuid())
   userId String @unique
-  user   User   @relation(fields: [userId], references: [id])
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   managedCities String[] @default([])
 
@@ -190,7 +191,7 @@ model UserInterest {
   userProfileId String
   categoryId    String
 
-  userProfile UserProfile @relation(fields: [userProfileId], references: [id])
+  userProfile UserProfile @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
   category    Category    @relation(fields: [categoryId], references: [id])
 
   @@id([userProfileId, categoryId])
@@ -202,7 +203,7 @@ model UserInterest {
 model HostProfile {
   id     String @id @default(uuid())
   userId String @unique
-  user   User   @relation("HostUser", fields: [userId], references: [id])
+  user   User   @relation("HostUser", fields: [userId], references: [id], onDelete: Cascade)
 
   // Identity & Type
   hostType    HostType?
@@ -269,7 +270,7 @@ model HostExperienceCategory {
   hostProfileId String
   categoryId    String
 
-  hostProfile HostProfile @relation(fields: [hostProfileId], references: [id])
+  hostProfile HostProfile @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
   category    Category    @relation(fields: [categoryId], references: [id])
 
   @@id([hostProfileId, categoryId])
@@ -279,7 +280,7 @@ model HostExperienceCategory {
 model HostAddress {
   id            String      @id @default(uuid())
   hostProfileId String      @unique
-  hostProfile   HostProfile @relation(fields: [hostProfileId], references: [id])
+  hostProfile   HostProfile @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
 
   addressLine1 String
   addressLine2 String?

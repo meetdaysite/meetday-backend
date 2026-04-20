@@ -3,6 +3,7 @@ import { BullModule } from '@nestjs/bull';
 import { HostsController } from './hosts.controller';
 import { HostsService } from './hosts.service';
 import { KycService } from './kyc.service';
+import { SandboxAuthService } from './sandbox-auth.service';
 import { SubscriptionService } from './subscription.service';
 import { PennyDropService } from './penny-drop.service';
 import { MailProcessor } from './processors/mail.processor';
@@ -14,6 +15,7 @@ import { KYC_PROVIDER } from './interfaces/kyc-provider.interface';
   controllers: [HostsController],
   providers: [
     HostsService,
+    SandboxAuthService,
     SubscriptionService,
     PennyDropService,
     RolesGuard,

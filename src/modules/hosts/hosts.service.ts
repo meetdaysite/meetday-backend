@@ -108,7 +108,12 @@ export class HostsService {
       },
     });
     if (!profile) throw new NotFoundException('Host profile not found');
-    return profile;
+
+    const { panEncrypted, ...rest } = profile;
+    return {
+      ...rest,
+      pan: panEncrypted ? this.cryptoService.decrypt(panEncrypted) : null,
+    };
   }
 
   async updateHostProfile(userId: string, dto: UpdateHostProfileDto) {
@@ -170,7 +175,7 @@ export class HostsService {
   async submitKyc(userId: string, dto: SubmitKycDto) {
     const profile = await this.prisma.hostProfile.findUnique({
       where: { userId },
-      include: { payoutAccount: true },
+      include: { payoutAccount: true, user: { select: { email: true, firstName: true, phone: true } } },
     });
     if (!profile) throw new NotFoundException('Host profile not found');
 
@@ -180,9 +185,12 @@ export class HostsService {
       );
     }
 
-    if (profile.kycStatus === 'PENDING') {
-      throw new ConflictException('KYC verification is already in progress');
+    if (!profile.legalName) {
+      throw new BadRequestException(
+        'Legal name is required before submitting KYC. Please update your profile.',
+      );
     }
+
     if (profile.kycStatus === 'VERIFIED' && profile.approvalStatus !== 'REJECTED') {
       throw new ConflictException('KYC already verified');
     }
@@ -247,39 +255,66 @@ export class HostsService {
     // Initiate both verifications outside the transaction to avoid holding the DB connection during I/O
     // Decrypt stored PAN to pass to KYC provider — discarded immediately after the call
     const decryptedPan = this.cryptoService.decrypt(profile.panEncrypted!);
-    const { referenceId: panReferenceId } = await this.kycProvider.initiateVerification(
+    const panResult = await this.kycProvider.initiateVerification(
       profile.id,
       decryptedPan,
+      profile.legalName, // legalName null already guarded above
     );
     await this.prisma.hostProfile.update({
       where: { id: profile.id },
-      data: { panVerificationReference: panReferenceId },
+      data: { panVerificationReference: panResult.referenceId },
     });
 
-    const { pennyDropReference } = await this.pennyDropService.initiatePennyDrop(
+    // Sandbox is synchronous — process the result immediately.
+    // Async providers leave verificationStatus undefined and rely on the webhook instead.
+    if (panResult.verificationStatus !== undefined) {
+      await this.applyPanVerificationResult(
+        { id: profile.id, payoutAccount: { status: 'PENDING_PENNY_DROP' }, user: profile.user },
+        panResult.verificationStatus,
+        panResult.failureReason,
+      );
+    }
+
+    const bankResult = await this.pennyDropService.initiatePennyDrop(
       newPayoutAccountId!,
       dto.bankAccount.accountNumber,
       dto.bankAccount.ifscCode,
+      dto.bankAccount.accountHolderName,
+      profile.user.phone ?? '',
     );
     await this.prisma.hostPayoutAccount.update({
       where: { id: newPayoutAccountId! },
-      data: { pennyDropReference },
+      data: { pennyDropReference: bankResult.pennyDropReference },
     });
 
-    return { panReferenceId, pennyDropReference };
+    // Sandbox is synchronous — process the result immediately.
+    // Async providers leave verificationStatus undefined and rely on the webhook instead.
+    if (bankResult.verificationStatus !== undefined) {
+      // Use the PAN result we just received rather than the stale profile.panVerificationStatus
+      // (which is still 'PENDING' from the original query even though we just updated it above).
+      const effectivePanStatus = panResult.verificationStatus ?? profile.panVerificationStatus;
+      await this.applyBankVerificationResult(
+        newPayoutAccountId!,
+        { ...profile, panVerificationStatus: effectivePanStatus },
+        bankResult.verificationStatus,
+        bankResult.bankName,
+        bankResult.failureReason,
+      );
+    }
+
+    return { panReferenceId: panResult.referenceId, pennyDropReference: bankResult.pennyDropReference };
   }
 
-  async handlePanWebhook(dto: PanWebhookDto) {
-    const profile = await this.prisma.hostProfile.findUnique({
-      where: { id: dto.hostProfileId },
-      include: {
-        user: { select: { email: true, firstName: true } },
-        payoutAccount: true,
-      },
-    });
-    if (!profile) throw new NotFoundException('Host profile not found');
-
-    if (dto.status === 'VERIFIED') {
+  private async applyPanVerificationResult(
+    profile: {
+      id: string;
+      payoutAccount: { status: string } | null;
+      user: { email: string; firstName: string };
+    },
+    status: 'VERIFIED' | 'FAILED',
+    failureReason?: string,
+  ): Promise<void> {
+    if (status === 'VERIFIED') {
       const updateData: Record<string, unknown> = {
         panVerificationStatus: 'VERIFIED',
         kycFailureReason: null,
@@ -298,13 +333,101 @@ export class HostsService {
         data: {
           panVerificationStatus: 'FAILED',
           kycStatus: 'FAILED',
-          kycFailureReason: dto.failureReason ?? null,
+          kycFailureReason: failureReason ?? null,
         },
       });
       void this.mailQueue.add('kyc-failed', {
         to: profile.user.email,
         hostName: profile.user.firstName,
-        reason: dto.failureReason ?? null,
+        reason: failureReason ?? null,
+      });
+    }
+  }
+
+  async handlePanWebhook(dto: PanWebhookDto) {
+    const profile = await this.prisma.hostProfile.findUnique({
+      where: { id: dto.hostProfileId },
+      include: {
+        user: { select: { email: true, firstName: true } },
+        payoutAccount: true,
+      },
+    });
+    if (!profile) throw new NotFoundException('Host profile not found');
+    await this.applyPanVerificationResult(profile, dto.status, dto.failureReason);
+  }
+
+  private async applyBankVerificationResult(
+    payoutAccountId: string,
+    profile: {
+      id: string;
+      panVerificationStatus: string;
+      user: { email: string; firstName: string };
+    },
+    status: 'VERIFIED' | 'FAILED',
+    bankName?: string,
+    failureReason?: string,
+  ): Promise<void> {
+    if (status === 'VERIFIED') {
+      await this.prisma.hostPayoutAccount.update({
+        where: { id: payoutAccountId },
+        data: {
+          status: 'PENDING_ADMIN_REVIEW',
+          bankName: bankName ?? null,
+          pennyDropCompletedAt: new Date(),
+          pennyDropFailReason: null,
+        },
+      });
+
+      await this.prisma.hostPayoutAccountHistory.create({
+        data: {
+          hostPayoutAccountId: payoutAccountId,
+          previousStatus: 'PENDING_PENNY_DROP',
+          newStatus: 'PENDING_ADMIN_REVIEW',
+          changeReason: 'PENNY_DROP_SUCCESS',
+        },
+      });
+
+      // If PAN has also been verified, both legs are done → kycStatus VERIFIED
+      const profileUpdate: Record<string, unknown> = { bankVerificationStatus: 'VERIFIED' };
+      if (profile.panVerificationStatus === 'VERIFIED') {
+        profileUpdate.kycStatus = 'VERIFIED';
+        profileUpdate.kycVerifiedAt = new Date();
+      }
+      await this.prisma.hostProfile.update({ where: { id: profile.id }, data: profileUpdate });
+    } else {
+      await this.prisma.hostPayoutAccount.update({
+        where: { id: payoutAccountId },
+        data: {
+          status: 'PENNY_DROP_FAILED',
+          pennyDropFailReason: failureReason ?? null,
+          pennyDropCompletedAt: new Date(),
+        },
+      });
+
+      await this.prisma.hostPayoutAccountHistory.create({
+        data: {
+          hostPayoutAccountId: payoutAccountId,
+          previousStatus: 'PENDING_PENNY_DROP',
+          newStatus: 'PENNY_DROP_FAILED',
+          changeReason: 'PENNY_DROP_FAILED',
+        },
+      });
+
+      await this.prisma.hostProfile.update({
+        where: { id: profile.id },
+        data: {
+          bankVerificationStatus: 'FAILED',
+          kycStatus: 'FAILED',
+          kycFailureReason: failureReason
+            ? `Bank account verification failed: ${failureReason}`
+            : 'Bank account verification failed',
+        },
+      });
+
+      void this.mailQueue.add('kyc-failed', {
+        to: profile.user.email,
+        hostName: profile.user.firstName,
+        reason: failureReason ?? null,
       });
     }
   }
@@ -328,71 +451,13 @@ export class HostsService {
       return;
     }
 
-    const profile = payoutAccount.hostProfile;
-
-    if (dto.status === 'SUCCESS') {
-      await this.prisma.hostPayoutAccount.update({
-        where: { id: payoutAccount.id },
-        data: {
-          status: 'PENDING_ADMIN_REVIEW',
-          bankName: dto.bankName ?? null,
-          pennyDropCompletedAt: new Date(),
-          pennyDropFailReason: null,
-        },
-      });
-
-      await this.prisma.hostPayoutAccountHistory.create({
-        data: {
-          hostPayoutAccountId: payoutAccount.id,
-          previousStatus: payoutAccount.status,
-          newStatus: 'PENDING_ADMIN_REVIEW',
-          changeReason: 'PENNY_DROP_SUCCESS',
-        },
-      });
-
-      // If PAN has also been verified, both legs are done → kycStatus VERIFIED
-      const profileUpdate: Record<string, unknown> = { bankVerificationStatus: 'VERIFIED' };
-      if (profile.panVerificationStatus === 'VERIFIED') {
-        profileUpdate.kycStatus = 'VERIFIED';
-        profileUpdate.kycVerifiedAt = new Date();
-      }
-      await this.prisma.hostProfile.update({ where: { id: profile.id }, data: profileUpdate });
-    } else {
-      await this.prisma.hostPayoutAccount.update({
-        where: { id: payoutAccount.id },
-        data: {
-          status: 'PENNY_DROP_FAILED',
-          pennyDropFailReason: dto.failureReason ?? null,
-          pennyDropCompletedAt: new Date(),
-        },
-      });
-
-      await this.prisma.hostPayoutAccountHistory.create({
-        data: {
-          hostPayoutAccountId: payoutAccount.id,
-          previousStatus: payoutAccount.status,
-          newStatus: 'PENNY_DROP_FAILED',
-          changeReason: 'PENNY_DROP_FAILED',
-        },
-      });
-
-      await this.prisma.hostProfile.update({
-        where: { id: profile.id },
-        data: {
-          bankVerificationStatus: 'FAILED',
-          kycStatus: 'FAILED',
-          kycFailureReason: dto.failureReason
-            ? `Bank account verification failed: ${dto.failureReason}`
-            : 'Bank account verification failed',
-        },
-      });
-
-      void this.mailQueue.add('kyc-failed', {
-        to: profile.user.email,
-        hostName: profile.user.firstName,
-        reason: dto.failureReason ?? null,
-      });
-    }
+    await this.applyBankVerificationResult(
+      payoutAccount.id,
+      payoutAccount.hostProfile,
+      dto.status === 'SUCCESS' ? 'VERIFIED' : 'FAILED',
+      dto.bankName,
+      dto.failureReason,
+    );
   }
 
   async reapply(userId: string) {
