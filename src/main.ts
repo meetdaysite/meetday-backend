@@ -7,7 +7,13 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const isProduction = process.env.NODE_ENV === 'production';
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+    logger: isProduction
+      ? ['log', 'warn', 'error']
+      : ['log', 'warn', 'error', 'debug', 'verbose'],
+  });
   app.useLogger(app.get(Logger));
 
   // CORS
