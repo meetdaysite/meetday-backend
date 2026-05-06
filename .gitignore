@@ -42,4 +42,4 @@ lerna-debug.log*
 .env.local
 
 # prisma
-prisma/migrations/
+# prisma/migrations/
