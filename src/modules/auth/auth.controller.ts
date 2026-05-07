@@ -32,12 +32,12 @@ export class AuthController {
       'Identity fields (uid, email, phone, displayName, avatarUrl) are extracted from the verified JWT — never pass them in the body.\n\n' +
       '**Supported providers:**\n' +
       '- `password` (email/password) — email from token, firstName + lastName required in body\n' +
-      '- `phone` — phone from token, firstName + lastName required in body\n' +
+      '- `phone` — phone from token, firstName + lastName required in body; **for HOST registration, `email` must also be provided in the body** (phone tokens carry no email, but hosts need one for transactional mail)\n' +
       '- `google.com` / `apple.com` — email + displayName from token, firstName + lastName optional (token name used as fallback)\n\n' +
       '**accountType: USER** — Creates a standard attendee account.\n\n' +
       '**accountType: HOST** — Creates the user with the HOST role and atomically creates a ' +
       'HostProfile (kycStatus: NOT_SUBMITTED, approvalStatus: PENDING). ' +
-      '`categoryIds` and `hostType` are required for host registration.',
+      '`categoryIds` and `hostType` are required. `email` is required when the Firebase token carries no email (phone-OTP sign-ups).',
   })
   @ApiBody({
     type: RegisterDto,
@@ -52,17 +52,18 @@ export class AuthController {
         },
       },
       registerAsHost: {
-        summary: 'Register as a host',
+        summary: 'Register as a host (phone-OTP sign-up)',
         value: {
           firstName: 'Priya',
           lastName: 'Nair',
           phone: '+919876543211',
+          email: 'priya@example.com',
           accountType: 'HOST',
           hostType: 'INDIVIDUAL',
           displayName: 'Mumbai Walks by Priya',
           legalName: 'Priya Nair',
           pan: 'ABCDE1234F',
-          categoryIds: ['11111111-1111-1111-1111-111111111111'],
+          categoryIds: ['a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'],
           hostBio: 'I run weekly photography walks across Mumbai exploring hidden heritage.',
           tagline: 'Discover Mumbai through a lens',
           languages: ['English', 'Hindi', 'Marathi'],

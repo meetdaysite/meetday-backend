@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsEmail,
   IsEnum,
   IsInt,
   IsOptional,
@@ -47,6 +48,16 @@ export class RegisterDto {
   @IsOptional()
   @Matches(/^\+[1-9]\d{7,14}$/, { message: 'phone must be in E.164 format' })
   phone?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Required for HOST registration when signing up via phone+OTP (Firebase token carries no email). ' +
+      'Ignored for email/Google/Apple sign-ups where the token already contains a verified email.',
+    example: 'priya@example.com',
+  })
+  @IsOptional()
+  @IsEmail({}, { message: 'email must be a valid email address' })
+  email?: string;
 
   @ApiPropertyOptional({
     enum: ['USER', 'HOST'],

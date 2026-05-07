@@ -1,4 +1,5 @@
 import {
+  ArrayMinSize,
   IsArray,
   IsEnum,
   IsInt,
@@ -170,7 +171,7 @@ export class ApplyHostDto {
     description: 'At least one category UUID required. Get IDs from GET /categories.',
   })
   @IsArray()
-  @MinLength(1, { message: 'At least one category is required' })
+  @ArrayMinSize(1, { message: 'At least one category is required' })
   @IsUUID('4', { each: true })
   categoryIds: string[];
 

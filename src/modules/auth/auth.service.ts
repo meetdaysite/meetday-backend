@@ -77,6 +77,11 @@ export class AuthService {
     resolved: ResolvedIdentity,
     dto: RegisterDto,
   ) {
+    if (!resolved.email) {
+      throw new BadRequestException(
+        'email is required for host registration. Phone-OTP sign-ups must include an email in the request body.',
+      );
+    }
     if (!dto.categoryIds || dto.categoryIds.length === 0) {
       throw new BadRequestException('categoryIds is required when registering as a host');
     }
@@ -161,7 +166,9 @@ export class AuthService {
    * Throws if the minimum required fields cannot be satisfied.
    */
   private resolveIdentity(tokenUser: TokenUser, dto: RegisterDto): ResolvedIdentity {
-    const email = tokenUser.email ?? undefined;
+    // Token email is always authoritative (verified by Firebase).
+    // dto.email is accepted as fallback for phone-OTP sign-ups where the token carries no email.
+    const email = tokenUser.email ?? dto.email ?? undefined;
     // Phone from token (verified by Firebase) takes priority over body
     const phone = tokenUser.phone ?? dto.phone ?? undefined;
 
