@@ -177,6 +177,7 @@ model Category {
   id          String  @id @default(uuid())
   name        String  @unique
   description String?
+  isActive    Boolean @default(true)
 
   userInterests            UserInterest[]
   hostExperienceCategories HostExperienceCategory[]

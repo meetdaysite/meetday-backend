@@ -18,6 +18,8 @@ import { RejectHostDto } from './dto/reject-host.dto';
 import { InviteAdminDto } from './dto/invite-admin.dto';
 import { CreateCouponDto } from './dto/create-coupon.dto';
 import { ListCouponsQueryDto } from './dto/list-coupons-query.dto';
+import { CreateCategoryDto } from './dto/create-category.dto';
+import { UpdateCategoryDto } from './dto/update-category.dto';
 
 @Injectable()
 export class AdminService {
@@ -437,5 +439,52 @@ export class AdminService {
     });
 
     return { message: 'Host rejected successfully' };
+  }
+
+  // ── Category management ──────────────────────────────────────────────────
+
+  async createCategory(dto: CreateCategoryDto) {
+    const existing = await this.prisma.category.findUnique({ where: { name: dto.name } });
+    if (existing) throw new ConflictException(`Category "${dto.name}" already exists`);
+
+    return this.prisma.category.create({
+      data: { name: dto.name, description: dto.description },
+      select: { id: true, name: true, description: true, isActive: true, createdAt: true },
+    });
+  }
+
+  async updateCategory(id: string, dto: UpdateCategoryDto) {
+    const category = await this.prisma.category.findUnique({ where: { id } });
+    if (!category) throw new NotFoundException('Category not found');
+
+    if (dto.name && dto.name !== category.name) {
+      const conflict = await this.prisma.category.findUnique({ where: { name: dto.name } });
+      if (conflict) throw new ConflictException(`Category "${dto.name}" already exists`);
+    }
+
+    return this.prisma.category.update({
+      where: { id },
+      data: {
+        ...(dto.name !== undefined && { name: dto.name }),
+        ...(dto.description !== undefined && { description: dto.description }),
+        ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+      },
+      select: { id: true, name: true, description: true, isActive: true, updatedAt: true },
+    });
+  }
+
+  async listCategoriesPublic() {
+    return this.prisma.category.findMany({
+      where: { isActive: true } as any,
+      select: { id: true, name: true, description: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async listCategoriesAdmin() {
+    return this.prisma.category.findMany({
+      select: { id: true, name: true, description: true, isActive: true, createdAt: true },
+      orderBy: { name: 'asc' },
+    });
   }
 }

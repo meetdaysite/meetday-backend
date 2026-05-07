@@ -313,4 +313,142 @@ describe('Admin (E2E)', () => {
       expect(res.status).toBe(400);
     });
   });
+
+  // ── POST /admin/categories ─────────────────────────────────────────────
+
+  describe('POST /admin/categories', () => {
+    it('SUPER_ADMIN creates a category', async () => {
+      await createTestUser(prisma, { uid: TEST_UIDS.superAdmin, roleName: 'SUPER_ADMIN' });
+
+      const res = await request(app.getHttpServer())
+        .post('/admin/categories')
+        .set(authHeader(TEST_UIDS.superAdmin))
+        .send({ name: 'Tech Talks', description: 'Developer meetups and workshops' });
+
+      expect(res.status).toBe(201);
+      expect(res.body.data).toMatchObject({ name: 'Tech Talks', isActive: true });
+    });
+
+    it('returns 409 for duplicate category name', async () => {
+      await createTestUser(prisma, { uid: TEST_UIDS.superAdmin, roleName: 'SUPER_ADMIN' });
+      // "Outdoor Adventures" is seeded by seedRefData
+      const res = await request(app.getHttpServer())
+        .post('/admin/categories')
+        .set(authHeader(TEST_UIDS.superAdmin))
+        .send({ name: 'Outdoor Adventures' });
+
+      expect(res.status).toBe(409);
+    });
+
+    it('returns 400 when name is too short', async () => {
+      await createTestUser(prisma, { uid: TEST_UIDS.superAdmin, roleName: 'SUPER_ADMIN' });
+
+      const res = await request(app.getHttpServer())
+        .post('/admin/categories')
+        .set(authHeader(TEST_UIDS.superAdmin))
+        .send({ name: 'X' }); // < 2 chars
+
+      expect(res.status).toBe(400);
+    });
+
+    it('returns 403 when called by MODERATOR', async () => {
+      await createTestUser(prisma, { uid: TEST_UIDS.moderator, roleName: 'MODERATOR' });
+
+      const res = await request(app.getHttpServer())
+        .post('/admin/categories')
+        .set(authHeader(TEST_UIDS.moderator))
+        .send({ name: 'Valid Name' });
+
+      expect(res.status).toBe(403);
+    });
+  });
+
+  // ── PATCH /admin/categories/:id ────────────────────────────────────────
+
+  describe('PATCH /admin/categories/:id', () => {
+    it('SUPER_ADMIN renames a category', async () => {
+      await createTestUser(prisma, { uid: TEST_UIDS.superAdmin, roleName: 'SUPER_ADMIN' });
+      const cat = await prisma.category.findFirstOrThrow({ where: { name: 'Outdoor Adventures' } });
+
+      const res = await request(app.getHttpServer())
+        .patch(`/admin/categories/${cat.id}`)
+        .set(authHeader(TEST_UIDS.superAdmin))
+        .send({ name: 'Nature Escapes' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ name: 'Nature Escapes' });
+    });
+
+    it('SUPER_ADMIN deactivates a category', async () => {
+      await createTestUser(prisma, { uid: TEST_UIDS.superAdmin, roleName: 'SUPER_ADMIN' });
+      const cat = await prisma.category.findFirstOrThrow({ where: { name: 'Outdoor Adventures' } });
+
+      const res = await request(app.getHttpServer())
+        .patch(`/admin/categories/${cat.id}`)
+        .set(authHeader(TEST_UIDS.superAdmin))
+        .send({ isActive: false });
+
+      expect(res.status).toBe(200);
+      const updated = await prisma.category.findUnique({ where: { id: cat.id } });
+      expect((updated as any).isActive).toBe(false);
+    });
+
+    it('returns 404 for unknown category', async () => {
+      await createTestUser(prisma, { uid: TEST_UIDS.superAdmin, roleName: 'SUPER_ADMIN' });
+
+      const res = await request(app.getHttpServer())
+        .patch('/admin/categories/00000000-0000-4000-8000-000000000000')
+        .set(authHeader(TEST_UIDS.superAdmin))
+        .send({ name: 'New Name' });
+
+      expect(res.status).toBe(404);
+    });
+  });
+
+  // ── GET /admin/categories ──────────────────────────────────────────────
+
+  describe('GET /admin/categories', () => {
+    it('returns all categories including inactive ones', async () => {
+      await createTestUser(prisma, { uid: TEST_UIDS.superAdmin, roleName: 'SUPER_ADMIN' });
+
+      const res = await request(app.getHttpServer())
+        .get('/admin/categories')
+        .set(authHeader(TEST_UIDS.superAdmin));
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.data)).toBe(true);
+      // isActive field present in admin view
+      expect(res.body.data[0]).toHaveProperty('isActive');
+    });
+  });
+
+  // ── GET /categories (public) ───────────────────────────────────────────
+
+  describe('GET /categories', () => {
+    it('returns active categories without authentication', async () => {
+      const res = await request(app.getHttpServer()).get('/categories');
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.data)).toBe(true);
+      // Public response should NOT include isActive
+      if (res.body.data.length > 0) {
+        expect(res.body.data[0]).not.toHaveProperty('isActive');
+      }
+    });
+
+    it('does not return deactivated categories', async () => {
+      await createTestUser(prisma, { uid: TEST_UIDS.superAdmin, roleName: 'SUPER_ADMIN' });
+      const cat = await prisma.category.findFirstOrThrow({ where: { name: 'Outdoor Adventures' } });
+
+      // Deactivate through admin endpoint
+      await request(app.getHttpServer())
+        .patch(`/admin/categories/${cat.id}`)
+        .set(authHeader(TEST_UIDS.superAdmin))
+        .send({ isActive: false });
+
+      const res = await request(app.getHttpServer()).get('/categories');
+      const names = res.body.data.map((c: any) => c.name);
+      expect(names).not.toContain('Outdoor Adventures');
+    });
+  });
 });

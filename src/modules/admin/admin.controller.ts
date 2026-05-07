@@ -36,6 +36,8 @@ import { ListRolesQueryDto } from './dto/list-roles-query.dto';
 import { InviteAdminDto } from './dto/invite-admin.dto';
 import { CreateCouponDto } from './dto/create-coupon.dto';
 import { ListCouponsQueryDto } from './dto/list-coupons-query.dto';
+import { CreateCategoryDto } from './dto/create-category.dto';
+import { UpdateCategoryDto } from './dto/update-category.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth('firebase-token')
@@ -667,5 +669,101 @@ export class AdminController {
   @ApiBadRequestResponse({ description: 'Coupon is already inactive.' })
   disableCoupon(@Param('id', ParseUUIDPipe) id: string) {
     return this.adminService.disableCoupon(id);
+  }
+
+  // ─── Category endpoints ──────────────────────────────────────────────────────
+
+  @Post('categories')
+  @Roles('SUPER_ADMIN')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Create an experience category',
+    description:
+      'Creates a new experience category that hosts can select when registering or updating their profile. ' +
+      'Category names must be unique (case-sensitive). Only SUPER_ADMIN can create categories.',
+  })
+  @ApiBody({
+    type: CreateCategoryDto,
+    examples: {
+      default: {
+        summary: 'Create category',
+        value: { name: 'Food & Drink', description: 'Dining experiences, food tours, and culinary workshops' },
+      },
+    },
+  })
+  @ApiCreatedResponse({
+    description: 'Category created.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-05-07T10:00:00.000Z',
+        data: { id: 'cat-uuid', name: 'Food & Drink', description: 'Dining experiences…', isActive: true, createdAt: '2026-05-07T10:00:00.000Z' },
+      },
+    },
+  })
+  @ApiConflictResponse({ description: 'A category with this name already exists.' })
+  createCategory(@Body() dto: CreateCategoryDto) {
+    return this.adminService.createCategory(dto);
+  }
+
+  @Patch('categories/:id')
+  @Roles('SUPER_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Update an experience category',
+    description:
+      'Updates the name, description, or active status of a category. ' +
+      'Setting `isActive: false` hides the category from hosts and attendees without deleting it. ' +
+      'Only SUPER_ADMIN can update categories.',
+  })
+  @ApiParam({ name: 'id', description: 'Category UUID', example: 'cat-uuid-1234' })
+  @ApiBody({
+    type: UpdateCategoryDto,
+    examples: {
+      rename: { summary: 'Rename', value: { name: 'Outdoor Adventures' } },
+      deactivate: { summary: 'Deactivate', value: { isActive: false } },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Category updated.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-05-07T10:00:00.000Z',
+        data: { id: 'cat-uuid', name: 'Outdoor Adventures', description: null, isActive: true, updatedAt: '2026-05-07T10:00:00.000Z' },
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Category not found.' })
+  @ApiConflictResponse({ description: 'Another category with the new name already exists.' })
+  updateCategory(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateCategoryDto,
+  ) {
+    return this.adminService.updateCategory(id, dto);
+  }
+
+  @Get('categories')
+  @ApiOperation({
+    summary: 'List all categories (admin view)',
+    description:
+      'Returns all categories including inactive ones, with isActive status. ' +
+      'Use the public GET /categories endpoint for the end-user facing list.',
+  })
+  @ApiOkResponse({
+    description: 'All categories.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-05-07T10:00:00.000Z',
+        data: [
+          { id: 'cat-uuid-1', name: 'Food & Drink', description: null, isActive: true, createdAt: '2026-05-07T10:00:00.000Z' },
+          { id: 'cat-uuid-2', name: 'Deprecated Category', description: null, isActive: false, createdAt: '2026-01-01T10:00:00.000Z' },
+        ],
+      },
+    },
+  })
+  listCategories() {
+    return this.adminService.listCategoriesAdmin();
   }
 }

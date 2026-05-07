@@ -40,6 +40,7 @@ function makePrisma() {
     role: { findUnique: jest.fn(), findMany: jest.fn() },
     hostProfile: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn(), count: jest.fn() },
     coupon: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn(), count: jest.fn() },
+    category: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn() },
   };
   prisma.$transaction = jest.fn().mockImplementation(async (fn: any) => fn(prisma));
   return prisma;
@@ -367,6 +368,78 @@ describe('AdminService', () => {
     it('throws NotFoundException when coupon not found', async () => {
       prisma.coupon.findUnique.mockResolvedValue(null);
       await expect(service.disableCoupon('bad-id')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ── createCategory() ─────────────────────────────────────────────────────
+
+  describe('createCategory()', () => {
+    const dto = { name: 'Food & Drink', description: 'Culinary experiences' };
+    const created = { id: 'cat-uuid', name: 'Food & Drink', description: 'Culinary experiences', isActive: true, createdAt: new Date() };
+
+    it('creates category successfully', async () => {
+      prisma.category.findUnique.mockResolvedValue(null);
+      prisma.category.create.mockResolvedValue(created);
+
+      const result = await service.createCategory(dto);
+      expect(prisma.category.create).toHaveBeenCalled();
+      expect(result).toMatchObject({ name: 'Food & Drink', isActive: true });
+    });
+
+    it('throws ConflictException when name already exists', async () => {
+      prisma.category.findUnique.mockResolvedValue({ id: 'existing-cat' });
+      await expect(service.createCategory(dto)).rejects.toThrow(ConflictException);
+    });
+  });
+
+  // ── updateCategory() ─────────────────────────────────────────────────────
+
+  describe('updateCategory()', () => {
+    const existing = { id: 'cat-uuid', name: 'Old Name', description: null, isActive: true };
+
+    it('updates name successfully', async () => {
+      prisma.category.findUnique
+        .mockResolvedValueOnce(existing) // find the category
+        .mockResolvedValueOnce(null);    // name conflict check
+      prisma.category.update.mockResolvedValue({ ...existing, name: 'New Name' });
+
+      const result = await service.updateCategory('cat-uuid', { name: 'New Name' });
+      expect(prisma.category.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ name: 'New Name' }) }),
+      );
+      expect(result).toMatchObject({ name: 'New Name' });
+    });
+
+    it('deactivates category', async () => {
+      prisma.category.findUnique.mockResolvedValueOnce(existing);
+      prisma.category.update.mockResolvedValue({ ...existing, isActive: false });
+
+      await service.updateCategory('cat-uuid', { isActive: false });
+      expect(prisma.category.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ isActive: false }) }),
+      );
+    });
+
+    it('throws NotFoundException when category does not exist', async () => {
+      prisma.category.findUnique.mockResolvedValue(null);
+      await expect(service.updateCategory('bad-id', { name: 'X' })).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws ConflictException when new name conflicts with another category', async () => {
+      prisma.category.findUnique
+        .mockResolvedValueOnce(existing)          // category found
+        .mockResolvedValueOnce({ id: 'other' });  // conflict found
+      await expect(service.updateCategory('cat-uuid', { name: 'Conflicting Name' })).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it('does not check name conflict when name is unchanged', async () => {
+      prisma.category.findUnique.mockResolvedValueOnce(existing); // only called once
+      prisma.category.update.mockResolvedValue(existing);
+
+      await service.updateCategory('cat-uuid', { name: existing.name });
+      expect(prisma.category.findUnique).toHaveBeenCalledTimes(1);
     });
   });
 });
