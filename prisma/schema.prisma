@@ -55,6 +55,7 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([roleId])
   @@map("users")
 }
 
@@ -196,6 +197,7 @@ model UserInterest {
   category    Category    @relation(fields: [categoryId], references: [id])
 
   @@id([userProfileId, categoryId])
+  @@index([categoryId])
   @@map("user_interests")
 }
 
@@ -275,6 +277,7 @@ model HostExperienceCategory {
   category    Category    @relation(fields: [categoryId], references: [id])
 
   @@id([hostProfileId, categoryId])
+  @@index([categoryId])
   @@map("host_experience_categories")
 }
 
