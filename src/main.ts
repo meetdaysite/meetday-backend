@@ -1,9 +1,11 @@
-import { NestFactory, Reflector } from '@nestjs/core';
+import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
+import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -16,8 +18,15 @@ async function bootstrap() {
   });
   app.useLogger(app.get(Logger));
 
-  // CORS
-  app.enableCors();
+  // Security headers
+  app.use(helmet());
+
+  // CORS — locked to known frontend in production, permissive in dev
+  app.enableCors({
+    origin: isProduction ? process.env.FRONTEND_URL : true,
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    credentials: true,
+  });
 
   // Global validation pipe
   app.useGlobalPipes(
@@ -31,8 +40,8 @@ async function bootstrap() {
   // Global exception filter
   app.useGlobalFilters(new AllExceptionsFilter());
 
-  // Global response transform
-  app.useGlobalInterceptors(new TransformInterceptor());
+  // Global response transform + request logging
+  app.useGlobalInterceptors(new TransformInterceptor(), new LoggingInterceptor());
 
   // Swagger (dev only)
   if (process.env.NODE_ENV !== 'production') {

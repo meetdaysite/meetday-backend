@@ -8,6 +8,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
+import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -269,6 +270,7 @@ export class HostsController {
   }
 
   @Post('kyc/submit')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @UseGuards(RolesGuard)
   @Roles('HOST')
   @HttpCode(HttpStatus.OK)
@@ -316,6 +318,7 @@ export class HostsController {
   }
 
   @Post('kyc/pan-webhook')
+  @SkipThrottle()
   @Public()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -356,6 +359,7 @@ export class HostsController {
   }
 
   @Post('kyc/bank-webhook')
+  @SkipThrottle()
   @Public()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -479,6 +483,7 @@ export class HostsController {
   }
 
   @Post('subscription/upgrade')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @UseGuards(RolesGuard)
   @Roles('HOST')
   @HttpCode(HttpStatus.OK)

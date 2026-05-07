@@ -1,6 +1,7 @@
 import { Logger, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bull';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import configuration from './config/configuration';
 import { validate } from './config/env.schema';
@@ -14,7 +15,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { FirebaseAuthGuard } from './common/guards/firebase-auth.guard';
-import { RedisHealthService } from './common/health/redis-health.service';
+import { HealthModule } from './common/health/health.module';
 import { MailModule } from './common/mail/mail.module';
 import { CryptoModule } from './common/crypto/crypto.module';
 
@@ -26,6 +27,7 @@ import { CryptoModule } from './common/crypto/crypto.module';
       envFilePath: '.env',
       validate,
     }),
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
     BullModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
@@ -47,13 +49,17 @@ import { CryptoModule } from './common/crypto/crypto.module';
     PaymentsModule,
     AdminModule,
     CategoriesModule,
+    HealthModule,
   ],
   providers: [
     Logger,
-    RedisHealthService,
     {
       provide: APP_GUARD,
       useClass: FirebaseAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
     },
   ],
 })
