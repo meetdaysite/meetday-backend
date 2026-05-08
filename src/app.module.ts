@@ -14,6 +14,7 @@ import { TicketsModule } from './modules/tickets/tickets.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { CategoriesModule } from './modules/categories/categories.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { FirebaseAuthGuard } from './common/guards/firebase-auth.guard';
 import { HealthModule } from './common/health/health.module';
 import { MailModule } from './common/mail/mail.module';
@@ -50,6 +51,7 @@ import { CryptoModule } from './common/crypto/crypto.module';
     AdminModule,
     CategoriesModule,
     HealthModule,
+    NotificationsModule,
   ],
   providers: [
     Logger,

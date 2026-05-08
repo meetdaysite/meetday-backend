@@ -14,6 +14,7 @@ import { KYC_PROVIDER } from './interfaces/kyc-provider.interface';
 import { SubscriptionService } from './subscription.service';
 import { PennyDropService } from './penny-drop.service';
 import { BankAccountType } from './dto/submit-kyc.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 
 // ── Mock factories ───────────────────────────────────────────────────────────
 
@@ -100,6 +101,7 @@ describe('HostsService', () => {
         { provide: SubscriptionService, useValue: mockSubscriptionService },
         { provide: PennyDropService, useValue: mockPennyDropService },
         { provide: getQueueToken('mail'), useValue: mockMailQueue },
+        { provide: NotificationsService, useValue: { create: jest.fn() } },
       ],
     }).compile();
 

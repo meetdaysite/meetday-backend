@@ -20,6 +20,7 @@ import { CreateCouponDto } from './dto/create-coupon.dto';
 import { ListCouponsQueryDto } from './dto/list-coupons-query.dto';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class AdminService {
@@ -27,6 +28,7 @@ export class AdminService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     @InjectQueue('mail') private readonly mailQueue: Queue,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async listAdmins(query: ListAdminsQueryDto) {
@@ -262,6 +264,12 @@ export class AdminService {
       to: host.user.email,
       hostName: host.user.firstName,
     });
+    void this.notificationsService.create(
+      host.user.id,
+      'host_approved',
+      'Application Approved',
+      "Your host application has been approved. You're now on the DISCOVER plan.",
+    );
 
     return { message: 'Host approved successfully' };
   }
@@ -419,7 +427,7 @@ export class AdminService {
   async rejectHost(hostProfileId: string, _adminId: string, dto: RejectHostDto) {
     const host = await this.prisma.hostProfile.findUnique({
       where: { id: hostProfileId },
-      include: { user: { select: { email: true, firstName: true } } },
+      include: { user: { select: { id: true, email: true, firstName: true } } },
     });
 
     if (!host) throw new NotFoundException('Host not found');
@@ -437,6 +445,12 @@ export class AdminService {
       hostName: host.user.firstName,
       reason: dto.rejectionReason,
     });
+    void this.notificationsService.create(
+      host.user.id,
+      'host_rejected',
+      'Application Not Approved',
+      `Your host application was not approved. Reason: ${dto.rejectionReason}`,
+    );
 
     return { message: 'Host rejected successfully' };
   }

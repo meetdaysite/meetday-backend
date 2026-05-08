@@ -24,6 +24,7 @@ import * as firebaseAdmin from 'firebase-admin';
 import { AdminService } from './admin.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
+import { NotificationsService } from '../notifications/notifications.service';
 
 // ── Mock factories ───────────────────────────────────────────────────────────
 
@@ -95,6 +96,7 @@ describe('AdminService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: ConfigService, useValue: mockConfig },
         { provide: getQueueToken('mail'), useValue: mockMailQueue },
+        { provide: NotificationsService, useValue: { create: jest.fn() } },
       ],
     }).compile();
 

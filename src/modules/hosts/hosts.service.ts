@@ -21,6 +21,7 @@ import { SubmitKycDto } from './dto/submit-kyc.dto';
 import { PanWebhookDto } from './dto/pan-webhook.dto';
 import { BankWebhookDto } from './dto/bank-webhook.dto';
 import { UpgradeSubscriptionDto } from './dto/upgrade-subscription.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class HostsService {
@@ -33,6 +34,7 @@ export class HostsService {
     private readonly subscriptionService: SubscriptionService,
     private readonly pennyDropService: PennyDropService,
     @InjectQueue('mail') private readonly mailQueue: Queue,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async applyAsHost(userId: string, dto: ApplyHostDto) {
@@ -54,8 +56,8 @@ export class HostsService {
 
     const hostRole = await this.prisma.role.findUniqueOrThrow({ where: { name: 'HOST' } });
 
-    return this.prisma.$transaction(async (tx) => {
-      const hostProfile = await tx.hostProfile.create({
+    const hostProfile = await this.prisma.$transaction(async (tx) => {
+      const profile = await tx.hostProfile.create({
         data: {
           userId,
           hostType: dto.hostType,
@@ -94,8 +96,17 @@ export class HostsService {
         });
       }
 
-      return hostProfile;
+      return profile;
     });
+
+    void this.notificationsService.create(
+      userId,
+      'host_applied',
+      'Application Submitted',
+      'Your host application is under review. We\'ll notify you once a decision is made.',
+    );
+
+    return hostProfile;
   }
 
   async getOwnHostProfile(userId: string) {
@@ -269,7 +280,7 @@ export class HostsService {
     // Async providers leave verificationStatus undefined and rely on the webhook instead.
     if (panResult.verificationStatus !== undefined) {
       await this.applyPanVerificationResult(
-        { id: profile.id, payoutAccount: { status: 'PENDING_PENNY_DROP' }, user: profile.user },
+        { id: profile.id, userId: profile.userId, payoutAccount: { status: 'PENDING_PENNY_DROP' }, user: profile.user },
         panResult.verificationStatus,
         panResult.failureReason,
       );
@@ -302,12 +313,20 @@ export class HostsService {
       );
     }
 
+    void this.notificationsService.create(
+      userId,
+      'kyc_submitted',
+      'KYC Under Review',
+      'Your KYC documents have been submitted and are being verified.',
+    );
+
     return { panReferenceId: panResult.referenceId, pennyDropReference: bankResult.pennyDropReference };
   }
 
   private async applyPanVerificationResult(
     profile: {
       id: string;
+      userId: string;
       payoutAccount: { status: string } | null;
       user: { email: string; firstName: string };
     },
@@ -324,6 +343,12 @@ export class HostsService {
       if (profile.payoutAccount?.status === 'PENDING_ADMIN_REVIEW') {
         updateData.kycStatus = 'VERIFIED';
         updateData.kycVerifiedAt = new Date();
+        void this.notificationsService.create(
+          profile.userId,
+          'kyc_verified',
+          'KYC Verified',
+          'Your identity and bank account have been verified. Your application is pending admin approval.',
+        );
       }
 
       await this.prisma.hostProfile.update({ where: { id: profile.id }, data: updateData });
@@ -341,6 +366,12 @@ export class HostsService {
         hostName: profile.user.firstName,
         reason: failureReason ?? null,
       });
+      void this.notificationsService.create(
+        profile.userId,
+        'kyc_failed',
+        'KYC Verification Failed',
+        `PAN verification failed.${failureReason ? ` ${failureReason}` : ''}`,
+      );
     }
   }
 
@@ -360,6 +391,7 @@ export class HostsService {
     payoutAccountId: string,
     profile: {
       id: string;
+      userId: string;
       panVerificationStatus: string;
       user: { email: string; firstName: string };
     },
@@ -392,6 +424,12 @@ export class HostsService {
       if (profile.panVerificationStatus === 'VERIFIED') {
         profileUpdate.kycStatus = 'VERIFIED';
         profileUpdate.kycVerifiedAt = new Date();
+        void this.notificationsService.create(
+          profile.userId,
+          'kyc_verified',
+          'KYC Verified',
+          'Your identity and bank account have been verified. Your application is pending admin approval.',
+        );
       }
       await this.prisma.hostProfile.update({ where: { id: profile.id }, data: profileUpdate });
     } else {
@@ -429,6 +467,12 @@ export class HostsService {
         hostName: profile.user.firstName,
         reason: failureReason ?? null,
       });
+      void this.notificationsService.create(
+        profile.userId,
+        'kyc_failed',
+        'Bank Verification Failed',
+        `Bank account verification failed.${failureReason ? ` ${failureReason}` : ''}`,
+      );
     }
   }
 
@@ -669,6 +713,13 @@ export class HostsService {
       plan: dto.plan,
       billingCycle: dto.billingCycle,
     });
+    void this.notificationsService.create(
+      profile.userId,
+      'subscription_activated',
+      'Subscription Activated',
+      `You're now on the ${dto.plan} plan (${dto.billingCycle}).`,
+      { plan: dto.plan, billingCycle: dto.billingCycle },
+    );
 
     return newSubscription;
   }
