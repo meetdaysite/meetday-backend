@@ -9,7 +9,7 @@ import {
 import { createAdapter } from '@socket.io/redis-adapter';
 import * as firebaseAdmin from 'firebase-admin';
 import { Redis } from 'ioredis';
-import { Server, Socket } from 'socket.io';
+import { Namespace, Socket } from 'socket.io';
 
 @WebSocketGateway({
   namespace: '/notifications',
@@ -19,19 +19,20 @@ import { Server, Socket } from 'socket.io';
   },
 })
 export class NotificationsGateway implements OnGatewayInit, OnGatewayConnection {
-  @WebSocketServer() server: Server;
+  @WebSocketServer() server: Namespace;
 
   private readonly logger = new Logger(NotificationsGateway.name);
 
   constructor(private readonly configService: ConfigService) {}
 
-  afterInit(server: Server) {
+  afterInit(namespace: Namespace) {
     const pubClient = new Redis({
       host: this.configService.get<string>('redis.host'),
       port: this.configService.get<number>('redis.port'),
     });
     const subClient = pubClient.duplicate();
-    server.adapter(createAdapter(pubClient, subClient));
+    // adapter() lives on the root Server, not the Namespace
+    namespace.server.adapter(createAdapter(pubClient, subClient));
     this.logger.log('WebSocket Redis adapter initialized');
   }
 

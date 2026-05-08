@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import {
   CanActivate,
   ExecutionContext,
@@ -7,10 +8,24 @@ import {
 import { Reflector } from '@nestjs/core';
 import * as firebaseAdmin from 'firebase-admin';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { RedisService } from '../redis/redis.service';
+
+interface CachedUser {
+  uid: string;
+  email?: string;
+  phone?: string;
+  displayName?: string;
+  avatarUrl?: string;
+  provider: string;
+  emailVerified: boolean;
+}
 
 @Injectable()
 export class FirebaseAuthGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly redis: RedisService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
@@ -30,23 +45,35 @@ export class FirebaseAuthGuard implements CanActivate {
     }
 
     const token = authHeader.split(' ')[1];
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const cacheKey = `firebase:token:${tokenHash}`;
+
+    const cached = await this.redis.get<CachedUser>(cacheKey);
+    if (cached) {
+      request.user = cached;
+      return true;
+    }
 
     try {
       const decoded = await firebaseAdmin.auth().verifyIdToken(token);
-
-      // Normalise the provider so downstream code can branch on it
       const provider = (decoded.firebase?.sign_in_provider ?? 'unknown') as string;
 
-      request.user = {
+      const user: CachedUser = {
         uid: decoded.uid,
-        // Identity fields — may be undefined depending on provider
-        email: decoded.email,                     // present: email/password, Google, Apple
-        phone: decoded.phone_number,              // present: phone auth
-        displayName: decoded.name,                // present: Google, Apple
-        avatarUrl: decoded.picture,               // present: Google, Apple
-        provider,                                 // 'password' | 'phone' | 'google.com' | 'apple.com'
+        email: decoded.email,
+        phone: decoded.phone_number,
+        displayName: decoded.name,
+        avatarUrl: decoded.picture,
+        provider,
         emailVerified: decoded.email_verified ?? false,
       };
+
+      request.user = user;
+
+      const ttl = decoded.exp - Math.floor(Date.now() / 1000);
+      if (ttl > 0) {
+        await this.redis.set(cacheKey, user, ttl);
+      }
 
       return true;
     } catch {

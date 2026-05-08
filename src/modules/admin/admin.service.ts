@@ -21,6 +21,7 @@ import { ListCouponsQueryDto } from './dto/list-coupons-query.dto';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { RedisService } from '../../common/redis/redis.service';
 
 @Injectable()
 export class AdminService {
@@ -29,6 +30,7 @@ export class AdminService {
     private readonly configService: ConfigService,
     @InjectQueue('mail') private readonly mailQueue: Queue,
     private readonly notificationsService: NotificationsService,
+    private readonly redis: RedisService,
   ) {}
 
   async listAdmins(query: ListAdminsQueryDto) {
@@ -461,10 +463,13 @@ export class AdminService {
     const existing = await this.prisma.category.findUnique({ where: { name: dto.name } });
     if (existing) throw new ConflictException(`Category "${dto.name}" already exists`);
 
-    return this.prisma.category.create({
+    const category = await this.prisma.category.create({
       data: { name: dto.name, description: dto.description },
       select: { id: true, name: true, description: true, isActive: true, createdAt: true },
     });
+
+    await this.redis.del('categories:public');
+    return category;
   }
 
   async updateCategory(id: string, dto: UpdateCategoryDto) {
@@ -476,7 +481,7 @@ export class AdminService {
       if (conflict) throw new ConflictException(`Category "${dto.name}" already exists`);
     }
 
-    return this.prisma.category.update({
+    const updated = await this.prisma.category.update({
       where: { id },
       data: {
         ...(dto.name !== undefined && { name: dto.name }),
@@ -485,6 +490,9 @@ export class AdminService {
       },
       select: { id: true, name: true, description: true, isActive: true, updatedAt: true },
     });
+
+    await this.redis.del('categories:public');
+    return updated;
   }
 
   async listCategoriesPublic() {

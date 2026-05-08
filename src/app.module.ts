@@ -19,6 +19,7 @@ import { FirebaseAuthGuard } from './common/guards/firebase-auth.guard';
 import { HealthModule } from './common/health/health.module';
 import { MailModule } from './common/mail/mail.module';
 import { CryptoModule } from './common/crypto/crypto.module';
+import { RedisModule } from './common/redis/redis.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { CryptoModule } from './common/crypto/crypto.module';
       }),
       inject: [ConfigService],
     }),
+    RedisModule,
     PrismaModule,
     MailModule,
     CryptoModule,

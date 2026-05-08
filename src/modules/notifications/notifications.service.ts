@@ -1,14 +1,22 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RedisService } from '../../common/redis/redis.service';
 import { ListNotificationsQueryDto } from './dto/list-notifications-query.dto';
 import { NotificationsGateway } from './notifications.gateway';
+
+const UNREAD_TTL = 30;
 
 @Injectable()
 export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: NotificationsGateway,
+    private readonly redis: RedisService,
   ) {}
+
+  private unreadKey(userId: string) {
+    return `notifications:unread:${userId}`;
+  }
 
   async create(
     userId: string,
@@ -20,6 +28,8 @@ export class NotificationsService {
     const notification = await this.prisma.notification.create({
       data: { userId, type, title, body, metadata: (metadata ?? undefined) as any },
     });
+
+    await this.redis.del(this.unreadKey(userId));
 
     this.gateway.sendToUser(userId, 'notification', {
       id: notification.id,
@@ -53,9 +63,15 @@ export class NotificationsService {
   }
 
   async getUnreadCount(userId: string): Promise<{ count: number }> {
+    const cacheKey = this.unreadKey(userId);
+    const cached = await this.redis.get<number>(cacheKey);
+    if (cached !== null) return { count: cached };
+
     const count = await this.prisma.notification.count({
       where: { userId, isRead: false },
     });
+
+    await this.redis.set(cacheKey, count, UNREAD_TTL);
     return { count };
   }
 
@@ -73,6 +89,7 @@ export class NotificationsService {
       data: { isRead: true, readAt: new Date() },
     });
 
+    await this.redis.del(this.unreadKey(userId));
     return { message: 'Marked as read' };
   }
 
@@ -82,6 +99,7 @@ export class NotificationsService {
       data: { isRead: true, readAt: new Date() },
     });
 
+    await this.redis.del(this.unreadKey(userId));
     return { message: `${count} notification(s) marked as read` };
   }
 }
