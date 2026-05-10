@@ -537,11 +537,18 @@ export class AdminService {
     });
 
     const hostUser = event.hostProfile.user;
+    const eventTitle = event.title ?? 'Untitled';
+
+    void this.mailQueue.add('event-approved', {
+      to: hostUser.email,
+      hostName: hostUser.firstName,
+      eventTitle,
+    });
     void this.notificationsService.create(
       hostUser.id,
       'event_approved',
       'Event Approved',
-      `Your event "${event.title ?? 'Untitled'}" has been approved and is now live.`,
+      `Your event "${eventTitle}" has been approved and is now live.`,
     );
 
     return { message: 'Event approved successfully' };
@@ -572,11 +579,19 @@ export class AdminService {
     });
 
     const hostUser = event.hostProfile.user;
+    const eventTitle = event.title ?? 'Untitled';
+
+    void this.mailQueue.add('event-rejected', {
+      to: hostUser.email,
+      hostName: hostUser.firstName,
+      eventTitle,
+      remark: dto.remark,
+    });
     void this.notificationsService.create(
       hostUser.id,
       'event_rejected',
       'Event Not Approved',
-      `Your event "${event.title ?? 'Untitled'}" was not approved. Remark: ${dto.remark}`,
+      `Your event "${eventTitle}" was not approved. Remark: ${dto.remark}`,
     );
 
     return { message: 'Event rejected successfully' };

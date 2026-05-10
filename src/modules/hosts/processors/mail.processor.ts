@@ -69,4 +69,22 @@ export class MailProcessor {
       this.logger.error(`Failed to process admin-invite mail job: ${(error as Error).message}`);
     }
   }
+
+  @Process('event-approved')
+  async handleEventApproved(job: Job<{ to: string; hostName: string; eventTitle: string }>) {
+    try {
+      await this.mailService.sendEventApproved(job.data.to, job.data.hostName, job.data.eventTitle);
+    } catch (error) {
+      this.logger.error(`Failed to process event-approved mail job: ${(error as Error).message}`);
+    }
+  }
+
+  @Process('event-rejected')
+  async handleEventRejected(job: Job<{ to: string; hostName: string; eventTitle: string; remark: string }>) {
+    try {
+      await this.mailService.sendEventRejected(job.data.to, job.data.hostName, job.data.eventTitle, job.data.remark);
+    } catch (error) {
+      this.logger.error(`Failed to process event-rejected mail job: ${(error as Error).message}`);
+    }
+  }
 }

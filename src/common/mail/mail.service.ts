@@ -7,6 +7,8 @@ import { hostRejectedTemplate } from './templates/host-rejected.template';
 import { subscriptionActivatedTemplate } from './templates/subscription-activated.template';
 import { subscriptionLapsedTemplate } from './templates/subscription-lapsed.template';
 import { adminInviteTemplate } from './templates/admin-invite.template';
+import { eventApprovedTemplate } from './templates/event-approved.template';
+import { eventRejectedTemplate } from './templates/event-rejected.template';
 
 @Injectable()
 export class MailService {
@@ -67,5 +69,13 @@ export class MailService {
 
   async sendAdminInvite(to: string, roleName: string, resetLink: string): Promise<void> {
     await this.sendMail(to, `You've been invited to Meetday as ${roleName}`, adminInviteTemplate(to, roleName, resetLink));
+  }
+
+  async sendEventApproved(to: string, hostName: string, eventTitle: string): Promise<void> {
+    await this.sendMail(to, 'Your event has been approved — Meetday', eventApprovedTemplate(hostName, eventTitle));
+  }
+
+  async sendEventRejected(to: string, hostName: string, eventTitle: string, remark: string): Promise<void> {
+    await this.sendMail(to, 'Update on your Meetday event listing', eventRejectedTemplate(hostName, eventTitle, remark));
   }
 }
