@@ -52,6 +52,8 @@ model User {
   createdCoupons    Coupon[]            @relation("CouponCreatedBy")
   couponRedemptions CouponRedemption[]  @relation("CouponRedemptions")
 
+  reviewedEvents Event[]         @relation("EventReviewedBy")
+
   notifications Notification[]
 
   createdAt DateTime @default(now())
@@ -184,6 +186,7 @@ model Category {
 
   userInterests            UserInterest[]
   hostExperienceCategories HostExperienceCategory[]
+  events                   Event[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -264,6 +267,7 @@ model HostProfile {
   totalReviews      Int    @default(0)
 
   subscriptions HostSubscription[]
+  events        Event[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -536,4 +540,153 @@ model Notification {
   @@index([userId, isRead])
   @@index([userId, createdAt(sort: Desc)])
   @@map("notifications")
+}
+
+// ─── Events ───────────────────────────────────────────────────────────────────
+
+model Event {
+  id            String  @id @default(uuid())
+  hostProfileId String
+  categoryId    String?
+
+  // Basic Info
+  title       String?
+  description String?  @db.Text
+  eventType   String?
+  languages   String[]
+  tags        String[]
+
+  // Date & Location
+  eventDate   DateTime?
+  startTime   String?
+  endTime     String?
+  venueName   String?
+  fullAddress String?
+  city        String?
+  latitude    Decimal?
+  longitude   Decimal?
+
+  // Experience Details
+  whatToExpect    Json @default("[]")
+  whoShouldAttend Json @default("[]")
+
+  // Settings
+  visibility          Visibility  @default(PUBLIC)
+  ageRestriction      String?
+  specialInstructions String?
+
+  // AI Reserved (populated by AI copilot later)
+  vibeSummary String?
+  crowdPulse  Json?
+
+  // Pricing & Fee
+  isFree            Boolean @default(false)
+  platformFeeWaived Boolean @default(false)
+
+  // Admin Review
+  adminRejectionRemark String?
+  reviewedBy           String?
+  reviewedAt           DateTime?
+  reviewedByUser       User?     @relation("EventReviewedBy", fields: [reviewedBy], references: [id])
+
+  // Meta
+  status    EventStatus @default(DRAFT)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  // Relations
+  hostProfile  HostProfile        @relation(fields: [hostProfileId], references: [id])
+  category     Category?          @relation(fields: [categoryId], references: [id])
+  tickets      EventTicket[]
+  media        EventMedia[]
+  refundPolicy EventRefundPolicy?
+
+  @@index([hostProfileId])
+  @@index([categoryId])
+  @@index([eventDate])
+  @@index([city])
+  @@index([status])
+  @@map("events")
+}
+
+model EventTicket {
+  id      String @id @default(uuid())
+  eventId String
+
+  name          String
+  price         Decimal
+  totalCapacity Int
+  maxPerPerson  Int?
+  description   String?
+  saleStartDate DateTime?
+  saleEndDate   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+  @@map("event_tickets")
+}
+
+model EventMedia {
+  id      String @id @default(uuid())
+  eventId String
+
+  url   String
+  type  MediaType
+  order Int       @default(0)
+
+  createdAt DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+  @@map("event_media")
+}
+
+model EventRefundPolicy {
+  id      String @id @default(uuid())
+  eventId String @unique
+
+  type          RefundType
+  cutoffHours   Int?
+  refundPercent Int?
+  refundTo      RefundTo
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@map("event_refund_policies")
+}
+
+// ─── Event Enums ──────────────────────────────────────────────────────────────
+
+enum EventStatus {
+  DRAFT
+  UNDER_REVIEW
+  PUBLISHED
+  CANCELLED
+}
+
+enum Visibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum MediaType {
+  COVER
+  GALLERY
+  VIDEO
+}
+
+enum RefundType {
+  FULL
+  PARTIAL
+  NO_REFUND
+}
+
+enum RefundTo {
+  ORIGINAL_PAYMENT
+  PLATFORM_CREDIT
 }
