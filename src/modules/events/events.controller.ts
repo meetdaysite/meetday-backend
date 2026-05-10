@@ -30,6 +30,8 @@ import { CreateEventDto } from './dto/create-event.dto';
 import { ListMyEventsQueryDto } from './dto/list-my-events-query.dto';
 import { BrowseEventsQueryDto } from './dto/browse-events-query.dto';
 import { CancelEventDto } from './dto/cancel-event.dto';
+import { RequestUploadUrlDto } from './dto/request-upload-url.dto';
+import { ConfirmMediaUploadDto } from './dto/confirm-media-upload.dto';
 
 @ApiTags('Events')
 @ApiBearerAuth('firebase-token')
@@ -161,6 +163,49 @@ export class EventsController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.eventsService.submitEvent(userId, id);
+  }
+
+  @Post(':id/media/upload-url')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Request a presigned S3 upload URL',
+    description:
+      'Returns a presigned PUT URL valid for 15 minutes and the S3 key. ' +
+      'The frontend uploads the file directly to S3 using the PUT URL, ' +
+      'then calls POST /events/:id/media/confirm with the key to register the media.',
+  })
+  @ApiOkResponse({ description: 'Presigned upload URL and key.' })
+  @ApiForbiddenResponse({ description: 'Not the owner of this event.' })
+  @ApiNotFoundResponse({ description: 'Event not found.' })
+  requestUploadUrl(
+    @GetUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RequestUploadUrlDto,
+  ) {
+    return this.eventsService.requestUploadUrl(userId, id, dto);
+  }
+
+  @Post(':id/media/confirm')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Confirm a completed media upload',
+    description:
+      'Registers an S3 object key as an EventMedia record after the frontend has finished uploading. ' +
+      'The key must have been obtained from POST /events/:id/media/upload-url.',
+  })
+  @ApiCreatedResponse({ description: 'Media record saved.' })
+  @ApiForbiddenResponse({ description: 'Not the owner of this event.' })
+  @ApiNotFoundResponse({ description: 'Event not found.' })
+  confirmMediaUpload(
+    @GetUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ConfirmMediaUploadDto,
+  ) {
+    return this.eventsService.confirmMediaUpload(userId, id, dto);
   }
 
   @Patch(':id/cancel')

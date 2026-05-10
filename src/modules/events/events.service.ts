@@ -4,13 +4,17 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { EventStatus, Visibility } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { ListMyEventsQueryDto } from './dto/list-my-events-query.dto';
 import { BrowseEventsQueryDto } from './dto/browse-events-query.dto';
 import { CancelEventDto } from './dto/cancel-event.dto';
+import { RequestUploadUrlDto } from './dto/request-upload-url.dto';
+import { ConfirmMediaUploadDto } from './dto/confirm-media-upload.dto';
 
 const EVENT_DETAIL_INCLUDE = {
   tickets: true,
@@ -19,12 +23,27 @@ const EVENT_DETAIL_INCLUDE = {
   hostProfile: { select: { id: true, displayName: true } },
 };
 
+const CONTENT_TYPE_EXT: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'video/mp4': 'mp4',
+};
+
 @Injectable()
 export class EventsService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly storageService: StorageService,
     private readonly notificationsService: NotificationsService,
   ) {}
+
+  private async withSignedMedia<T extends { media: Array<{ url: string }> }>(obj: T): Promise<T> {
+    const signed = await Promise.all(
+      obj.media.map(async (m) => ({ ...m, url: await this.storageService.getPresignedDownloadUrl(m.url) })),
+    );
+    return { ...obj, media: signed };
+  }
 
   async createEvent(userId: string, dto: CreateEventDto) {
     const hostProfile = await this.prisma.hostProfile.findUnique({
@@ -377,7 +396,16 @@ export class EventsService {
       this.prisma.event.count({ where }),
     ]);
 
-    return { events, total, page, limit };
+    const signedEvents = await Promise.all(
+      events.map(async (e) => ({
+        ...e,
+        media: await Promise.all(
+          e.media.map(async (m) => ({ ...m, url: await this.storageService.getPresignedDownloadUrl(m.url) })),
+        ),
+      })),
+    );
+
+    return { events: signedEvents, total, page, limit };
   }
 
   async getPublicEventById(eventId: string) {
@@ -404,6 +432,41 @@ export class EventsService {
     if (event.status !== EventStatus.PUBLISHED || event.visibility !== Visibility.PUBLIC)
       throw new NotFoundException('Event not found');
 
-    return event;
+    return this.withSignedMedia(event);
+  }
+
+  async requestUploadUrl(userId: string, eventId: string, dto: RequestUploadUrlDto) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: { hostProfile: { select: { userId: true } } },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+    if (event.hostProfile.userId !== userId)
+      throw new ForbiddenException('You do not own this event');
+
+    const ext = CONTENT_TYPE_EXT[dto.contentType];
+    const key = `events/${eventId}/${dto.type.toLowerCase()}/${randomUUID()}.${ext}`;
+    const uploadUrl = await this.storageService.getPresignedUploadUrl(key, dto.contentType);
+
+    return { uploadUrl, key };
+  }
+
+  async confirmMediaUpload(userId: string, eventId: string, dto: ConfirmMediaUploadDto) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: { hostProfile: { select: { userId: true } } },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+    if (event.hostProfile.userId !== userId)
+      throw new ForbiddenException('You do not own this event');
+
+    return this.prisma.eventMedia.create({
+      data: {
+        eventId,
+        url: dto.key,
+        type: dto.type,
+        order: dto.order ?? 0,
+      },
+    });
   }
 }

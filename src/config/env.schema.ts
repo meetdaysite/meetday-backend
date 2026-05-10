@@ -29,6 +29,11 @@ export const envSchema = z.object({
   ENCRYPTION_KEY: z.string().length(64, 'ENCRYPTION_KEY must be a 64-char hex string (32 bytes) — generate with: openssl rand -hex 32'),
 
   FRONTEND_URL: z.string().url('FRONTEND_URL must be a valid URL'),
+
+  AWS_REGION: z.string().min(1, 'AWS_REGION is required'),
+  AWS_ACCESS_KEY_ID: z.string().min(1, 'AWS_ACCESS_KEY_ID is required'),
+  AWS_SECRET_ACCESS_KEY: z.string().min(1, 'AWS_SECRET_ACCESS_KEY is required'),
+  AWS_S3_BUCKET: z.string().min(1, 'AWS_S3_BUCKET is required'),
 });
 
 export type Env = z.infer<typeof envSchema>;

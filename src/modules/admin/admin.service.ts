@@ -22,6 +22,7 @@ import { ListCouponsQueryDto } from './dto/list-coupons-query.dto';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
+import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RedisService } from '../../common/redis/redis.service';
 
@@ -31,6 +32,7 @@ export class AdminService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     @InjectQueue('mail') private readonly mailQueue: Queue,
+    private readonly storageService: StorageService,
     private readonly notificationsService: NotificationsService,
     private readonly redis: RedisService,
   ) {}
@@ -651,7 +653,11 @@ export class AdminService {
     });
 
     if (!event) throw new NotFoundException('Event not found');
-    return event;
+
+    const signedMedia = await Promise.all(
+      event.media.map(async (m) => ({ ...m, url: await this.storageService.getPresignedDownloadUrl(m.url) })),
+    );
+    return { ...event, media: signedMedia };
   }
 
   async rejectEvent(eventId: string, adminId: string, dto: RejectEventDto) {
