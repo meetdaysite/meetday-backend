@@ -589,6 +589,13 @@ model Event {
   reviewedAt           DateTime?
   reviewedByUser       User?     @relation("EventReviewedBy", fields: [reviewedBy], references: [id])
 
+  // Cancellation
+  cancelledAt        DateTime?
+  cancellationReason String?
+
+  // Submission tracking
+  submittedAt DateTime?
+
   // Meta
   status    EventStatus @default(DRAFT)
   createdAt DateTime    @default(now())

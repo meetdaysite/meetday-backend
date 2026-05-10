@@ -39,6 +39,7 @@ import { CreateCouponDto } from './dto/create-coupon.dto';
 import { ListCouponsQueryDto } from './dto/list-coupons-query.dto';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
+import { ListEventsQueryDto } from './dto/list-events-query.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth('firebase-token')
@@ -815,6 +816,34 @@ export class AdminController {
     @Query('limit') limit = 20,
   ) {
     return this.adminService.listPendingEvents(Number(page), Number(limit));
+  }
+
+  @Get('events')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({
+    summary: 'List all events (admin view)',
+    description:
+      'Returns a paginated list of all events across all statuses. ' +
+      'Filter by status, city, hostProfileId, or categoryId. Ordered newest first.',
+  })
+  @ApiOkResponse({ description: 'Paginated list of events.' })
+  listAllEvents(@Query() query: ListEventsQueryDto) {
+    return this.adminService.listAllEvents(query);
+  }
+
+  @Get('events/:id')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({
+    summary: 'Get full event detail (admin view)',
+    description:
+      'Returns all event fields including tickets, refundPolicy, host profile, media, and category. ' +
+      'Used when an admin is reviewing an event before approving or rejecting.',
+  })
+  @ApiParam({ name: 'id', description: 'Event UUID', example: 'event-uuid-1234' })
+  @ApiOkResponse({ description: 'Full event detail.' })
+  @ApiNotFoundResponse({ description: 'Event not found.' })
+  getEventDetail(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.getEventDetail(id);
   }
 
   @Post('events/:id/approve')

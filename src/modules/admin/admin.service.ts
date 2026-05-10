@@ -21,6 +21,7 @@ import { CreateCouponDto } from './dto/create-coupon.dto';
 import { ListCouponsQueryDto } from './dto/list-coupons-query.dto';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
+import { ListEventsQueryDto } from './dto/list-events-query.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RedisService } from '../../common/redis/redis.service';
 
@@ -586,6 +587,71 @@ export class AdminService {
     );
 
     return { message: 'Event approved successfully' };
+  }
+
+  async listAllEvents(query: ListEventsQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const where: any = {};
+    if (query.status) where.status = query.status;
+    if (query.city) where.city = { contains: query.city, mode: 'insensitive' };
+    if (query.hostProfileId) where.hostProfileId = query.hostProfileId;
+    if (query.categoryId) where.categoryId = query.categoryId;
+
+    const [events, total] = await Promise.all([
+      this.prisma.event.findMany({
+        where,
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          eventType: true,
+          eventDate: true,
+          city: true,
+          isFree: true,
+          submittedAt: true,
+          createdAt: true,
+          category: { select: { id: true, name: true } },
+          hostProfile: {
+            select: {
+              id: true,
+              displayName: true,
+              user: { select: { id: true, firstName: true, lastName: true, email: true } },
+            },
+          },
+          _count: { select: { tickets: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.event.count({ where }),
+    ]);
+
+    return { events, total, page, limit };
+  }
+
+  async getEventDetail(eventId: string) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: {
+        tickets: true,
+        refundPolicy: true,
+        category: { select: { id: true, name: true } },
+        hostProfile: {
+          select: {
+            id: true,
+            displayName: true,
+            user: { select: { id: true, firstName: true, lastName: true, email: true } },
+          },
+        },
+        media: { orderBy: { order: 'asc' } },
+      },
+    });
+
+    if (!event) throw new NotFoundException('Event not found');
+    return event;
   }
 
   async rejectEvent(eventId: string, adminId: string, dto: RejectEventDto) {
