@@ -272,6 +272,8 @@ model HostProfile {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([approvalStatus])
+  @@index([kycStatus])
   @@map("host_profiles")
 }
 

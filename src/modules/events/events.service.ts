@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
@@ -31,6 +32,8 @@ const CONTENT_TYPE_EXT: Record<string, string> = {
 
 @Injectable()
 export class EventsService {
+  private readonly logger = new Logger(EventsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storageService: StorageService,
@@ -291,7 +294,7 @@ export class EventsService {
           `A new event "${event.title ?? 'Untitled'}" has been submitted for review.`,
         ),
       ),
-    );
+    ).catch((err) => this.logger.error('Failed to notify admins of pending event', err));
 
     return updated;
   }

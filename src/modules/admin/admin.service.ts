@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
@@ -28,6 +29,8 @@ import { RedisService } from '../../common/redis/redis.service';
 
 @Injectable()
 export class AdminService {
+  private readonly logger = new Logger(AdminService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
@@ -143,12 +146,11 @@ export class AdminService {
       },
     });
 
-    // Dispatch invite email asynchronously
     void this.mailQueue.add('admin-invite', {
       to: dto.email,
       roleName: role.name,
       resetLink,
-    });
+    }).catch((err) => this.logger.error('Failed to queue admin-invite mail', err));
 
     return { message: 'Invitation sent' };
   }
@@ -269,13 +271,13 @@ export class AdminService {
     void this.mailQueue.add('host-approved', {
       to: host.user.email,
       hostName: host.user.firstName,
-    });
+    }).catch((err) => this.logger.error('Failed to queue host-approved mail', err));
     void this.notificationsService.create(
       host.user.id,
       'host_approved',
       'Application Approved',
       "Your host application has been approved. You're now on the DISCOVER plan.",
-    );
+    ).catch((err) => this.logger.error('Failed to create host_approved notification', err));
 
     return { message: 'Host approved successfully' };
   }
@@ -450,13 +452,13 @@ export class AdminService {
       to: host.user.email,
       hostName: host.user.firstName,
       reason: dto.rejectionReason,
-    });
+    }).catch((err) => this.logger.error('Failed to queue host-rejected mail', err));
     void this.notificationsService.create(
       host.user.id,
       'host_rejected',
       'Application Not Approved',
       `Your host application was not approved. Reason: ${dto.rejectionReason}`,
-    );
+    ).catch((err) => this.logger.error('Failed to create host_rejected notification', err));
 
     return { message: 'Host rejected successfully' };
   }
@@ -500,11 +502,17 @@ export class AdminService {
   }
 
   async listCategoriesPublic() {
-    return this.prisma.category.findMany({
+    const CACHE_KEY = 'categories:public';
+    const cached = await this.redis.get<{ id: string; name: string; description: string | null }[]>(CACHE_KEY);
+    if (cached) return cached;
+
+    const categories = await this.prisma.category.findMany({
       where: { isActive: true } as any,
       select: { id: true, name: true, description: true },
       orderBy: { name: 'asc' },
     });
+    await this.redis.set(CACHE_KEY, categories, 3600);
+    return categories;
   }
 
   async listCategoriesAdmin() {
@@ -580,13 +588,13 @@ export class AdminService {
       to: hostUser.email,
       hostName: hostUser.firstName,
       eventTitle,
-    });
+    }).catch((err) => this.logger.error('Failed to queue event-approved mail', err));
     void this.notificationsService.create(
       hostUser.id,
       'event_approved',
       'Event Approved',
       `Your event "${eventTitle}" has been approved and is now live.`,
-    );
+    ).catch((err) => this.logger.error('Failed to create event_approved notification', err));
 
     return { message: 'Event approved successfully' };
   }
@@ -692,13 +700,13 @@ export class AdminService {
       hostName: hostUser.firstName,
       eventTitle,
       remark: dto.remark,
-    });
+    }).catch((err) => this.logger.error('Failed to queue event-rejected mail', err));
     void this.notificationsService.create(
       hostUser.id,
       'event_rejected',
       'Event Not Approved',
       `Your event "${eventTitle}" was not approved. Remark: ${dto.remark}`,
-    );
+    ).catch((err) => this.logger.error('Failed to create event_rejected notification', err));
 
     return { message: 'Event rejected successfully' };
   }

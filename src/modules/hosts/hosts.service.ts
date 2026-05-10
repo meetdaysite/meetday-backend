@@ -104,7 +104,7 @@ export class HostsService {
       'host_applied',
       'Application Submitted',
       'Your host application is under review. We\'ll notify you once a decision is made.',
-    );
+    ).catch((err) => this.logger.error('Failed to create host_applied notification', err));
 
     return hostProfile;
   }
@@ -318,7 +318,7 @@ export class HostsService {
       'kyc_submitted',
       'KYC Under Review',
       'Your KYC documents have been submitted and are being verified.',
-    );
+    ).catch((err) => this.logger.error('Failed to create kyc_submitted notification', err));
 
     return { panReferenceId: panResult.referenceId, pennyDropReference: bankResult.pennyDropReference };
   }
@@ -348,7 +348,7 @@ export class HostsService {
           'kyc_verified',
           'KYC Verified',
           'Your identity and bank account have been verified. Your application is pending admin approval.',
-        );
+        ).catch((err) => this.logger.error('Failed to create kyc_verified notification', err));
       }
 
       await this.prisma.hostProfile.update({ where: { id: profile.id }, data: updateData });
@@ -365,13 +365,13 @@ export class HostsService {
         to: profile.user.email,
         hostName: profile.user.firstName,
         reason: failureReason ?? null,
-      });
+      }).catch((err) => this.logger.error('Failed to queue kyc-failed mail', err));
       void this.notificationsService.create(
         profile.userId,
         'kyc_failed',
         'KYC Verification Failed',
         `PAN verification failed.${failureReason ? ` ${failureReason}` : ''}`,
-      );
+      ).catch((err) => this.logger.error('Failed to create kyc_failed notification', err));
     }
   }
 
@@ -429,7 +429,7 @@ export class HostsService {
           'kyc_verified',
           'KYC Verified',
           'Your identity and bank account have been verified. Your application is pending admin approval.',
-        );
+        ).catch((err) => this.logger.error('Failed to create kyc_verified notification', err));
       }
       await this.prisma.hostProfile.update({ where: { id: profile.id }, data: profileUpdate });
     } else {
@@ -466,13 +466,13 @@ export class HostsService {
         to: profile.user.email,
         hostName: profile.user.firstName,
         reason: failureReason ?? null,
-      });
+      }).catch((err) => this.logger.error('Failed to queue kyc-failed mail', err));
       void this.notificationsService.create(
         profile.userId,
         'kyc_failed',
         'Bank Verification Failed',
         `Bank account verification failed.${failureReason ? ` ${failureReason}` : ''}`,
-      );
+      ).catch((err) => this.logger.error('Failed to create kyc_failed notification', err));
     }
   }
 
@@ -712,14 +712,14 @@ export class HostsService {
       hostName: profile.user.firstName,
       plan: dto.plan,
       billingCycle: dto.billingCycle,
-    });
+    }).catch((err) => this.logger.error('Failed to queue subscription-activated mail', err));
     void this.notificationsService.create(
       profile.userId,
       'subscription_activated',
       'Subscription Activated',
       `You're now on the ${dto.plan} plan (${dto.billingCycle}).`,
       { plan: dto.plan, billingCycle: dto.billingCycle },
-    );
+    ).catch((err) => this.logger.error('Failed to create subscription_activated notification', err));
 
     return newSubscription;
   }
