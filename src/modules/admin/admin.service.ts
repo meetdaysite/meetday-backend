@@ -513,6 +513,40 @@ export class AdminService {
 
   // ── Event review ─────────────────────────────────────────────────────────
 
+  async listPendingEvents(page: number, limit: number) {
+    const where = { status: 'UNDER_REVIEW' as const };
+
+    const [events, total] = await Promise.all([
+      this.prisma.event.findMany({
+        where,
+        select: {
+          id: true,
+          title: true,
+          eventType: true,
+          eventDate: true,
+          city: true,
+          isFree: true,
+          updatedAt: true,
+          category: { select: { id: true, name: true } },
+          hostProfile: {
+            select: {
+              id: true,
+              displayName: true,
+              user: { select: { id: true, firstName: true, lastName: true, email: true } },
+            },
+          },
+          _count: { select: { tickets: true } },
+        },
+        orderBy: { updatedAt: 'asc' }, // oldest submission first (FIFO)
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.event.count({ where }),
+    ]);
+
+    return { events, total, page, limit };
+  }
+
   async approveEvent(eventId: string, adminId: string) {
     const event = await this.prisma.event.findUnique({
       where: { id: eventId },

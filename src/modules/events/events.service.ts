@@ -6,11 +6,15 @@ import {
 } from '@nestjs/common';
 import { EventStatus, Visibility } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateEventDto } from './dto/create-event.dto';
 
 @Injectable()
 export class EventsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   async createEvent(userId: string, dto: CreateEventDto) {
     const hostProfile = await this.prisma.hostProfile.findUnique({
@@ -227,7 +231,7 @@ export class EventsService {
     if (missing.length)
       throw new BadRequestException(`Event is incomplete. Missing: ${missing.join(', ')}`);
 
-    return this.prisma.event.update({
+    const updated = await this.prisma.event.update({
       where: { id: eventId },
       data: { status: EventStatus.UNDER_REVIEW },
       include: {
@@ -236,5 +240,25 @@ export class EventsService {
         category: { select: { id: true, name: true } },
       },
     });
+
+    // Notify all active admins (SUPER_ADMIN, CITY_ADMIN, MODERATOR) of the new submission
+    const adminRoles = ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'];
+    const admins = await this.prisma.user.findMany({
+      where: { isActive: true, role: { name: { in: adminRoles } } },
+      select: { id: true },
+    });
+
+    void Promise.all(
+      admins.map((admin) =>
+        this.notificationsService.create(
+          admin.id,
+          'event_pending_review',
+          'New Event Pending Review',
+          `A new event "${event.title ?? 'Untitled'}" has been submitted for review.`,
+        ),
+      ),
+    );
+
+    return updated;
   }
 }

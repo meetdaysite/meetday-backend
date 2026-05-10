@@ -770,6 +770,53 @@ export class AdminController {
 
   // ─── Event review endpoints ───────────────────────────────────────────────────
 
+  @Get('events/pending')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({
+    summary: 'List events pending admin review',
+    description:
+      'Returns events in UNDER_REVIEW status, oldest submission first (FIFO). ' +
+      'Accessible by SUPER_ADMIN, CITY_ADMIN, and MODERATOR.',
+  })
+  @ApiOkResponse({
+    description: 'Paginated list of events pending review.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-05-11T10:00:00.000Z',
+        data: {
+          events: [
+            {
+              id: 'event-uuid',
+              title: 'Photography Walk in Bandra',
+              eventType: 'Workshop',
+              eventDate: '2026-06-15T00:00:00.000Z',
+              city: 'Mumbai',
+              isFree: false,
+              updatedAt: '2026-05-11T09:00:00.000Z',
+              category: { id: 'cat-uuid', name: 'Photography' },
+              hostProfile: {
+                id: 'hp-uuid',
+                displayName: 'Mumbai Walks by Rahul',
+                user: { id: 'user-uuid', firstName: 'Rahul', lastName: 'Sharma', email: 'host@example.com' },
+              },
+              _count: { tickets: 2 },
+            },
+          ],
+          total: 1,
+          page: 1,
+          limit: 20,
+        },
+      },
+    },
+  })
+  listPendingEvents(
+    @Query('page') page = 1,
+    @Query('limit') limit = 20,
+  ) {
+    return this.adminService.listPendingEvents(Number(page), Number(limit));
+  }
+
   @Post('events/:id/approve')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @HttpCode(HttpStatus.OK)
