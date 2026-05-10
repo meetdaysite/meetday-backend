@@ -15,7 +15,23 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { RefundTo, RefundType, Visibility } from '@prisma/client';
+import { MediaType, RefundTo, RefundType, Visibility } from '@prisma/client';
+
+export class CreateEventMediaDto {
+  @ApiPropertyOptional({ example: 'events/event-uuid/cover/abc123.jpg' })
+  @IsString()
+  key: string;
+
+  @ApiPropertyOptional({ enum: MediaType, example: 'COVER' })
+  @IsEnum(MediaType)
+  type: MediaType;
+
+  @ApiPropertyOptional({ default: 0 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  order?: number = 0;
+}
 
 export class CreateEventTicketDto {
   @ApiPropertyOptional({ example: 'General Admission', maxLength: 100 })
@@ -213,4 +229,11 @@ export class CreateEventDto {
   @ValidateNested()
   @Type(() => CreateEventRefundPolicyDto)
   refundPolicy?: CreateEventRefundPolicyDto;
+
+  @ApiPropertyOptional({ type: [CreateEventMediaDto], description: 'Replaces all existing media when provided.' })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateEventMediaDto)
+  media?: CreateEventMediaDto[];
 }

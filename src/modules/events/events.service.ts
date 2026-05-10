@@ -14,7 +14,6 @@ import { ListMyEventsQueryDto } from './dto/list-my-events-query.dto';
 import { BrowseEventsQueryDto } from './dto/browse-events-query.dto';
 import { CancelEventDto } from './dto/cancel-event.dto';
 import { RequestUploadUrlDto } from './dto/request-upload-url.dto';
-import { ConfirmMediaUploadDto } from './dto/confirm-media-upload.dto';
 
 const EVENT_DETAIL_INCLUDE = {
   tickets: true,
@@ -113,6 +112,15 @@ export class EventsService {
               },
             },
           }),
+          ...(dto.media && {
+            media: {
+              create: dto.media.map((m) => ({
+                url: m.key,
+                type: m.type,
+                order: m.order ?? 0,
+              })),
+            },
+          }),
         },
         include: EVENT_DETAIL_INCLUDE,
       });
@@ -204,6 +212,20 @@ export class EventsService {
             ...(dto.refundPolicy.refundTo !== undefined && { refundTo: dto.refundPolicy.refundTo }),
           },
         });
+      }
+
+      if (dto.media !== undefined) {
+        await tx.eventMedia.deleteMany({ where: { eventId } });
+        if (dto.media.length > 0) {
+          await tx.eventMedia.createMany({
+            data: dto.media.map((m) => ({
+              eventId,
+              url: m.key,
+              type: m.type,
+              order: m.order ?? 0,
+            })),
+          });
+        }
       }
 
       return tx.event.findUnique({
@@ -451,22 +473,4 @@ export class EventsService {
     return { uploadUrl, key };
   }
 
-  async confirmMediaUpload(userId: string, eventId: string, dto: ConfirmMediaUploadDto) {
-    const event = await this.prisma.event.findUnique({
-      where: { id: eventId },
-      include: { hostProfile: { select: { userId: true } } },
-    });
-    if (!event) throw new NotFoundException('Event not found');
-    if (event.hostProfile.userId !== userId)
-      throw new ForbiddenException('You do not own this event');
-
-    return this.prisma.eventMedia.create({
-      data: {
-        eventId,
-        url: dto.key,
-        type: dto.type,
-        order: dto.order ?? 0,
-      },
-    });
-  }
 }
