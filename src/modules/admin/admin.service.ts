@@ -15,6 +15,7 @@ import { ListHostsQueryDto } from './dto/list-hosts-query.dto';
 import { ListAdminsQueryDto } from './dto/list-admins-query.dto';
 import { ListRolesQueryDto } from './dto/list-roles-query.dto';
 import { RejectHostDto } from './dto/reject-host.dto';
+import { RejectEventDto } from './dto/reject-event.dto';
 import { InviteAdminDto } from './dto/invite-admin.dto';
 import { CreateCouponDto } from './dto/create-coupon.dto';
 import { ListCouponsQueryDto } from './dto/list-coupons-query.dto';
@@ -508,5 +509,76 @@ export class AdminService {
       select: { id: true, name: true, description: true, isActive: true, createdAt: true },
       orderBy: { name: 'asc' },
     });
+  }
+
+  // ── Event review ─────────────────────────────────────────────────────────
+
+  async approveEvent(eventId: string, adminId: string) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: {
+        hostProfile: {
+          include: { user: { select: { id: true, email: true, firstName: true } } },
+        },
+      },
+    });
+
+    if (!event) throw new NotFoundException('Event not found');
+    if (event.status !== 'UNDER_REVIEW')
+      throw new BadRequestException('Only events in UNDER_REVIEW status can be approved');
+
+    await this.prisma.event.update({
+      where: { id: eventId },
+      data: {
+        status: 'PUBLISHED',
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+      },
+    });
+
+    const hostUser = event.hostProfile.user;
+    void this.notificationsService.create(
+      hostUser.id,
+      'event_approved',
+      'Event Approved',
+      `Your event "${event.title ?? 'Untitled'}" has been approved and is now live.`,
+    );
+
+    return { message: 'Event approved successfully' };
+  }
+
+  async rejectEvent(eventId: string, adminId: string, dto: RejectEventDto) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: {
+        hostProfile: {
+          include: { user: { select: { id: true, email: true, firstName: true } } },
+        },
+      },
+    });
+
+    if (!event) throw new NotFoundException('Event not found');
+    if (event.status !== 'UNDER_REVIEW')
+      throw new BadRequestException('Only events in UNDER_REVIEW status can be rejected');
+
+    await this.prisma.event.update({
+      where: { id: eventId },
+      data: {
+        status: 'DRAFT',
+        adminRejectionRemark: dto.remark,
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+      },
+    });
+
+    const hostUser = event.hostProfile.user;
+    void this.notificationsService.create(
+      hostUser.id,
+      'event_rejected',
+      'Event Not Approved',
+      `Your event "${event.title ?? 'Untitled'}" was not approved. Remark: ${dto.remark}`,
+    );
+
+    return { message: 'Event rejected successfully' };
   }
 }

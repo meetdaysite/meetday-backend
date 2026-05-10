@@ -30,6 +30,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { RejectHostDto } from './dto/reject-host.dto';
+import { RejectEventDto } from './dto/reject-event.dto';
 import { ListHostsQueryDto } from './dto/list-hosts-query.dto';
 import { ListAdminsQueryDto } from './dto/list-admins-query.dto';
 import { ListRolesQueryDto } from './dto/list-roles-query.dto';
@@ -765,5 +766,77 @@ export class AdminController {
   })
   listCategories() {
     return this.adminService.listCategoriesAdmin();
+  }
+
+  // ─── Event review endpoints ───────────────────────────────────────────────────
+
+  @Post('events/:id/approve')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Approve an event',
+    description:
+      'Approves an event that is in UNDER_REVIEW status, making it PUBLISHED and visible to attendees. ' +
+      'Records the reviewing admin and timestamp. Sends an in-app notification to the host. ' +
+      'Only SUPER_ADMIN and CITY_ADMIN can approve.',
+  })
+  @ApiParam({ name: 'id', description: 'Event UUID', example: 'event-uuid-1234' })
+  @ApiOkResponse({
+    description: 'Event approved and published.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-05-10T10:00:00.000Z',
+        data: { message: 'Event approved successfully' },
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Event not found.' })
+  @ApiBadRequestResponse({ description: 'Event is not in UNDER_REVIEW status.' })
+  approveEvent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') adminId: string,
+  ) {
+    return this.adminService.approveEvent(id, adminId);
+  }
+
+  @Post('events/:id/reject')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reject an event',
+    description:
+      'Rejects an event that is in UNDER_REVIEW status, moving it back to DRAFT so the host can edit and resubmit. ' +
+      'Stores the admin remark on the event record. Sends an in-app notification to the host with the remark. ' +
+      'Only SUPER_ADMIN and CITY_ADMIN can reject.',
+  })
+  @ApiParam({ name: 'id', description: 'Event UUID', example: 'event-uuid-1234' })
+  @ApiBody({
+    type: RejectEventDto,
+    examples: {
+      default: {
+        summary: 'Rejection with remark',
+        value: { remark: 'The event description does not meet our content guidelines. Please revise and resubmit.' },
+      },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Event rejected and moved back to DRAFT.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-05-10T10:00:00.000Z',
+        data: { message: 'Event rejected successfully' },
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Event not found.' })
+  @ApiBadRequestResponse({ description: 'Event is not in UNDER_REVIEW status.' })
+  rejectEvent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') adminId: string,
+    @Body() dto: RejectEventDto,
+  ) {
+    return this.adminService.rejectEvent(id, adminId, dto);
   }
 }
