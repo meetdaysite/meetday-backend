@@ -14,9 +14,23 @@ export class StorageController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Request a presigned S3 upload URL',
-    description:
-      'Returns a presigned PUT URL (valid 15 min) and the S3 key. ' +
-      'Upload the file directly to S3 via PUT, then pass the key in the relevant resource body.',
+    description: `Returns a presigned PUT URL (valid 15 min) and the S3 key.
+Upload the file directly to S3 using the PUT URL with the matching Content-Type header, then include the key in the relevant resource body.
+
+**Contexts**
+
+| context | resourceId | mediaType | Notes |
+|---|---|---|---|
+| \`EVENT_MEDIA\` | event UUID | required | Must own the event |
+| \`USER_AVATAR\` | — | — | Derived from JWT |
+| \`HOST_DOCUMENT\` | — | — | Must have a host profile |
+
+**Allowed contentType values:** \`image/jpeg\`, \`image/png\`, \`image/webp\`, \`video/mp4\`
+
+**S3 key paths**
+- \`EVENT_MEDIA\` → \`events/{eventId}/{mediaType}/{uuid}.ext\`
+- \`USER_AVATAR\` → \`users/{userId}/avatar/{uuid}.ext\`
+- \`HOST_DOCUMENT\` → \`hosts/{hostProfileId}/documents/{uuid}.ext\``,
   })
   @ApiOkResponse({ description: 'Presigned upload URL and key.' })
   requestUploadUrl(@GetUser('id') userId: string, @Body() dto: RequestUploadUrlDto) {
