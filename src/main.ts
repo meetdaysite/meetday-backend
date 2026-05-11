@@ -18,8 +18,8 @@ async function bootstrap() {
   });
   app.useLogger(app.get(Logger));
 
-  // Security headers — disable CSP in dev so Swagger UI loads correctly
-  app.use(helmet({ contentSecurityPolicy: isProduction }));
+  // Security headers — only in production (helmet blocks Swagger UI in dev)
+  if (isProduction) app.use(helmet());
 
   // CORS — locked to known frontend in production, permissive in dev
   app.enableCors({
@@ -51,6 +51,7 @@ async function bootstrap() {
       .setTitle('Meetday API')
       .setDescription('Meetday backend API documentation')
       .setVersion('1.0')
+      .addServer('/', 'Default')
       .addBearerAuth(
         { type: 'http', scheme: 'bearer', bearerFormat: 'Firebase JWT' },
         'firebase-token',
