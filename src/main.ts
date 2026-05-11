@@ -18,8 +18,8 @@ async function bootstrap() {
   });
   app.useLogger(app.get(Logger));
 
-  // Security headers
-  app.use(helmet());
+  // Security headers — disable CSP in dev so Swagger UI loads correctly
+  app.use(helmet({ contentSecurityPolicy: isProduction }));
 
   // CORS — locked to known frontend in production, permissive in dev
   app.enableCors({
