@@ -1,11 +1,26 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { RequestUploadUrlDto, UploadContext } from './dto/request-upload-url.dto';
 
 const PRESIGN_TTL = 900; // 15 minutes
 const PRESIGN_CACHE_TTL = 840; // cache for 14 min — always valid when served
+
+const CONTENT_TYPE_EXT: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'video/mp4': 'mp4',
+};
 
 @Injectable()
 export class StorageService {
@@ -15,6 +30,7 @@ export class StorageService {
   constructor(
     private readonly configService: ConfigService,
     private readonly redis: RedisService,
+    private readonly prisma: PrismaService,
   ) {
     this.s3 = new S3Client({
       region: configService.get<string>('s3.region'),
@@ -46,5 +62,42 @@ export class StorageService {
     );
     await this.redis.set(cacheKey, url, PRESIGN_CACHE_TTL);
     return url;
+  }
+
+  async requestUploadUrl(userId: string, dto: RequestUploadUrlDto) {
+    const ext = CONTENT_TYPE_EXT[dto.contentType];
+    let key: string;
+
+    switch (dto.context) {
+      case UploadContext.EVENT_MEDIA: {
+        if (!dto.resourceId) throw new BadRequestException('resourceId is required for EVENT_MEDIA');
+        if (!dto.mediaType) throw new BadRequestException('mediaType is required for EVENT_MEDIA');
+
+        const event = await this.prisma.event.findUnique({
+          where: { id: dto.resourceId },
+          include: { hostProfile: { select: { userId: true } } },
+        });
+        if (!event) throw new NotFoundException('Event not found');
+        if (event.hostProfile.userId !== userId) throw new ForbiddenException('You do not own this event');
+
+        key = `events/${dto.resourceId}/${dto.mediaType.toLowerCase()}/${randomUUID()}.${ext}`;
+        break;
+      }
+
+      case UploadContext.USER_AVATAR: {
+        key = `users/${userId}/avatar/${randomUUID()}.${ext}`;
+        break;
+      }
+
+      case UploadContext.HOST_DOCUMENT: {
+        const hostProfile = await this.prisma.hostProfile.findUnique({ where: { userId } });
+        if (!hostProfile) throw new NotFoundException('Host profile not found');
+        key = `hosts/${hostProfile.id}/documents/${randomUUID()}.${ext}`;
+        break;
+      }
+    }
+
+    const uploadUrl = await this.getPresignedUploadUrl(key, dto.contentType);
+    return { uploadUrl, key };
   }
 }

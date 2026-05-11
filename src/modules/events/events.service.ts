@@ -14,20 +14,12 @@ import { CreateEventDto } from './dto/create-event.dto';
 import { ListMyEventsQueryDto } from './dto/list-my-events-query.dto';
 import { BrowseEventsQueryDto } from './dto/browse-events-query.dto';
 import { CancelEventDto } from './dto/cancel-event.dto';
-import { RequestUploadUrlDto } from './dto/request-upload-url.dto';
 
 const EVENT_DETAIL_INCLUDE = {
   tickets: true,
   refundPolicy: true,
   category: { select: { id: true, name: true } },
   hostProfile: { select: { id: true, displayName: true } },
-};
-
-const CONTENT_TYPE_EXT: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'video/mp4': 'mp4',
 };
 
 @Injectable()
@@ -458,22 +450,6 @@ export class EventsService {
       throw new NotFoundException('Event not found');
 
     return this.withSignedMedia(event);
-  }
-
-  async requestUploadUrl(userId: string, eventId: string, dto: RequestUploadUrlDto) {
-    const event = await this.prisma.event.findUnique({
-      where: { id: eventId },
-      include: { hostProfile: { select: { userId: true } } },
-    });
-    if (!event) throw new NotFoundException('Event not found');
-    if (event.hostProfile.userId !== userId)
-      throw new ForbiddenException('You do not own this event');
-
-    const ext = CONTENT_TYPE_EXT[dto.contentType];
-    const key = `events/${eventId}/${dto.type.toLowerCase()}/${randomUUID()}.${ext}`;
-    const uploadUrl = await this.storageService.getPresignedUploadUrl(key, dto.contentType);
-
-    return { uploadUrl, key };
   }
 
 }
