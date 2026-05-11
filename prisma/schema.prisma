@@ -1,0 +1,701 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Role {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  description String?
+
+  users User[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("roles")
+}
+
+model User {
+  id          String  @id @default(uuid())
+  firebaseUid String  @unique
+  email       String? // null for phone-only accounts — uniqueness enforced by partial index (see migration)
+  phone       String? // null for email-only accounts — uniqueness enforced by partial index (see migration)
+  firstName   String
+  lastName    String
+  avatarUrl           String?
+  isActive            Boolean   @default(true)
+  mustCompleteProfile Boolean   @default(false)
+  deletedAt           DateTime? // soft delete — set instead of hard-deleting
+
+  roleId String
+  role   Role   @relation(fields: [roleId], references: [id])
+
+  userProfile  UserProfile?
+  hostProfile  HostProfile?  @relation("HostUser")
+  adminProfile AdminProfile?
+
+  // Back-relations for admin audit trails
+  approvedHostProfiles    HostProfile[]              @relation("HostApprovedBy")
+  subscriptionPlanChanges SubscriptionPlanHistory[]  @relation("PlanChangedBy")
+  verifiedPayoutAccounts  HostPayoutAccount[]        @relation("PayoutAccountVerifiedBy")
+  payoutAccountChanges    HostPayoutAccountHistory[] @relation("PayoutAccountChangedBy")
+
+  // Coupon back-relations
+  createdCoupons    Coupon[]            @relation("CouponCreatedBy")
+  couponRedemptions CouponRedemption[]  @relation("CouponRedemptions")
+
+  reviewedEvents Event[]         @relation("EventReviewedBy")
+
+  notifications Notification[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([roleId])
+  @@map("users")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum Gender {
+  MALE
+  FEMALE
+  NON_BINARY
+  PREFER_NOT_TO_SAY
+}
+
+enum ProfileVisibility {
+  PUBLIC
+  MEMBERS_ONLY
+  PRIVATE
+}
+
+enum HostPlan {
+  DISCOVER
+  SELL
+  COMMUNITY
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  EXPIRED
+  PAST_DUE
+}
+
+enum BillingCycle {
+  MONTHLY
+  YEARLY
+}
+
+enum HostApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum KycStatus {
+  NOT_SUBMITTED
+  PENDING
+  VERIFIED
+  FAILED
+}
+
+enum PanVerificationStatus {
+  NOT_SUBMITTED
+  PENDING
+  VERIFIED
+  FAILED
+}
+
+enum HostType {
+  INDIVIDUAL
+  BUSINESS
+}
+
+enum PayoutAccountStatus {
+  PENDING_PENNY_DROP    // Fund account created in Razorpay, awaiting penny drop result
+  PENNY_DROP_FAILED     // Razorpay penny drop failed — account invalid or unreachable
+  PENDING_ADMIN_REVIEW  // Penny drop passed, awaiting admin sign-off
+  APPROVED              // Admin approved — host can receive payouts
+  REJECTED              // Admin rejected (mismatch, fraud, compliance failure)
+  DEACTIVATED           // Soft-deleted — account closed or replaced
+}
+
+enum CouponTarget {
+  HOST
+  ATTENDEE
+  VENDOR
+}
+
+enum DiscountType {
+  PERCENTAGE  // reduce fee rate by X% of its value (e.g. 50% off 15% → 7.5%)
+  FLAT        // reduce fee rate by X percentage points (e.g. 10 off 15% → 5%)
+}
+
+// ─── User Profile ─────────────────────────────────────────────────────────────
+
+model UserProfile {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  bio         String?
+  dateOfBirth DateTime?
+  gender      Gender?
+  city        String?
+  languages   String[]
+  visibility  ProfileVisibility @default(MEMBERS_ONLY)
+
+  interests UserInterest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([city])
+  @@index([languages(ops: ArrayOps)], type: Gin)
+  @@map("user_profiles")
+}
+
+model AdminProfile {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  managedCities String[] @default([])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("admin_profiles")
+}
+
+model Category {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  description String?
+  isActive    Boolean @default(true)
+
+  userInterests            UserInterest[]
+  hostExperienceCategories HostExperienceCategory[]
+  events                   Event[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("categories")
+}
+
+model UserInterest {
+  userProfileId String
+  categoryId    String
+
+  userProfile UserProfile @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  category    Category    @relation(fields: [categoryId], references: [id])
+
+  @@id([userProfileId, categoryId])
+  @@index([categoryId])
+  @@map("user_interests")
+}
+
+// ─── Host Profile ─────────────────────────────────────────────────────────────
+
+model HostProfile {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation("HostUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  // Identity & Type
+  hostType    HostType?
+  displayName String?   // Public-facing name shown to attendees
+  legalName   String?   // Full legal name or registered company name
+
+  // Legal / Compliance (encrypted or masked)
+  panEncrypted  String?  // AES-256-GCM encrypted PAN — required for TDS on payouts
+  gstin         String?  // GST number — collected when applicable (not required at onboarding)
+
+  // Credibility & Bio
+  hostBio                     String?
+  tagline                     String?
+  languages                   String[]
+  socialLinks                 Json?     // { instagram, linkedin, youtube, website }
+  yearsOfExperience           Int?
+  totalEventsPreviouslyHosted Int?
+  portfolioLinks              String[]  // URLs to past events, press coverage, etc.
+
+  // Reach
+  operatingCities String[]  // Cities the host is willing to operate in
+
+  // Address (structured, separate table)
+  address HostAddress?
+
+  // Categories (multi - what types of experiences they host)
+  categories HostExperienceCategory[]
+
+  // KYC
+  kycStatus                KycStatus             @default(NOT_SUBMITTED)
+  kycVerifiedAt            DateTime?
+  kycFailureReason         String?
+  panVerificationStatus    PanVerificationStatus @default(NOT_SUBMITTED)
+  panVerificationReference String?               // referenceId from KYC provider initiation
+  bankVerificationStatus   PanVerificationStatus @default(NOT_SUBMITTED)
+
+  // Admin Approval
+  approvalStatus  HostApprovalStatus @default(PENDING)
+  approvedAt      DateTime?
+  approvedBy      String?
+  approvedByUser  User?              @relation("HostApprovedBy", fields: [approvedBy], references: [id])
+  rejectionReason String?
+
+  // Plan (denormalized — keep in sync via subscription lifecycle events)
+  currentPlan HostPlan @default(DISCOVER)
+
+  // Payout
+  payoutAccount HostPayoutAccount?
+
+  // Platform Metrics (denormalized)
+  totalEventsHosted Int    @default(0)
+  averageRating     Float?
+  totalReviews      Int    @default(0)
+
+  subscriptions HostSubscription[]
+  events        Event[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([approvalStatus])
+  @@index([kycStatus])
+  @@map("host_profiles")
+}
+
+model HostExperienceCategory {
+  hostProfileId String
+  categoryId    String
+
+  hostProfile HostProfile @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
+  category    Category    @relation(fields: [categoryId], references: [id])
+
+  @@id([hostProfileId, categoryId])
+  @@index([categoryId])
+  @@map("host_experience_categories")
+}
+
+model HostAddress {
+  id            String      @id @default(uuid())
+  hostProfileId String      @unique
+  hostProfile   HostProfile @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
+
+  addressLine1 String
+  addressLine2 String?
+  city         String
+  state        String
+  pincode      String
+  country      String @default("India")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("host_addresses")
+}
+
+// ─── Payout ───────────────────────────────────────────────────────────────────
+
+model HostPayoutAccount {
+  id            String      @id @default(uuid())
+  hostProfileId String      @unique
+  hostProfile   HostProfile @relation(fields: [hostProfileId], references: [id])
+
+  // Razorpay gateway identifiers (not sensitive)
+  razorpayContactId     String?
+  razorpayFundAccountId String?
+
+  // Display-safe bank details (raw account number NEVER stored — PCI-DSS)
+  maskedAccountNumber String?  // Last 4 digits only, e.g. "XXXX1234"
+  bankName            String?  // e.g. "HDFC Bank"
+  accountHolderName   String?  // Name as registered on bank account
+  accountType         String?  // "SAVINGS" | "CURRENT"
+
+  // Verification lifecycle
+  status PayoutAccountStatus @default(PENDING_PENNY_DROP)
+
+  // Penny drop (automated Razorpay verification)
+  pennyDropReference   String?
+  pennyDropInitiatedAt DateTime?
+  pennyDropCompletedAt DateTime?
+  pennyDropFailReason  String?
+
+  // Admin review (mirrors HostProfile.approvedBy pattern)
+  verifiedBy      String?
+  verifiedByUser  User?     @relation("PayoutAccountVerifiedBy", fields: [verifiedBy], references: [id])
+  adminReviewedAt DateTime?
+  rejectionReason String?
+
+  // KYC snapshot at submission time (audit — not live KYC source)
+  kycStatusAtSubmission KycStatus?
+
+  // Soft-delete — financial records must not be hard-deleted (PMLA 2002)
+  deactivatedAt      DateTime?
+  deactivationReason String?
+
+  // Audit trail
+  history HostPayoutAccountHistory[]
+
+  // Deprecated — kept for zero-downtime migration; remove after data migration
+  isVerified Boolean   @default(false)
+  verifiedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([verifiedBy])
+  @@map("host_payout_accounts")
+}
+
+model HostPayoutAccountHistory {
+  id                  String            @id @default(uuid())
+  hostPayoutAccountId String
+  hostPayoutAccount   HostPayoutAccount @relation(fields: [hostPayoutAccountId], references: [id])
+
+  // Actor — null means system/webhook-driven change (e.g. Razorpay callback)
+  changedBy     String?
+  changedByUser User?   @relation("PayoutAccountChangedBy", fields: [changedBy], references: [id])
+
+  // Status delta
+  previousStatus PayoutAccountStatus?
+  newStatus      PayoutAccountStatus?
+
+  // Display-field deltas (only non-sensitive fields logged — DPDP data minimisation)
+  previousMaskedAccountNumber String?
+  newMaskedAccountNumber      String?
+  previousBankName            String?
+  newBankName                 String?
+  previousAccountHolderName   String?
+  newAccountHolderName        String?
+
+  // Change context (RBI audit requirement)
+  changeReason String   // e.g. "ADMIN_APPROVED", "PENNY_DROP_FAILED", "BANK_ACCOUNT_UPDATED"
+  ipAddress    String?
+  userAgent    String?
+
+  createdAt DateTime @default(now())
+
+  @@index([hostPayoutAccountId])
+  @@index([changedBy])
+  @@map("host_payout_account_history")
+}
+
+// ─── Subscriptions ────────────────────────────────────────────────────────────
+
+model HostSubscription {
+  id            String      @id @default(uuid())
+  hostProfileId String
+  hostProfile   HostProfile @relation(fields: [hostProfileId], references: [id])
+
+  plan         HostPlan
+  status       SubscriptionStatus
+  billingCycle BillingCycle?
+
+  // Price locked at time of subscription
+  lockedYearlyPrice  Float?
+  lockedMonthlyPrice Float?
+  lockedFeeRate      Float
+
+  // Razorpay
+  razorpaySubscriptionId String? @unique
+  razorpayPlanId         String?
+
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+
+  cancelledAt  DateTime?
+  cancelReason String?
+
+  couponRedemption CouponRedemption?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([hostProfileId])
+  @@map("host_subscriptions")
+}
+
+model SubscriptionPlan {
+  id              String   @id @default(uuid())
+  plan            HostPlan @unique
+  yearlyPrice     Float?
+  monthlyPrice    Float?
+  platformFeeRate Float
+  isActive        Boolean  @default(true)
+
+  priceHistory SubscriptionPlanHistory[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("subscription_plans")
+}
+
+model SubscriptionPlanHistory {
+  id                 String           @id @default(uuid())
+  subscriptionPlanId String
+  subscriptionPlan   SubscriptionPlan @relation(fields: [subscriptionPlanId], references: [id])
+
+  changedBy     String
+  changedByUser User   @relation("PlanChangedBy", fields: [changedBy], references: [id])
+
+  previousYearlyPrice  Float?
+  previousMonthlyPrice Float?
+  previousFeeRate      Float?
+  newYearlyPrice       Float?
+  newMonthlyPrice      Float?
+  newFeeRate           Float?
+
+  changeReason       String   // mandatory, internal only
+  effectiveDate      DateTime
+  notificationSentAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@map("subscription_plan_history")
+}
+
+// ─── Coupons ──────────────────────────────────────────────────────────────────
+
+model Coupon {
+  id          String  @id @default(uuid())
+  code        String  @unique
+  description String?
+
+  target        CouponTarget
+  discountType  DiscountType
+  discountValue Float
+
+  maxUsages        Int? // null = unlimited total redemptions
+  usageCount       Int  @default(0)
+  maxUsagesPerUser Int? // null = unlimited per user; 1 = one-time per user
+
+  isActive   Boolean   @default(true)
+  validFrom  DateTime?
+  validUntil DateTime?
+
+  createdBy     String
+  createdByUser User   @relation("CouponCreatedBy", fields: [createdBy], references: [id])
+
+  redemptions CouponRedemption[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([code])
+  @@index([target, isActive])
+  @@map("coupons")
+}
+
+model CouponRedemption {
+  id       String @id @default(uuid())
+  couponId String
+  coupon   Coupon @relation(fields: [couponId], references: [id])
+
+  userId String
+  user   User   @relation("CouponRedemptions", fields: [userId], references: [id])
+
+  // Context — nullable; extended when attendee/vendor redemptions are added
+  hostSubscriptionId String?           @unique
+  hostSubscription   HostSubscription? @relation(fields: [hostSubscriptionId], references: [id])
+
+  originalFeeRate   Float // rate before coupon
+  discountedFeeRate Float // rate after coupon (what gets locked)
+
+  createdAt DateTime @default(now())
+
+  @@index([couponId])
+  @@index([userId])
+  @@map("coupon_redemptions")
+}
+
+// ─── Notifications ────────────────────────────────────────────────────────────
+
+model Notification {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type     String   // e.g. "host_approved", "kyc_failed", "subscription_activated"
+  title    String
+  body     String
+  isRead   Boolean   @default(false)
+  readAt   DateTime?
+  metadata Json?    // optional context: { plan, reason, billingCycle, … }
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("notifications")
+}
+
+// ─── Events ───────────────────────────────────────────────────────────────────
+
+model Event {
+  id            String  @id @default(uuid())
+  hostProfileId String
+  categoryId    String?
+
+  // Basic Info
+  title       String?
+  description String?  @db.Text
+  eventType   String?
+  languages   String[]
+  tags        String[]
+
+  // Date & Location
+  eventDate   DateTime?
+  startTime   String?
+  endTime     String?
+  venueName   String?
+  fullAddress String?
+  city        String?
+  latitude    Decimal?
+  longitude   Decimal?
+
+  // Experience Details
+  whatToExpect    Json @default("[]")
+  whoShouldAttend Json @default("[]")
+
+  // Settings
+  visibility          Visibility  @default(PUBLIC)
+  ageRestriction      String?
+  specialInstructions String?
+
+  // AI Reserved (populated by AI copilot later)
+  vibeSummary String?
+  crowdPulse  Json?
+
+  // Pricing & Fee
+  isFree            Boolean @default(false)
+  platformFeeWaived Boolean @default(false)
+
+  // Admin Review
+  adminRejectionRemark String?
+  reviewedBy           String?
+  reviewedAt           DateTime?
+  reviewedByUser       User?     @relation("EventReviewedBy", fields: [reviewedBy], references: [id])
+
+  // Cancellation
+  cancelledAt        DateTime?
+  cancellationReason String?
+
+  // Submission tracking
+  submittedAt DateTime?
+
+  // Meta
+  status    EventStatus @default(DRAFT)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  // Relations
+  hostProfile  HostProfile        @relation(fields: [hostProfileId], references: [id])
+  category     Category?          @relation(fields: [categoryId], references: [id])
+  tickets      EventTicket[]
+  media        EventMedia[]
+  refundPolicy EventRefundPolicy?
+
+  @@index([hostProfileId])
+  @@index([categoryId])
+  @@index([eventDate])
+  @@index([city])
+  @@index([status])
+  @@map("events")
+}
+
+model EventTicket {
+  id      String @id @default(uuid())
+  eventId String
+
+  name          String
+  price         Decimal
+  totalCapacity Int
+  maxPerPerson  Int?
+  description   String?
+  saleStartDate DateTime?
+  saleEndDate   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+  @@map("event_tickets")
+}
+
+model EventMedia {
+  id      String @id @default(uuid())
+  eventId String
+
+  url   String
+  type  MediaType
+  order Int       @default(0)
+
+  createdAt DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+  @@map("event_media")
+}
+
+model EventRefundPolicy {
+  id      String @id @default(uuid())
+  eventId String @unique
+
+  type          RefundType
+  cutoffHours   Int?
+  refundPercent Int?
+  refundTo      RefundTo
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@map("event_refund_policies")
+}
+
+// ─── Event Enums ──────────────────────────────────────────────────────────────
+
+enum EventStatus {
+  DRAFT
+  UNDER_REVIEW
+  PUBLISHED
+  CANCELLED
+}
+
+enum Visibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum MediaType {
+  COVER
+  GALLERY
+  VIDEO
+}
+
+enum RefundType {
+  FULL
+  PARTIAL
+  NO_REFUND
+}
+
+enum RefundTo {
+  ORIGINAL_PAYMENT
+  PLATFORM_CREDIT
+}

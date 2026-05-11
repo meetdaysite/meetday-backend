@@ -1,0 +1,26 @@
+stages:
+  - build
+
+variables:
+  DOCKER_TLS_CERTDIR: "/certs"
+  IMAGE: $CI_REGISTRY_IMAGE
+
+build-dev:
+  stage: build
+  image: docker:24
+  services:
+    - docker:24-dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    # Pull previous dev image to use as layer cache (speeds up npm ci layer etc.)
+    - docker pull $IMAGE:dev || true
+    - docker build
+        --cache-from $IMAGE:dev
+        -t $IMAGE:dev
+        -t $IMAGE:$CI_COMMIT_SHORT_SHA
+        .
+    - docker push $IMAGE:dev
+    - docker push $IMAGE:$CI_COMMIT_SHORT_SHA
+  rules:
+    - if: $CI_COMMIT_BRANCH == "dev"
