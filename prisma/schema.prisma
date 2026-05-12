@@ -218,6 +218,7 @@ model HostProfile {
   hostType    HostType?
   displayName String?   // Public-facing name shown to attendees
   legalName   String?   // Full legal name or registered company name
+  gender      Gender?
 
   // Legal / Compliance (encrypted or masked)
   panEncrypted  String?  // AES-256-GCM encrypted PAN — required for TDS on payouts

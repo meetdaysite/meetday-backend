@@ -1,6 +1,9 @@
 # compiled output
 dist
 node_modules
+prisma/seeders/*.js
+prisma/seeders/*.js.map
+prisma/seeders/*.d.ts
 
 # Logs
 logs

@@ -292,6 +292,14 @@ export class AuthService {
 
     return user;
   }
+
+  async checkPhoneExists(phone: string): Promise<{ exists: boolean }> {
+    const user = await this.prisma.user.findFirst({
+      where: { phone },
+      select: { id: true },
+    });
+    return { exists: user !== null };
+  }
 }
 
 interface ResolvedIdentity {

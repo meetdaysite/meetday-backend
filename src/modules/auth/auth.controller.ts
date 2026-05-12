@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
   ApiBadRequestResponse,
@@ -9,6 +9,7 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiQuery,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -16,6 +17,7 @@ import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { CompleteProfileDto } from './dto/complete-profile.dto';
 import { GetUser } from '../../common/decorators/get-user.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('Auth')
 @ApiBearerAuth('firebase-token')
@@ -281,5 +283,30 @@ export class AuthController {
   @ApiNotFoundResponse({ description: 'No DB record found. User must register first.' })
   getMe(@GetUser('uid') firebaseUid: string) {
     return this.authService.getMe(firebaseUid);
+  }
+
+  @Get('check-phone')
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Check if a phone number is registered',
+    description:
+      'Public endpoint — no token required. ' +
+      'Returns `{ exists: true }` if a user account with the given E.164 phone number exists, ' +
+      '`{ exists: false }` otherwise. ' +
+      'Intended for the registration screen to warn the user before they attempt to sign up.',
+  })
+  @ApiQuery({
+    name: 'phone',
+    description: 'E.164 formatted phone number, e.g. +919876543210',
+    example: '+919876543210',
+  })
+  @ApiOkResponse({
+    description: 'Lookup result.',
+    schema: { example: { exists: true } },
+  })
+  checkPhone(@Query('phone') phone: string) {
+    return this.authService.checkPhoneExists(phone);
   }
 }
