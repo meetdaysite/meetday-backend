@@ -127,6 +127,7 @@ export class AuthService {
         data: {
           userId: user.id,
           hostType: dto.hostType,
+          gender: dto.gender,
           displayName: dto.displayName,
           legalName: dto.legalName,
           panEncrypted: dto.pan ? this.cryptoService.encrypt(dto.pan) : undefined,

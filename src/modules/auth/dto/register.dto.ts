@@ -16,7 +16,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { HostType } from '@prisma/client';
+import { Gender, HostType } from '@prisma/client';
 import { HostAddressDto, SocialLinksDto } from '../../hosts/dto/apply-host.dto';
 
 export class RegisterDto {
@@ -80,6 +80,11 @@ export class RegisterDto {
   @IsOptional()
   @IsEnum(HostType)
   hostType?: HostType;
+
+  @ApiPropertyOptional({ enum: Gender, description: 'Host gender', example: 'FEMALE' })
+  @IsOptional()
+  @IsEnum(Gender)
+  gender?: Gender;
 
   @ApiPropertyOptional({
     description: 'Required when accountType is HOST. UUIDs from GET /categories.',
