@@ -452,4 +452,18 @@ export class EventsService {
     return this.withSignedMedia(event);
   }
 
+  async deleteEvent(userId: string, eventId: string): Promise<void> {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: { hostProfile: { select: { userId: true } } },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+    if (event.hostProfile.userId !== userId)
+      throw new ForbiddenException('You do not own this event');
+    if (event.status !== EventStatus.DRAFT)
+      throw new BadRequestException('Only DRAFT events can be deleted');
+
+    await this.prisma.event.delete({ where: { id: eventId } });
+  }
+
 }

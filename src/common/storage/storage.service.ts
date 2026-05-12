@@ -64,23 +64,36 @@ export class StorageService {
     return url;
   }
 
-  async requestUploadUrl(userId: string, dto: RequestUploadUrlDto) {
+  async requestUploadUrl(firebaseUid: string, dto: RequestUploadUrlDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { firebaseUid },
+      select: { id: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    const userId = user.id;
+
     const ext = CONTENT_TYPE_EXT[dto.contentType];
     let key: string;
 
     switch (dto.context) {
       case UploadContext.EVENT_MEDIA: {
-        if (!dto.resourceId) throw new BadRequestException('resourceId is required for EVENT_MEDIA');
         if (!dto.mediaType) throw new BadRequestException('mediaType is required for EVENT_MEDIA');
 
-        const event = await this.prisma.event.findUnique({
-          where: { id: dto.resourceId },
-          include: { hostProfile: { select: { userId: true } } },
-        });
-        if (!event) throw new NotFoundException('Event not found');
-        if (event.hostProfile.userId !== userId) throw new ForbiddenException('You do not own this event');
-
-        key = `events/${dto.resourceId}/${dto.mediaType.toLowerCase()}/${randomUUID()}.${ext}`;
+        if (dto.resourceId) {
+          // Uploading to an existing event — verify ownership
+          const event = await this.prisma.event.findUnique({
+            where: { id: dto.resourceId },
+            include: { hostProfile: { select: { userId: true } } },
+          });
+          if (!event) throw new NotFoundException('Event not found');
+          if (event.hostProfile.userId !== userId) throw new ForbiddenException('You do not own this event');
+          key = `events/${dto.resourceId}/${dto.mediaType.toLowerCase()}/${randomUUID()}.${ext}`;
+        } else {
+          // Pre-creation upload — scope to host profile so event ID is not required yet
+          const hostProfile = await this.prisma.hostProfile.findUnique({ where: { userId } });
+          if (!hostProfile) throw new NotFoundException('Host profile not found');
+          key = `hosts/${hostProfile.id}/event-media/${dto.mediaType.toLowerCase()}/${randomUUID()}.${ext}`;
+        }
         break;
       }
 

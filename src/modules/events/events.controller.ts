@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -16,6 +17,7 @@ import {
   ApiBearerAuth,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -161,6 +163,25 @@ export class EventsController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.eventsService.submitEvent(userId, id);
+  }
+
+  @Delete(':id')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Delete a draft event',
+    description: 'Permanently deletes an event. Only allowed when the event is in DRAFT status.',
+  })
+  @ApiNoContentResponse({ description: 'Event deleted.' })
+  @ApiForbiddenResponse({ description: 'Not the owner.' })
+  @ApiNotFoundResponse({ description: 'Event not found.' })
+  @ApiBadRequestResponse({ description: 'Only DRAFT events can be deleted.' })
+  deleteEvent(
+    @GetUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.eventsService.deleteEvent(userId, id);
   }
 
   @Patch(':id/cancel')
