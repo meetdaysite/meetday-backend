@@ -22,6 +22,8 @@ import { CreateCouponDto } from './dto/create-coupon.dto';
 import { ListCouponsQueryDto } from './dto/list-coupons-query.dto';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
+import { CreateInterestDto } from './dto/create-interest.dto';
+import { UpdateInterestDto } from './dto/update-interest.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
 import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -709,5 +711,61 @@ export class AdminService {
     ).catch((err) => this.logger.error('Failed to create event_rejected notification', err));
 
     return { message: 'Event rejected successfully' };
+  }
+
+  // ─── Interests ───────────────────────────────────────────────────────────────
+
+  private toSlug(name: string): string {
+    return name
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .trim()
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-');
+  }
+
+  async createInterest(dto: CreateInterestDto) {
+    const slug = this.toSlug(dto.name);
+    const existing = await this.prisma.interest.findFirst({
+      where: { OR: [{ name: dto.name }, { slug }] },
+    });
+    if (existing) throw new ConflictException('An interest with this name already exists');
+
+    return this.prisma.interest.create({
+      data: { name: dto.name, slug, description: dto.description, image: dto.image },
+    });
+  }
+
+  async getInterests() {
+    return this.prisma.interest.findMany({ orderBy: { name: 'asc' } });
+  }
+
+  async getInterestById(id: string) {
+    const interest = await this.prisma.interest.findUnique({ where: { id } });
+    if (!interest) throw new NotFoundException('Interest not found');
+    return interest;
+  }
+
+  async updateInterest(id: string, dto: UpdateInterestDto) {
+    const interest = await this.prisma.interest.findUnique({ where: { id } });
+    if (!interest) throw new NotFoundException('Interest not found');
+
+    const slug = dto.name ? this.toSlug(dto.name) : undefined;
+
+    if (slug && slug !== interest.slug) {
+      const conflict = await this.prisma.interest.findFirst({
+        where: { slug, NOT: { id } },
+      });
+      if (conflict) throw new ConflictException('An interest with this name already exists');
+    }
+
+    return this.prisma.interest.update({
+      where: { id },
+      data: {
+        ...(dto.name && { name: dto.name, slug }),
+        ...(dto.description !== undefined && { description: dto.description }),
+        ...(dto.image !== undefined && { image: dto.image }),
+      },
+    });
   }
 }

@@ -39,6 +39,8 @@ import { CreateCouponDto } from './dto/create-coupon.dto';
 import { ListCouponsQueryDto } from './dto/list-coupons-query.dto';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
+import { CreateInterestDto } from './dto/create-interest.dto';
+import { UpdateInterestDto } from './dto/update-interest.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
 
 @ApiTags('Admin')
@@ -914,5 +916,57 @@ export class AdminController {
     @Body() dto: RejectEventDto,
   ) {
     return this.adminService.rejectEvent(id, adminId, dto);
+  }
+
+  // ─── Interests ───────────────────────────────────────────────────────────────
+
+  @Post('interests')
+  @Roles('SUPER_ADMIN')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Create an interest',
+    description: 'Creates a new interest. Slug is auto-generated from the name. Only SUPER_ADMIN.',
+  })
+  @ApiBody({ type: CreateInterestDto })
+  @ApiCreatedResponse({ description: 'Interest created.' })
+  @ApiConflictResponse({ description: 'An interest with this name already exists.' })
+  createInterest(@Body() dto: CreateInterestDto) {
+    return this.adminService.createInterest(dto);
+  }
+
+  @Get('interests')
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({ summary: 'List all interests', description: 'Returns all interests ordered by name. Only SUPER_ADMIN.' })
+  @ApiOkResponse({ description: 'List of interests.' })
+  getInterests() {
+    return this.adminService.getInterests();
+  }
+
+  @Get('interests/:id')
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({ summary: 'Get interest by ID', description: 'Returns a single interest by UUID. Only SUPER_ADMIN.' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ description: 'Interest detail.' })
+  @ApiNotFoundResponse({ description: 'Interest not found.' })
+  getInterestById(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.getInterestById(id);
+  }
+
+  @Patch('interests/:id')
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({
+    summary: 'Update an interest',
+    description: 'Partially updates an interest. Slug is re-generated if name changes. Only SUPER_ADMIN.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiBody({ type: UpdateInterestDto })
+  @ApiOkResponse({ description: 'Interest updated.' })
+  @ApiNotFoundResponse({ description: 'Interest not found.' })
+  @ApiConflictResponse({ description: 'An interest with this name already exists.' })
+  updateInterest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateInterestDto,
+  ) {
+    return this.adminService.updateInterest(id, dto);
   }
 }

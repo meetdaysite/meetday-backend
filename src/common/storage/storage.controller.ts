@@ -24,6 +24,7 @@ Upload the file directly to S3 using the PUT URL with the matching Content-Type 
 | \`EVENT_MEDIA\` | event UUID *(optional)* | required | If provided, must own the event. If omitted (pre-creation), must have a host profile — key is scoped to the host. |
 | \`USER_AVATAR\` | — | — | Derived from JWT |
 | \`HOST_DOCUMENT\` | — | — | Must have a host profile |
+| \`INTEREST_IMAGE\` | interest UUID | — | Interest must exist. Intended for SUPER_ADMIN use. |
 
 **Allowed contentType values:** \`image/jpeg\`, \`image/png\`, \`image/webp\`, \`video/mp4\`
 
@@ -31,7 +32,8 @@ Upload the file directly to S3 using the PUT URL with the matching Content-Type 
 - \`EVENT_MEDIA\` (with resourceId) → \`events/{eventId}/{mediaType}/{uuid}.ext\`
 - \`EVENT_MEDIA\` (without resourceId) → \`hosts/{hostProfileId}/event-media/{mediaType}/{uuid}.ext\`
 - \`USER_AVATAR\` → \`users/{userId}/avatar/{uuid}.ext\`
-- \`HOST_DOCUMENT\` → \`hosts/{hostProfileId}/documents/{uuid}.ext\``,
+- \`HOST_DOCUMENT\` → \`hosts/{hostProfileId}/documents/{uuid}.ext\`
+- \`INTEREST_IMAGE\` → \`interests/{interestId}/{uuid}.ext\``,
   })
   @ApiOkResponse({ description: 'Presigned upload URL and key.' })
   requestUploadUrl(@GetUser('uid') firebaseUid: string, @Body() dto: RequestUploadUrlDto) {

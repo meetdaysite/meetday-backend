@@ -108,6 +108,14 @@ export class StorageService {
         key = `hosts/${hostProfile.id}/documents/${randomUUID()}.${ext}`;
         break;
       }
+
+      case UploadContext.INTEREST_IMAGE: {
+        if (!dto.resourceId) throw new BadRequestException('resourceId (interest UUID) is required for INTEREST_IMAGE');
+        const interest = await this.prisma.interest.findUnique({ where: { id: dto.resourceId } });
+        if (!interest) throw new NotFoundException('Interest not found');
+        key = `interests/${dto.resourceId}/${randomUUID()}.${ext}`;
+        break;
+      }
     }
 
     const uploadUrl = await this.getPresignedUploadUrl(key, dto.contentType);
