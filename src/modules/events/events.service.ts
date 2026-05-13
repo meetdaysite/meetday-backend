@@ -314,12 +314,20 @@ export class EventsService {
           status: true,
           eventDate: true,
           city: true,
+          venueName: true,
           isFree: true,
           adminRejectionRemark: true,
           submittedAt: true,
           createdAt: true,
           category: { select: { id: true, name: true } },
-          _count: { select: { tickets: true } },
+          media: {
+            where: { type: 'COVER' },
+            select: { url: true },
+            take: 1,
+          },
+          tickets: {
+            select: { totalCapacity: true, price: true },
+          },
         },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
@@ -328,7 +336,26 @@ export class EventsService {
       this.prisma.event.count({ where }),
     ]);
 
-    return { events, total, page, limit };
+    const enriched = await Promise.all(
+      events.map(async (e) => {
+        const cover = e.media[0];
+        const totalCapacity = e.tickets.reduce((sum, t) => sum + t.totalCapacity, 0);
+        const prices = e.tickets.map((t) => Number(t.price)).filter((p) => p > 0);
+        const startingPrice = prices.length ? Math.min(...prices) : null;
+
+        const { media: _media, tickets: _tickets, ...rest } = e;
+        return {
+          ...rest,
+          coverImageUrl: cover
+            ? await this.storageService.getPresignedDownloadUrl(cover.url)
+            : null,
+          totalCapacity,
+          startingPrice,
+        };
+      }),
+    );
+
+    return { events: enriched, total, page, limit };
   }
 
   async getMyEventById(userId: string, eventId: string) {
