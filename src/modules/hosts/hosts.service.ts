@@ -22,6 +22,7 @@ import { PanWebhookDto } from './dto/pan-webhook.dto';
 import { BankWebhookDto } from './dto/bank-webhook.dto';
 import { UpgradeSubscriptionDto } from './dto/upgrade-subscription.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { StorageService } from '../../common/storage/storage.service';
 
 @Injectable()
 export class HostsService {
@@ -35,6 +36,7 @@ export class HostsService {
     private readonly pennyDropService: PennyDropService,
     @InjectQueue('mail') private readonly mailQueue: Queue,
     private readonly notificationsService: NotificationsService,
+    private readonly storageService: StorageService,
   ) {}
 
   async applyAsHost(userId: string, dto: ApplyHostDto) {
@@ -117,14 +119,20 @@ export class HostsService {
         categories: { include: { category: true } },
         address: true,
         subscriptions: { orderBy: { createdAt: 'desc' }, take: 1 },
+        user: { select: { avatarUrl: true } },
       },
     });
     if (!profile) throw new NotFoundException('Host profile not found');
 
-    const { panEncrypted, ...rest } = profile;
+    const { panEncrypted, user, ...rest } = profile;
+    const avatarUrl = user.avatarUrl
+      ? await this.storageService.getPresignedDownloadUrl(user.avatarUrl)
+      : null;
+
     return {
       ...rest,
       pan: panEncrypted ? this.cryptoService.decrypt(panEncrypted) : null,
+      avatarUrl,
     };
   }
 
@@ -149,7 +157,14 @@ export class HostsService {
       ]);
     }
 
-    const { categoryIds: _, address, pan, ...fields } = dto;
+    const { categoryIds: _, address, pan, avatarUrl, ...fields } = dto;
+
+    if (avatarUrl !== undefined) {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { avatarUrl },
+      });
+    }
 
     return this.prisma.hostProfile.update({
       where: { id: profile.id },

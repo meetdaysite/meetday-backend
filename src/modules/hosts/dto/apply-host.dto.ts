@@ -171,6 +171,14 @@ export class ApplyHostDto {
   @IsUrl({}, { each: true })
   portfolioLinks?: string[];
 
+  @ApiPropertyOptional({
+    description: 'S3 key for the host avatar, returned from POST /storage/upload-url with context USER_AVATAR.',
+    example: 'users/user-uuid/avatar/abc123.jpg',
+  })
+  @IsOptional()
+  @IsString()
+  avatarUrl?: string;
+
   @ApiProperty({
     type: [String],
     description: 'At least one category UUID required. Get IDs from GET /categories.',

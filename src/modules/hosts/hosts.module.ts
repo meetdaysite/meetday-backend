@@ -10,9 +10,10 @@ import { PennyDropService } from './penny-drop.service';
 import { MailProcessor } from './processors/mail.processor';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { KYC_PROVIDER } from './interfaces/kyc-provider.interface';
+import { StorageModule } from '../../common/storage/storage.module';
 
 @Module({
-  imports: [BullModule.registerQueue({ name: 'mail' }), NotificationsModule],
+  imports: [BullModule.registerQueue({ name: 'mail' }), NotificationsModule, StorageModule],
   controllers: [HostsController],
   providers: [
     HostsService,
