@@ -57,6 +57,8 @@ model User {
 
   notifications Notification[]
 
+  interestAffinities UserInterestAffinity[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -186,10 +188,25 @@ model Interest {
   description String?
   image       String?
 
+  userAffinities UserInterestAffinity[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("interests")
+}
+
+model UserInterestAffinity {
+  userId     String
+  interestId String
+  affinity   InterestAffinity
+
+  user     User     @relation(fields: [userId],     references: [id], onDelete: Cascade)
+  interest Interest @relation(fields: [interestId], references: [id], onDelete: Cascade)
+
+  @@id([userId, interestId])
+  @@index([interestId])
+  @@map("user_interest_affinities")
 }
 
 model Category {
@@ -713,4 +730,10 @@ enum RefundType {
 enum RefundTo {
   ORIGINAL_PAYMENT
   PLATFORM_CREDIT
+}
+
+enum InterestAffinity {
+  LIKED
+  DISLIKED
+  OPEN_TO
 }
