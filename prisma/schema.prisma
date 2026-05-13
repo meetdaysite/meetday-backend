@@ -39,8 +39,8 @@ model User {
   roleId String
   role   Role   @relation(fields: [roleId], references: [id])
 
-  userProfile  UserProfile?
-  hostProfile  HostProfile?  @relation("HostUser")
+  attendeeProfile AttendeeProfile?
+  hostProfile     HostProfile?  @relation("HostUser")
   adminProfile AdminProfile?
 
   // Back-relations for admin audit trails
@@ -144,28 +144,27 @@ enum DiscountType {
   FLAT        // reduce fee rate by X percentage points (e.g. 10 off 15% → 5%)
 }
 
-// ─── User Profile ─────────────────────────────────────────────────────────────
+// ─── Attendee Profile ─────────────────────────────────────────────────────────
 
-model UserProfile {
+model AttendeeProfile {
   id     String @id @default(uuid())
   userId String @unique
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  username    String?           @unique
   bio         String?
-  dateOfBirth DateTime?
-  gender      Gender?
   city        String?
-  languages   String[]
-  visibility  ProfileVisibility @default(MEMBERS_ONLY)
-
-  interests UserInterest[]
+  ageRange    AgeRange?
+  profession  String?
+  vibeType    VibeType?
+  socialStyle SocialStyle?
+  privacy     ProfileVisibility @default(MEMBERS_ONLY)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([city])
-  @@index([languages(ops: ArrayOps)], type: Gin)
-  @@map("user_profiles")
+  @@map("attendee_profiles")
 }
 
 model AdminProfile {
@@ -215,7 +214,6 @@ model Category {
   description String?
   isActive    Boolean @default(true)
 
-  userInterests            UserInterest[]
   hostExperienceCategories HostExperienceCategory[]
   events                   Event[]
 
@@ -225,17 +223,6 @@ model Category {
   @@map("categories")
 }
 
-model UserInterest {
-  userProfileId String
-  categoryId    String
-
-  userProfile UserProfile @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
-  category    Category    @relation(fields: [categoryId], references: [id])
-
-  @@id([userProfileId, categoryId])
-  @@index([categoryId])
-  @@map("user_interests")
-}
 
 // ─── Host Profile ─────────────────────────────────────────────────────────────
 
@@ -736,4 +723,26 @@ enum InterestAffinity {
   LIKED
   DISLIKED
   OPEN_TO
+}
+
+enum AgeRange {
+  UNDER_18
+  AGE_18_24
+  AGE_25_34
+  AGE_35_44
+  AGE_45_54
+  AGE_55_PLUS
+}
+
+enum VibeType {
+  LIFE_OF_PARTY
+  CHILL_OBSERVING
+  HERE_TO_CONNECT
+  OPEN_TO_WHATEVER
+}
+
+enum SocialStyle {
+  SOLO_EXPLORER
+  OPEN_TO_MEETING
+  BRINGING_GANG
 }

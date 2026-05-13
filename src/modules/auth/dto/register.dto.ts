@@ -16,7 +16,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Gender, HostType } from '@prisma/client';
+import { Gender, HostType, SocialStyle, VibeType } from '@prisma/client';
 import { HostAddressDto, SocialLinksDto } from '../../hosts/dto/apply-host.dto';
 
 export class RegisterDto {
@@ -69,6 +69,18 @@ export class RegisterDto {
   @IsOptional()
   @IsEnum(['USER', 'HOST'], { message: 'accountType must be USER or HOST' })
   accountType?: 'USER' | 'HOST' = 'USER';
+
+  // ── Attendee-specific fields (only used when accountType === 'USER') ─────────
+
+  @ApiPropertyOptional({ enum: VibeType, description: 'How you typically show up at events.', example: 'HERE_TO_CONNECT' })
+  @IsOptional()
+  @IsEnum(VibeType)
+  vibeType?: VibeType;
+
+  @ApiPropertyOptional({ enum: SocialStyle, description: 'How you prefer to attend events.', example: 'OPEN_TO_MEETING' })
+  @IsOptional()
+  @IsEnum(SocialStyle)
+  socialStyle?: SocialStyle;
 
   // ── Host-specific fields (only used when accountType === 'HOST') ─────────────
 

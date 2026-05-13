@@ -38,7 +38,10 @@ export class AuthController {
       '- `password` (email/password) — email from token, firstName + lastName required in body\n' +
       '- `phone` — phone from token, firstName + lastName required in body; **for HOST registration, `email` must also be provided in the body** (phone tokens carry no email, but hosts need one for transactional mail)\n' +
       '- `google.com` / `apple.com` — email + displayName from token, firstName + lastName optional (token name used as fallback)\n\n' +
-      '**accountType: USER** — Creates a standard attendee account.\n\n' +
+      '**accountType: USER** — Creates a standard attendee account. ' +
+      'Optionally accepts `vibeType` and `socialStyle` to seed the attendee profile at registration time — ' +
+      'useful for onboarding flows that ask these questions upfront. ' +
+      'All other profile fields (username, bio, city, etc.) are set later via `POST /attendee/profile`.\n\n' +
       '**accountType: HOST** — Creates the user with the HOST role and atomically creates a ' +
       'HostProfile (kycStatus: NOT_SUBMITTED, approvalStatus: PENDING). ' +
       '`categoryIds` and `hostType` are required. `email` is required when the Firebase token carries no email (phone-OTP sign-ups).',
@@ -47,12 +50,14 @@ export class AuthController {
     type: RegisterDto,
     examples: {
       registerAsUser: {
-        summary: 'Register as a regular user',
+        summary: 'Register as a regular user (phone OTP)',
         value: {
           firstName: 'Rahul',
           lastName: 'Sharma',
           phone: '+919876543210',
           accountType: 'USER',
+          vibeType: 'HERE_TO_CONNECT',
+          socialStyle: 'OPEN_TO_MEETING',
         },
       },
       registerAsHost: {
@@ -99,10 +104,10 @@ export class AuthController {
             timestamp: '2026-04-08T10:00:00.000Z',
             data: {
               id: 'user-uuid',
-              email: 'rahul.sharma@example.com',
+              email: null,
+              phone: '+919876543210',
               firstName: 'Rahul',
               lastName: 'Sharma',
-              phone: '+919876543210',
               avatarUrl: null,
               isActive: true,
               role: { name: 'USER' },
@@ -273,7 +278,7 @@ export class AuthController {
           avatarUrl: null,
           isActive: true,
           role: { name: 'USER' },
-          userProfile: null,
+          attendeeProfile: null,
           createdAt: '2026-04-08T10:00:00.000Z',
           updatedAt: '2026-04-08T10:00:00.000Z',
         },

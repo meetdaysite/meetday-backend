@@ -57,6 +57,16 @@ export class AuthService {
         lastName: resolved.lastName,
         avatarUrl: resolved.avatarUrl,
         roleId: userRole.id,
+        ...(dto.vibeType || dto.socialStyle
+          ? {
+              attendeeProfile: {
+                create: {
+                  vibeType: dto.vibeType,
+                  socialStyle: dto.socialStyle,
+                },
+              },
+            }
+          : {}),
       },
       select: {
         id: true,
@@ -281,7 +291,7 @@ export class AuthService {
         isActive: true,
         mustCompleteProfile: true,
         role: { select: { name: true } },
-        userProfile: true,
+        attendeeProfile: true,
         createdAt: true,
         updatedAt: true,
       },
