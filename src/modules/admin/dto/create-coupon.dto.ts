@@ -5,6 +5,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   MaxLength,
   Min,
@@ -95,4 +96,14 @@ export class CreateCouponDto {
   @IsOptional()
   @IsDateString()
   validUntil?: string;
+
+  @ApiPropertyOptional({
+    example: 'event-uuid',
+    description:
+      'Restrict this coupon to a specific event. Only valid when target is ATTENDEE. ' +
+      'Omit for a platform-wide code usable on any event.',
+  })
+  @IsOptional()
+  @IsUUID('4')
+  eventId?: string;
 }

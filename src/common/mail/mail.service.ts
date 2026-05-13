@@ -38,6 +38,27 @@ export class MailService {
     }
   }
 
+  async sendTicketConfirmation(to: string, eventTitle: string, pdfBuffer: Buffer): Promise<void> {
+    try {
+      await this.transporter.sendMail({
+        from: this.from,
+        to,
+        subject: `Your tickets for ${eventTitle} — Meetday`,
+        html: `<p>Hi there,</p><p>Your booking is confirmed! Find your tickets attached as a PDF.</p><p>See you at the event!</p><p>— The Meetday Team</p>`,
+        attachments: [
+          {
+            filename: 'tickets.pdf',
+            content: pdfBuffer,
+            contentType: 'application/pdf',
+          },
+        ],
+      });
+      this.logger.log(`Ticket confirmation email sent to ${to}`);
+    } catch (error) {
+      this.logger.error(`Failed to send ticket confirmation to ${to}: ${(error as Error).message}`);
+    }
+  }
+
   async sendKycFailed(to: string, hostName: string, reason: string | null): Promise<void> {
     await this.sendMail(to, 'KYC Verification Failed — Meetday', kycFailedTemplate(hostName, reason));
   }

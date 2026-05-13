@@ -376,6 +376,7 @@ export class AdminService {
         isActive: true,
         validFrom: dto.validFrom ? new Date(dto.validFrom) : undefined,
         validUntil: dto.validUntil ? new Date(dto.validUntil) : undefined,
+        eventId: dto.eventId ?? null,
         createdBy: creatingAdminId,
       },
     });

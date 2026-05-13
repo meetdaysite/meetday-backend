@@ -58,6 +58,7 @@ model User {
   notifications Notification[]
 
   interestAffinities UserInterestAffinity[]
+  orders             Order[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -524,13 +525,19 @@ model Coupon {
   createdBy     String
   createdByUser User   @relation("CouponCreatedBy", fields: [createdBy], references: [id])
 
-  redemptions CouponRedemption[]
+  // Event-specific coupon (null = platform-wide, applies to any event)
+  eventId String?
+  event   Event?  @relation("EventCoupons", fields: [eventId], references: [id])
+
+  redemptions    CouponRedemption[]
+  orderUsages    Order[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([code])
   @@index([target, isActive])
+  @@index([eventId])
   @@map("coupons")
 }
 
@@ -642,6 +649,8 @@ model Event {
   tickets      EventTicket[]
   media        EventMedia[]
   refundPolicy EventRefundPolicy?
+  orders       Order[]
+  coupons      Coupon[]           @relation("EventCoupons")
 
   @@index([hostProfileId])
   @@index([categoryId])
@@ -658,6 +667,7 @@ model EventTicket {
   name          String
   price         Decimal
   totalCapacity Int
+  soldCount     Int     @default(0) // held (PENDING) + sold (CONFIRMED); authoritative availability
   maxPerPerson  Int?
   description   String?
   saleStartDate DateTime?
@@ -666,7 +676,8 @@ model EventTicket {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  event      Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
 
   @@index([eventId])
   @@map("event_tickets")
@@ -759,4 +770,88 @@ enum SocialStyle {
   SOLO_EXPLORER
   OPEN_TO_MEETING
   BRINGING_GANG
+}
+
+// ─── Orders ───────────────────────────────────────────────────────────────────
+
+model Order {
+  id        String @id @default(uuid())
+  bookingId String @unique // human-readable ID shown on ticket e.g. MDAY-7X9K-3PL2
+  userId    String
+  eventId   String
+
+  status OrderStatus @default(PENDING_PAYMENT)
+
+  // Financials — snapshotted at creation, never recomputed from live data
+  subtotal       Decimal
+  platformFee    Decimal
+  taxAmount      Decimal
+  totalAmount    Decimal
+
+  // Promo
+  couponId       String?
+  discountAmount Decimal @default(0)
+
+  // Razorpay — nullable until payment is wired in
+  razorpayOrderId   String? @unique
+  razorpayPaymentId String? @unique
+
+  confirmedAt        DateTime?
+  cancelledAt        DateTime?
+  cancellationReason String?
+
+  user   User    @relation(fields: [userId], references: [id])
+  event  Event   @relation(fields: [eventId], references: [id])
+  coupon Coupon? @relation(fields: [couponId], references: [id])
+  items  OrderItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([eventId])
+  @@index([status])
+  @@index([couponId])
+  @@map("orders")
+}
+
+model OrderItem {
+  id      String @id @default(uuid())
+  orderId String
+
+  ticketId  String
+  quantity  Int
+  unitPrice Decimal // snapshot — price at time of purchase
+
+  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  ticket    EventTicket @relation(fields: [ticketId], references: [id])
+  attendees OrderAttendee[]
+
+  @@index([orderId])
+  @@index([ticketId])
+  @@map("order_items")
+}
+
+model OrderAttendee {
+  id          String @id @default(uuid())
+  orderItemId String
+
+  fullName    String
+  email       String
+  isLead      Boolean  @default(false) // true = the buyer themselves
+  ticketCode  String   @unique @default(uuid()) // value encoded in QR code
+  checkedInAt DateTime?
+
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  @@index([orderItemId])
+  @@index([ticketCode])
+  @@map("order_attendees")
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT  // order created, awaiting payment (expires after 15 min)
+  CONFIRMED        // payment verified
+  CANCELLED        // cancelled by user or payment timeout
+  REFUNDED         // refund processed
 }

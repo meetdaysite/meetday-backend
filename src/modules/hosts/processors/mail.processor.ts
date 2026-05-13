@@ -87,4 +87,5 @@ export class MailProcessor {
       this.logger.error(`Failed to process event-rejected mail job: ${(error as Error).message}`);
     }
   }
+
 }
