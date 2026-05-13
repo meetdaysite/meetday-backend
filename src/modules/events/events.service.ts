@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { EventStatus, Visibility } from '@prisma/client';
+import { EventStatus, Prisma, Visibility } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -398,21 +398,50 @@ export class EventsService {
   async browseEvents(query: BrowseEventsQueryDto) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
+    const sortOrder = query.sortOrder ?? 'asc';
 
-    const where: any = {
+    // Resolve interest slugs → category IDs via InterestCategory mapping
+    let resolvedCategoryIds: string[] | undefined;
+    if (query.interestSlugs?.length) {
+      const interests = await this.prisma.interest.findMany({
+        where: { slug: { in: query.interestSlugs } },
+        include: { categoryMappings: { select: { categoryId: true } } },
+      });
+      resolvedCategoryIds = [...new Set(interests.flatMap((i) => i.categoryMappings.map((m) => m.categoryId)))];
+    }
+
+    // Union direct categoryId with interest-resolved category IDs
+    const allCategoryIds = [
+      ...(query.categoryId ? [query.categoryId] : []),
+      ...(resolvedCategoryIds ?? []),
+    ];
+    const categoryFilter = allCategoryIds.length
+      ? { categoryId: { in: [...new Set(allCategoryIds)] } }
+      : {};
+
+    // Default to upcoming events; respect explicit dateFrom if provided
+    const dateFilter = {
+      eventDate: {
+        gte: query.dateFrom ? new Date(query.dateFrom) : new Date(),
+        ...(query.dateTo && { lte: new Date(query.dateTo) }),
+      },
+    };
+
+    const where: Prisma.EventWhereInput = {
       status: EventStatus.PUBLISHED,
       visibility: Visibility.PUBLIC,
-      ...(query.city && { city: { contains: query.city, mode: 'insensitive' } }),
-      ...(query.categoryId && { categoryId: query.categoryId }),
+      ...categoryFilter,
+      ...dateFilter,
+      ...(query.city && { city: { contains: query.city, mode: Prisma.QueryMode.insensitive } }),
       ...(query.isFree !== undefined && { isFree: query.isFree }),
-      ...(query.search && { title: { contains: query.search, mode: 'insensitive' } }),
-      ...((query.dateFrom || query.dateTo) && {
-        eventDate: {
-          ...(query.dateFrom && { gte: new Date(query.dateFrom) }),
-          ...(query.dateTo && { lte: new Date(query.dateTo) }),
-        },
-      }),
+      ...(query.search && { title: { contains: query.search, mode: Prisma.QueryMode.insensitive } }),
     };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const orderBy: any =
+      query.sortBy === 'price'
+        ? { tickets: { _min: { price: sortOrder } } }
+        : { eventDate: sortOrder };
 
     const [events, total] = await Promise.all([
       this.prisma.event.findMany({
@@ -423,34 +452,34 @@ export class EventsService {
           eventType: true,
           eventDate: true,
           startTime: true,
-          endTime: true,
-          city: true,
           venueName: true,
-          isFree: true,
-          languages: true,
           tags: true,
           category: { select: { id: true, name: true } },
-          hostProfile: { select: { id: true, displayName: true, averageRating: true } },
           media: { where: { type: 'COVER' }, select: { url: true }, take: 1 },
-          _count: { select: { tickets: true } },
+          tickets: { select: { price: true } },
         },
-        orderBy: { eventDate: 'asc' },
+        orderBy,
         skip: (page - 1) * limit,
         take: limit,
       }),
       this.prisma.event.count({ where }),
     ]);
 
-    const signedEvents = await Promise.all(
-      events.map(async (e) => ({
-        ...e,
-        media: await Promise.all(
-          e.media.map(async (m) => ({ ...m, url: await this.storageService.getPresignedDownloadUrl(m.url) })),
-        ),
-      })),
+    const enriched = await Promise.all(
+      events.map(async (e) => {
+        const cover = e.media[0];
+        const prices = e.tickets.map((t) => Number(t.price)).filter((p) => p > 0);
+        const startingPrice = prices.length ? Math.min(...prices) : null;
+        const { media: _media, tickets: _tickets, ...rest } = e;
+        return {
+          ...rest,
+          coverImageUrl: cover ? await this.storageService.getPresignedDownloadUrl(cover.url) : null,
+          startingPrice,
+        };
+      }),
     );
 
-    return { events: signedEvents, total, page, limit };
+    return { events: enriched, total, page, limit };
   }
 
   async getPublicEventById(eventId: string) {
