@@ -364,12 +364,13 @@ export class EventsService {
       include: {
         ...EVENT_DETAIL_INCLUDE,
         hostProfile: { select: { id: true, displayName: true, userId: true } },
+        media: { orderBy: { order: 'asc' } },
       },
     });
     if (!event) throw new NotFoundException('Event not found');
     if (event.hostProfile.userId !== userId)
       throw new ForbiddenException('You do not own this event');
-    return event;
+    return this.withSignedMedia(event);
   }
 
   async cancelEvent(userId: string, eventId: string, dto: CancelEventDto) {
