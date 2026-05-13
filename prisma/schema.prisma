@@ -187,7 +187,8 @@ model Interest {
   description String?
   image       String?
 
-  userAffinities UserInterestAffinity[]
+  userAffinities   UserInterestAffinity[]
+  categoryMappings InterestCategory[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -214,6 +215,7 @@ model Category {
   description String?
   isActive    Boolean @default(true)
 
+  interestMappings         InterestCategory[]
   hostExperienceCategories HostExperienceCategory[]
   events                   Event[]
 
@@ -223,6 +225,18 @@ model Category {
   @@map("categories")
 }
 
+
+model InterestCategory {
+  interestId String
+  categoryId String
+
+  interest Interest  @relation(fields: [interestId], references: [id], onDelete: Cascade)
+  category Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([interestId, categoryId])
+  @@index([categoryId])
+  @@map("interest_categories")
+}
 
 // ─── Host Profile ─────────────────────────────────────────────────────────────
 
