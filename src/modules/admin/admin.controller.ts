@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -41,6 +42,7 @@ import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { CreateInterestDto } from './dto/create-interest.dto';
 import { UpdateInterestDto } from './dto/update-interest.dto';
+import { SetInterestCategoriesDto } from './dto/set-interest-categories.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
 
 @ApiTags('Admin')
@@ -968,5 +970,22 @@ export class AdminController {
     @Body() dto: UpdateInterestDto,
   ) {
     return this.adminService.updateInterest(id, dto);
+  }
+
+  @Put('interests/:id/categories')
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({
+    summary: 'Replace category mappings for an interest',
+    description: 'Full replace — existing mappings are deleted and replaced with the provided list. Pass an empty array to clear all mappings. Duplicate categoryIds in the request are ignored.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiBody({ type: SetInterestCategoriesDto })
+  @ApiOkResponse({ description: 'Interest with updated category mappings.' })
+  @ApiNotFoundResponse({ description: 'Interest not found.' })
+  setInterestCategories(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetInterestCategoriesDto,
+  ) {
+    return this.adminService.setInterestCategories(id, dto.categoryIds);
   }
 }

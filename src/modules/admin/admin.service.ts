@@ -737,13 +737,43 @@ export class AdminService {
   }
 
   async getInterests() {
-    return this.prisma.interest.findMany({ orderBy: { name: 'asc' } });
+    return this.prisma.interest.findMany({
+      orderBy: { name: 'asc' },
+      include: {
+        categoryMappings: {
+          include: { category: { select: { id: true, name: true } } },
+        },
+      },
+    });
   }
 
   async getInterestById(id: string) {
-    const interest = await this.prisma.interest.findUnique({ where: { id } });
+    const interest = await this.prisma.interest.findUnique({
+      where: { id },
+      include: {
+        categoryMappings: {
+          include: { category: { select: { id: true, name: true } } },
+        },
+      },
+    });
     if (!interest) throw new NotFoundException('Interest not found');
     return interest;
+  }
+
+  async setInterestCategories(id: string, categoryIds: string[]) {
+    const interest = await this.prisma.interest.findUnique({ where: { id } });
+    if (!interest) throw new NotFoundException('Interest not found');
+
+    const uniqueCategoryIds = [...new Set(categoryIds)];
+
+    await this.prisma.$transaction([
+      this.prisma.interestCategory.deleteMany({ where: { interestId: id } }),
+      this.prisma.interestCategory.createMany({
+        data: uniqueCategoryIds.map((categoryId) => ({ interestId: id, categoryId })),
+      }),
+    ]);
+
+    return this.getInterestById(id);
   }
 
   async updateInterest(id: string, dto: UpdateInterestDto) {
