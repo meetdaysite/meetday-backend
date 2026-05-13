@@ -5,9 +5,10 @@ import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { ReviewsModule } from '../reviews/reviews.module';
 
 @Module({
-  imports: [BullModule.registerQueue({ name: 'mail' }), ConfigModule, NotificationsModule],
+  imports: [BullModule.registerQueue({ name: 'mail' }), ConfigModule, NotificationsModule, ReviewsModule],
   controllers: [AdminController],
   providers: [AdminService, RolesGuard],
   exports: [AdminService],

@@ -7,6 +7,7 @@ export enum UploadContext {
   USER_AVATAR = 'USER_AVATAR',
   HOST_DOCUMENT = 'HOST_DOCUMENT',
   INTEREST_IMAGE = 'INTEREST_IMAGE',
+  REVIEW_PHOTO = 'REVIEW_PHOTO',
 }
 
 const ALLOWED_CONTENT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'video/mp4'] as const;

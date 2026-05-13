@@ -59,6 +59,7 @@ model User {
 
   interestAffinities UserInterestAffinity[]
   orders             Order[]
+  reviews            EventReview[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -651,6 +652,7 @@ model Event {
   refundPolicy EventRefundPolicy?
   orders       Order[]
   coupons      Coupon[]           @relation("EventCoupons")
+  reviews      EventReview[]
 
   @@index([hostProfileId])
   @@index([categoryId])
@@ -804,6 +806,7 @@ model Order {
   event  Event   @relation(fields: [eventId], references: [id])
   coupon Coupon? @relation(fields: [couponId], references: [id])
   items  OrderItem[]
+  review EventReview?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -854,4 +857,55 @@ enum OrderStatus {
   CONFIRMED        // payment verified
   CANCELLED        // cancelled by user or payment timeout
   REFUNDED         // refund processed
+}
+
+// ─── Reviews ──────────────────────────────────────────────────────────────────
+
+model EventReview {
+  id      String @id @default(uuid())
+  eventId String
+  userId  String
+  orderId String @unique // one review per order; also enforces one per user+event via @@unique below
+
+  rating     Int      // 1–5
+  highlights String[] // e.g. ["GREAT_MUSIC", "GOOD_CROWD"]
+  body       String?  // optional written review, max 800 chars
+  isVisible  Boolean  @default(true) // admin can hide
+
+  photos ReviewPhoto[]
+
+  event Event @relation(fields: [eventId], references: [id])
+  user  User  @relation(fields: [userId],  references: [id])
+  order Order @relation(fields: [orderId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, eventId])
+  @@index([eventId])
+  @@index([userId])
+  @@map("event_reviews")
+}
+
+model ReviewPhoto {
+  id       String @id @default(uuid())
+  reviewId String
+
+  key            String              // S3 key
+  approvalStatus PhotoApprovalStatus @default(PENDING)
+  approvedAt     DateTime?
+  rejectedAt     DateTime?
+
+  review EventReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([reviewId])
+  @@map("review_photos")
+}
+
+enum PhotoApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }

@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseIntPipe,
   ParseUUIDPipe,
   Patch,
   Post,
@@ -28,6 +29,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { EventsService } from './events.service';
+import { ReviewsService } from '../reviews/reviews.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { ListMyEventsQueryDto } from './dto/list-my-events-query.dto';
 import { BrowseEventsQueryDto } from './dto/browse-events-query.dto';
@@ -37,7 +39,10 @@ import { CancelEventDto } from './dto/cancel-event.dto';
 @ApiBearerAuth('firebase-token')
 @Controller('events')
 export class EventsController {
-  constructor(private readonly eventsService: EventsService) {}
+  constructor(
+    private readonly eventsService: EventsService,
+    private readonly reviewsService: ReviewsService,
+  ) {}
 
   // ─── Public endpoints ──────────────────────────────────────────────────────
 
@@ -52,6 +57,18 @@ export class EventsController {
   @ApiOkResponse({ description: 'Paginated list of published events.' })
   browseEvents(@Query() query: BrowseEventsQueryDto) {
     return this.eventsService.browseEvents(query);
+  }
+
+  @Get(':id/reviews')
+  @Public()
+  @ApiOperation({ summary: 'Get reviews for a published event' })
+  @ApiOkResponse({ description: 'Paginated reviews with average rating.' })
+  getEventReviews(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('page', new ParseIntPipe({ optional: true })) page?: number,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+  ) {
+    return this.reviewsService.getEventReviews(id, page, limit);
   }
 
   @Get(':id/public')

@@ -116,6 +116,11 @@ export class StorageService {
         key = `interests/${dto.resourceId}/${randomUUID()}.${ext}`;
         break;
       }
+
+      case UploadContext.REVIEW_PHOTO: {
+        key = `users/${userId}/review-photos/${randomUUID()}.${ext}`;
+        break;
+      }
     }
 
     const uploadUrl = await this.getPresignedUploadUrl(key, dto.contentType);

@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseIntPipe,
   ParseUUIDPipe,
   Patch,
   Post,
@@ -27,6 +28,7 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
+import { ReviewsService } from '../reviews/reviews.service';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
@@ -53,7 +55,10 @@ import { ListEventsQueryDto } from './dto/list-events-query.dto';
 @ApiForbiddenResponse({ description: 'Authenticated user does not have a required admin role' })
 @Controller('admin')
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly reviewsService: ReviewsService,
+  ) {}
 
   @Get('admins')
   @Roles('SUPER_ADMIN')
@@ -987,5 +992,26 @@ export class AdminController {
     @Body() dto: SetInterestCategoriesDto,
   ) {
     return this.adminService.setInterestCategories(id, dto.categoryIds);
+  }
+
+  // ─── Reviews ──────────────────────────────────────────────────────────────
+
+  @Get('reviews')
+  @ApiOperation({ summary: 'List all reviews with moderation status' })
+  listReviews(
+    @Query('page', new ParseIntPipe({ optional: true })) page?: number,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+  ) {
+    return this.reviewsService.listAllReviews(page, limit);
+  }
+
+  @Patch('reviews/:id/visibility')
+  @ApiOperation({ summary: 'Show or hide a review' })
+  @ApiParam({ name: 'id', type: String })
+  setReviewVisibility(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('isVisible') isVisible: boolean,
+  ) {
+    return this.reviewsService.setReviewVisibility(id, isVisible);
   }
 }
