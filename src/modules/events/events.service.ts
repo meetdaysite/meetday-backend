@@ -484,10 +484,29 @@ export class EventsService {
 
   async getPublicEventById(eventId: string) {
     const event = await this.prisma.event.findUnique({
-      where: { id: eventId },
-      include: {
-        tickets: true,
-        refundPolicy: true,
+      where: { id: eventId, status: EventStatus.PUBLISHED, visibility: Visibility.PUBLIC },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        eventType: true,
+        languages: true,
+        tags: true,
+        eventDate: true,
+        startTime: true,
+        endTime: true,
+        venueName: true,
+        fullAddress: true,
+        city: true,
+        latitude: true,
+        longitude: true,
+        whatToExpect: true,
+        whoShouldAttend: true,
+        vibeSummary: true,
+        crowdPulse: true,
+        isFree: true,
+        ageRestriction: true,
+        specialInstructions: true,
         category: { select: { id: true, name: true } },
         hostProfile: {
           select: {
@@ -496,17 +515,39 @@ export class EventsService {
             tagline: true,
             averageRating: true,
             totalReviews: true,
+            totalEventsHosted: true,
           },
         },
+        tickets: {
+          select: {
+            id: true,
+            name: true,
+            price: true,
+            totalCapacity: true,
+            maxPerPerson: true,
+            description: true,
+            saleStartDate: true,
+            saleEndDate: true,
+          },
+        },
+        refundPolicy: true,
         media: { orderBy: { order: 'asc' } },
       },
     });
 
     if (!event) throw new NotFoundException('Event not found');
-    if (event.status !== EventStatus.PUBLISHED || event.visibility !== Visibility.PUBLIC)
-      throw new NotFoundException('Event not found');
 
-    return this.withSignedMedia(event);
+    const signedMedia = await Promise.all(
+      event.media.map(async (m) => ({
+        ...m,
+        url: await this.storageService.getPresignedDownloadUrl(m.url),
+      })),
+    );
+
+    const prices = event.tickets.map((t) => Number(t.price)).filter((p) => p > 0);
+    const startingPrice = prices.length ? Math.min(...prices) : null;
+
+    return { ...event, media: signedMedia, startingPrice };
   }
 
   async deleteEvent(userId: string, eventId: string): Promise<void> {

@@ -58,9 +58,12 @@ export class EventsController {
   @Public()
   @ApiOperation({
     summary: 'Get public event detail',
-    description: 'Returns full detail of a published, public event. Includes tickets, refund policy, and host info.',
+    description:
+      'Returns full detail of a published, public event. ' +
+      'Includes all media (presigned S3 URLs), ticket tiers, refund policy, host trust signals, ' +
+      'vibe summary, crowd pulse, what-to-expect, and a computed startingPrice.',
   })
-  @ApiOkResponse({ description: 'Event detail.' })
+  @ApiOkResponse({ description: 'Event detail with signed media URLs.' })
   @ApiNotFoundResponse({ description: 'Event not found or not publicly available.' })
   getPublicEvent(@Param('id', ParseUUIDPipe) id: string) {
     return this.eventsService.getPublicEventById(id);
