@@ -39,8 +39,9 @@ export class AuthController {
       '- `phone` — phone from token, firstName + lastName required in body; **for HOST registration, `email` must also be provided in the body** (phone tokens carry no email, but hosts need one for transactional mail)\n' +
       '- `google.com` / `apple.com` — email + displayName from token, firstName + lastName optional (token name used as fallback)\n\n' +
       '**accountType: USER** — Creates a standard attendee account. ' +
-      'Optionally accepts `vibeType` and `socialStyle` to seed the attendee profile at registration time — ' +
-      'useful for onboarding flows that ask these questions upfront. ' +
+      'Optionally accepts `vibeType`, `socialStyle`, and `interestIds` to seed the attendee profile at registration time — ' +
+      'useful for onboarding flows that ask preference questions upfront. ' +
+      '`interests` is an array of `{ interestId, affinity }` objects — UUIDs from `GET /interests`, affinity one of `LIKED | OPEN_TO | DISLIKED`. ' +
       'All other profile fields (username, bio, city, etc.) are set later via `POST /attendee/profile`.\n\n' +
       '**accountType: HOST** — Creates the user with the HOST role and atomically creates a ' +
       'HostProfile (kycStatus: NOT_SUBMITTED, approvalStatus: PENDING). ' +
@@ -58,6 +59,10 @@ export class AuthController {
           accountType: 'USER',
           vibeType: 'HERE_TO_CONNECT',
           socialStyle: 'OPEN_TO_MEETING',
+          interests: [
+            { interestId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', affinity: 'LIKED' },
+            { interestId: 'b1ffcd00-0d1c-5f09-cc7e-7cc0ce491b22', affinity: 'OPEN_TO' },
+          ],
         },
       },
       registerAsHost: {

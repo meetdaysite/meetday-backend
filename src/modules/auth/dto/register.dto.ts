@@ -16,8 +16,18 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Gender, HostType, SocialStyle, VibeType } from '@prisma/client';
+import { Gender, HostType, InterestAffinity, SocialStyle, VibeType } from '@prisma/client';
 import { HostAddressDto, SocialLinksDto } from '../../hosts/dto/apply-host.dto';
+
+export class InterestAffinityDto {
+  @ApiProperty({ description: 'UUID of the interest', example: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' })
+  @IsUUID('4')
+  interestId: string;
+
+  @ApiProperty({ enum: InterestAffinity, description: 'How the user relates to this interest', example: 'LIKED' })
+  @IsEnum(InterestAffinity)
+  affinity: InterestAffinity;
+}
 
 export class RegisterDto {
   @ApiPropertyOptional({
@@ -81,6 +91,16 @@ export class RegisterDto {
   @IsOptional()
   @IsEnum(SocialStyle)
   socialStyle?: SocialStyle;
+
+  @ApiPropertyOptional({
+    description: 'Interest affinities to seed at registration. UUIDs from GET /interests.',
+    type: [InterestAffinityDto],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => InterestAffinityDto)
+  interests?: InterestAffinityDto[];
 
   // ── Host-specific fields (only used when accountType === 'HOST') ─────────────
 

@@ -70,6 +70,18 @@ export class AuthService {
                 },
               }
             : {}),
+          ...(dto.interests?.length
+            ? {
+                interestAffinities: {
+                  createMany: {
+                    data: dto.interests.map(({ interestId, affinity }) => ({
+                      interestId,
+                      affinity,
+                    })),
+                  },
+                },
+              }
+            : {}),
         },
         select: {
           id: true,
