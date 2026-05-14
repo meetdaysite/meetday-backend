@@ -58,8 +58,9 @@ model User {
   notifications Notification[]
 
   interestAffinities UserInterestAffinity[]
-  orders             Order[]
-  reviews            EventReview[]
+  orders                 Order[]
+  reviews                EventReview[]
+  createdScannerSessions EventScannerSession[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -645,14 +646,15 @@ model Event {
   updatedAt DateTime    @updatedAt
 
   // Relations
-  hostProfile  HostProfile        @relation(fields: [hostProfileId], references: [id])
-  category     Category?          @relation(fields: [categoryId], references: [id])
-  tickets      EventTicket[]
-  media        EventMedia[]
-  refundPolicy EventRefundPolicy?
-  orders       Order[]
-  coupons      Coupon[]           @relation("EventCoupons")
-  reviews      EventReview[]
+  hostProfile     HostProfile           @relation(fields: [hostProfileId], references: [id])
+  category        Category?             @relation(fields: [categoryId], references: [id])
+  tickets         EventTicket[]
+  media           EventMedia[]
+  refundPolicy    EventRefundPolicy?
+  orders          Order[]
+  coupons         Coupon[]              @relation("EventCoupons")
+  reviews         EventReview[]
+  scannerSessions EventScannerSession[]
 
   @@index([hostProfileId])
   @@index([categoryId])
@@ -843,9 +845,11 @@ model OrderAttendee {
   email       String
   isLead      Boolean  @default(false) // true = the buyer themselves
   ticketCode  String   @unique @default(uuid()) // value encoded in QR code
-  checkedInAt DateTime?
+  checkedInAt        DateTime?
+  scannedBySessionId String?
 
-  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  orderItem        OrderItem            @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  scannedBySession EventScannerSession? @relation(fields: [scannedBySessionId], references: [id])
 
   @@index([orderItemId])
   @@index([ticketCode])
@@ -908,4 +912,27 @@ enum PhotoApprovalStatus {
   PENDING
   APPROVED
   REJECTED
+}
+
+// ─── Check-In ─────────────────────────────────────────────────────────────────
+
+model EventScannerSession {
+  id      String @id @default(uuid())
+  eventId String
+  label   String   // display name: "Gate A", "Security Team", etc.
+  token   String   @unique // 32-byte hex — authenticates scanner requests without login
+  expiresAt DateTime
+  isActive  Boolean @default(true) // host can deactivate early
+
+  createdByUserId String
+
+  event     Event           @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  createdBy User            @relation(fields: [createdByUserId], references: [id])
+  checkIns  OrderAttendee[]
+
+  createdAt DateTime @default(now())
+
+  @@index([eventId])
+  @@index([token])
+  @@map("event_scanner_sessions")
 }

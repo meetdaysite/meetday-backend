@@ -17,6 +17,7 @@ import { CategoriesModule } from './modules/categories/categories.module';
 import { AttendeeModule } from './modules/attendee/attendee.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
+import { CheckInModule } from './modules/check-in/check-in.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { FirebaseAuthGuard } from './common/guards/firebase-auth.guard';
 import { HealthModule } from './common/health/health.module';
@@ -60,6 +61,7 @@ import { StorageModule } from './common/storage/storage.module';
     AttendeeModule,
     OrdersModule,
     ReviewsModule,
+    CheckInModule,
     HealthModule,
     NotificationsModule,
   ],

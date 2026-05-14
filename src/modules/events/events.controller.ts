@@ -30,6 +30,8 @@ import { GetUser } from '../../common/decorators/get-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { EventsService } from './events.service';
 import { ReviewsService } from '../reviews/reviews.service';
+import { CheckInService } from '../check-in/check-in.service';
+import { CreateScannerSessionDto } from '../check-in/dto/create-scanner-session.dto';
 import { CreateEventDto } from './dto/create-event.dto';
 import { ListMyEventsQueryDto } from './dto/list-my-events-query.dto';
 import { BrowseEventsQueryDto } from './dto/browse-events-query.dto';
@@ -42,6 +44,7 @@ export class EventsController {
   constructor(
     private readonly eventsService: EventsService,
     private readonly reviewsService: ReviewsService,
+    private readonly checkInService: CheckInService,
   ) {}
 
   // ─── Public endpoints ──────────────────────────────────────────────────────
@@ -221,5 +224,53 @@ export class EventsController {
     @Body() dto: CancelEventDto,
   ) {
     return this.eventsService.cancelEvent(userId, id, dto);
+  }
+
+  // ─── Scanner session endpoints ─────────────────────────────────────────────
+
+  @Post(':id/scanner-sessions')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({ summary: 'Create a scanner session (time-limited link for staff to scan tickets)' })
+  createScannerSession(
+    @GetUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateScannerSessionDto,
+  ) {
+    return this.checkInService.createScannerSession(userId, id, dto);
+  }
+
+  @Get(':id/scanner-sessions')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({ summary: 'List scanner sessions for an event with check-in counts' })
+  listScannerSessions(
+    @GetUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.checkInService.listScannerSessions(userId, id);
+  }
+
+  @Patch(':id/scanner-sessions/:sessionId/deactivate')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({ summary: 'Deactivate a scanner session early' })
+  deactivateScannerSession(
+    @GetUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('sessionId', ParseUUIDPipe) sessionId: string,
+  ) {
+    return this.checkInService.deactivateScannerSession(userId, id, sessionId);
+  }
+
+  @Get(':id/check-in-stats')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({ summary: 'Get check-in progress and per-session breakdown for an event' })
+  getCheckInStats(
+    @GetUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.checkInService.getCheckInStats(userId, id);
   }
 }
