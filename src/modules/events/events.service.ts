@@ -537,17 +537,59 @@ export class EventsService {
 
     if (!event) throw new NotFoundException('Event not found');
 
-    const signedMedia = await Promise.all(
-      event.media.map(async (m) => ({
-        ...m,
-        url: await this.storageService.getPresignedDownloadUrl(m.url),
+    const [signedMedia, reviewAgg, recentReviews] = await Promise.all([
+      Promise.all(
+        event.media.map(async (m) => ({
+          ...m,
+          url: await this.storageService.getPresignedDownloadUrl(m.url),
+        })),
+      ),
+      this.prisma.eventReview.aggregate({
+        where: { eventId, isVisible: true },
+        _avg: { rating: true },
+        _count: { rating: true },
+      }),
+      this.prisma.eventReview.findMany({
+        where: { eventId, isVisible: true },
+        select: {
+          id: true,
+          rating: true,
+          highlights: true,
+          body: true,
+          createdAt: true,
+          user: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
+          photos: {
+            where: { approvalStatus: 'APPROVED' },
+            select: { id: true, key: true },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 3,
+      }),
+    ]);
+
+    const signedReviews = await Promise.all(
+      recentReviews.map(async (r) => ({
+        ...r,
+        photos: await Promise.all(
+          r.photos.map(async (p) => ({
+            id: p.id,
+            url: await this.storageService.getPresignedDownloadUrl(p.key),
+          })),
+        ),
       })),
     );
 
     const prices = event.tickets.map((t) => Number(t.price)).filter((p) => p > 0);
     const startingPrice = prices.length ? Math.min(...prices) : null;
 
-    return { ...event, media: signedMedia, startingPrice };
+    const reviewSummary = {
+      averageRating: reviewAgg._avg.rating ? Math.round(reviewAgg._avg.rating * 10) / 10 : null,
+      reviewCount: reviewAgg._count.rating,
+      recentReviews: signedReviews,
+    };
+
+    return { ...event, media: signedMedia, startingPrice, reviewSummary };
   }
 
   async deleteEvent(userId: string, eventId: string): Promise<void> {
