@@ -122,6 +122,17 @@ export class OrdersService {
       }
     }
 
+    // Duplicate attendee email check across all group attendees in this order
+    const seenEmails = new Set<string>();
+    for (const item of dto.items) {
+      for (const a of item.groupAttendees ?? []) {
+        if (!a.email) continue;
+        if (seenEmails.has(a.email))
+          throw new BadRequestException(`Duplicate attendee email in order: ${a.email}`);
+        seenEmails.add(a.email);
+      }
+    }
+
     // Coupon validation
     let coupon: any = null;
     if (dto.couponCode) {
@@ -298,13 +309,35 @@ export class OrdersService {
 
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      select: { id: true, userId: true, status: true },
+      select: {
+        id: true,
+        userId: true,
+        status: true,
+        event: { select: { status: true } },
+        items: {
+          select: {
+            ticket: { select: { name: true, saleStartDate: true, saleEndDate: true } },
+          },
+        },
+      },
     });
 
     if (!order) throw new NotFoundException('Order not found');
     if (order.userId !== userId) throw new ForbiddenException('You do not own this order');
     if (order.status !== 'PENDING_PAYMENT')
       throw new BadRequestException(`Order is already ${order.status.toLowerCase().replace('_', ' ')}`);
+
+    if (order.event.status !== 'PUBLISHED')
+      throw new BadRequestException('This event is no longer available');
+
+    const now = new Date();
+    for (const item of order.items) {
+      const { name, saleStartDate, saleEndDate } = item.ticket;
+      if (saleStartDate && saleStartDate > now)
+        throw new BadRequestException(`Ticket "${name}" sales have not started yet`);
+      if (saleEndDate && saleEndDate < now)
+        throw new BadRequestException(`Ticket "${name}" sales have ended`);
+    }
 
     await this.prisma.order.update({
       where: { id: orderId },
@@ -415,7 +448,7 @@ export class OrdersService {
         event: {
           select: {
             eventDate: true,
-            refundPolicy: { select: { cutoffHours: true } },
+            refundPolicy: { select: { type: true, cutoffHours: true, refundPercent: true } },
           },
         },
       },
@@ -433,6 +466,17 @@ export class OrdersService {
         throw new BadRequestException(
           `Cancellation window has passed (must cancel at least ${cutoffHours}h before the event)`,
         );
+    }
+
+    const policy = order.event.refundPolicy;
+    let refundAmount = 0;
+    if (policy) {
+      if (policy.type === 'FULL') {
+        refundAmount = Number(order.totalAmount);
+      } else if (policy.type === 'PARTIAL' && policy.refundPercent) {
+        refundAmount = Math.round(Number(order.totalAmount) * (policy.refundPercent / 100) * 100) / 100;
+      }
+      // NO_REFUND → refundAmount stays 0
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -455,14 +499,14 @@ export class OrdersService {
       action: 'ORDER_CANCELLED',
       entityType: 'ORDER',
       entityId: orderId,
-      metadata: { reason: 'USER_CANCELLED' },
+      metadata: { reason: 'USER_CANCELLED', refundAmount },
     });
 
     void this.notificationsService
       .create(userId, 'order_cancelled', 'Booking Cancelled', 'Your order has been cancelled.')
       .catch((err) => this.logger.error('Failed to send order_cancelled notification', err));
 
-    return { message: 'Order cancelled successfully' };
+    return { message: 'Order cancelled successfully', refundAmount };
   }
 
   @Cron(CronExpression.EVERY_5_MINUTES)

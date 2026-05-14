@@ -171,7 +171,13 @@ export class CheckInService {
         orderItem: {
           include: {
             ticket: { select: { name: true } },
-            order: { select: { eventId: true, status: true } },
+            order: {
+              select: {
+                eventId: true,
+                status: true,
+                event: { select: { status: true } },
+              },
+            },
           },
         },
       },
@@ -180,6 +186,8 @@ export class CheckInService {
     if (!attendee) throw new NotFoundException('Ticket not found');
     if (attendee.orderItem.order.eventId !== session.eventId)
       throw new BadRequestException('Ticket does not belong to this event');
+    if (attendee.orderItem.order.event.status !== 'PUBLISHED')
+      throw new BadRequestException('This event has been cancelled');
     if (attendee.orderItem.order.status !== 'CONFIRMED')
       throw new BadRequestException('Ticket order is not confirmed');
 
