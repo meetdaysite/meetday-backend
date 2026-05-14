@@ -62,6 +62,9 @@ model User {
   reviews                EventReview[]
   createdScannerSessions EventScannerSession[]
 
+  auditLogs      AuditLog[]      @relation("AuditLogActor")
+  consentRecords ConsentRecord[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -935,4 +938,115 @@ model EventScannerSession {
   @@index([eventId])
   @@index([token])
   @@map("event_scanner_sessions")
+}
+
+// ─── Audit & Consent ──────────────────────────────────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  actorId   String?
+  actorRole String?  // ATTENDEE | HOST | ADMIN | SYSTEM
+  ipAddress String?
+  userAgent String?
+
+  action     AuditAction
+  entityType String      // USER | HOST | EVENT | ORDER | PAYOUT_ACCOUNT | SUBSCRIPTION | SCANNER_SESSION
+  entityId   String
+
+  metadata Json?
+
+  actor User? @relation("AuditLogActor", fields: [actorId], references: [id])
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model ConsentRecord {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  userId      String
+  consentType ConsentType
+  version     String
+  consentText String
+
+  ipAddress String?
+  userAgent String?
+
+  consentedAt DateTime
+  withdrawnAt DateTime?
+  isActive    Boolean   @default(true)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, consentType])
+  @@index([userId, isActive])
+  @@map("consent_records")
+}
+
+enum AuditAction {
+  // Auth / identity
+  USER_REGISTERED
+  USER_LOGGED_IN
+  USER_DELETED
+  USER_RESTORED
+
+  // Host KYC
+  KYC_SUBMITTED
+  KYC_APPROVED
+  KYC_REJECTED
+  KYC_RESUBMITTED
+
+  // Payout accounts (PMLA / RBI)
+  PAYOUT_ACCOUNT_ADDED
+  PAYOUT_ACCOUNT_APPROVED
+  PAYOUT_ACCOUNT_DEACTIVATED
+
+  // Event lifecycle
+  EVENT_CREATED
+  EVENT_SUBMITTED_FOR_REVIEW
+  EVENT_APPROVED
+  EVENT_REJECTED
+  EVENT_PUBLISHED
+  EVENT_CANCELLED
+
+  // Orders / payments (PMLA / GST)
+  ORDER_CREATED
+  ORDER_CONFIRMED
+  ORDER_CANCELLED
+  REFUND_INITIATED
+  REFUND_COMPLETED
+
+  // Subscriptions
+  SUBSCRIPTION_CREATED
+  SUBSCRIPTION_UPGRADED
+  SUBSCRIPTION_CANCELLED
+
+  // Admin actions
+  ADMIN_HOST_SUSPENDED
+  ADMIN_HOST_RESTORED
+  ADMIN_PLAN_PRICE_CHANGED
+
+  // Check-in
+  SCANNER_SESSION_CREATED
+  SCANNER_SESSION_EXPIRED
+  TICKET_SCANNED
+
+  // DPDP data subject rights (future)
+  DATA_EXPORT_REQUESTED
+  DATA_DELETION_REQUESTED
+}
+
+enum ConsentType {
+  TERMS_OF_SERVICE
+  PRIVACY_POLICY
+  MARKETING_EMAILS
+  HOST_KYC_DATA_SHARING
+  HOST_BANK_DATA_SHARING
+  AGE_VERIFICATION
 }

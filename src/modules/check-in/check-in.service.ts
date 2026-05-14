@@ -11,12 +11,14 @@ import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateScannerSessionDto } from './dto/create-scanner-session.dto';
 import { ScanTicketDto } from './dto/scan-ticket.dto';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 @Injectable()
 export class CheckInService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async createScannerSession(hostUserId: string, eventId: string, dto: CreateScannerSessionDto) {
@@ -40,6 +42,15 @@ export class CheckInService {
         expiresAt,
         createdByUserId: hostUserId,
       },
+    });
+
+    this.auditLogService.log({
+      actorId: hostUserId,
+      actorRole: 'HOST',
+      action: 'SCANNER_SESSION_CREATED',
+      entityType: 'SCANNER_SESSION',
+      entityId: session.id,
+      metadata: { eventId, label: dto.label, expiresAt: session.expiresAt },
     });
 
     const appUrl = this.configService.get<string>('app.url') ?? 'https://app.meetday.app';
@@ -188,6 +199,18 @@ export class CheckInService {
       where: { id: attendee.id },
       data: { checkedInAt: new Date(), scannedBySessionId: session.id },
       include: { orderItem: { include: { ticket: { select: { name: true } } } } },
+    });
+
+    this.auditLogService.log({
+      action: 'TICKET_SCANNED',
+      entityType: 'ORDER',
+      entityId: attendee.orderItem.order.eventId,
+      metadata: {
+        attendeeId: attendee.id,
+        ticketCode: dto.ticketCode,
+        scannerSessionId: session.id,
+        ticketName: updated.orderItem.ticket.name,
+      },
     });
 
     return {

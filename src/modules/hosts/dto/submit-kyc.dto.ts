@@ -1,6 +1,6 @@
-import { IsString, Matches, ValidateNested } from 'class-validator';
+import { IsOptional, IsString, Matches, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class BankAccountDto {
   @ApiProperty({
@@ -42,4 +42,15 @@ export class VerifyBankDto {
   @ValidateNested()
   @Type(() => BankAccountDto)
   bankAccount: BankAccountDto;
+
+  @ApiPropertyOptional({
+    description:
+      'Version of the KYC & bank data consent shown to the user (e.g. "kyc-v1.0"). ' +
+      'Required on first submission — used to record SPDI consent (IT Act / DPDP). ' +
+      'Omit if the user has already granted consent in a previous session.',
+    example: 'kyc-v1.0',
+  })
+  @IsOptional()
+  @IsString()
+  consentVersion?: string;
 }

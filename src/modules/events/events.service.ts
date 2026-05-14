@@ -14,6 +14,7 @@ import { CreateEventDto } from './dto/create-event.dto';
 import { ListMyEventsQueryDto } from './dto/list-my-events-query.dto';
 import { BrowseEventsQueryDto } from './dto/browse-events-query.dto';
 import { CancelEventDto } from './dto/cancel-event.dto';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 const EVENT_DETAIL_INCLUDE = {
   tickets: true,
@@ -30,6 +31,7 @@ export class EventsService {
     private readonly prisma: PrismaService,
     private readonly storageService: StorageService,
     private readonly notificationsService: NotificationsService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   private async withSignedMedia<T extends { media: Array<{ url: string }> }>(obj: T): Promise<T> {
@@ -59,7 +61,7 @@ export class EventsService {
     if (dto.isFree && dto.tickets?.some((t) => (t.price ?? 0) !== 0))
       throw new BadRequestException('All ticket prices must be 0 for a free event');
 
-    return this.prisma.$transaction(async (tx) => {
+    const event = await this.prisma.$transaction(async (tx) => {
       return tx.event.create({
         data: {
           hostProfileId: hostProfile.id,
@@ -120,6 +122,14 @@ export class EventsService {
         include: EVENT_DETAIL_INCLUDE,
       });
     });
+    this.auditLogService.log({
+      actorId: userId,
+      actorRole: 'HOST',
+      action: 'EVENT_CREATED',
+      entityType: 'EVENT',
+      entityId: event.id,
+    });
+    return event;
   }
 
   async updateEvent(userId: string, eventId: string, dto: CreateEventDto) {
@@ -277,6 +287,14 @@ export class EventsService {
       select: { id: true },
     });
 
+    this.auditLogService.log({
+      actorId: userId,
+      actorRole: 'HOST',
+      action: 'EVENT_SUBMITTED_FOR_REVIEW',
+      entityType: 'EVENT',
+      entityId: eventId,
+    });
+
     void Promise.all(
       admins.map((admin) =>
         this.notificationsService.create(
@@ -384,7 +402,7 @@ export class EventsService {
     if (event.status !== EventStatus.PUBLISHED)
       throw new BadRequestException('Only PUBLISHED events can be cancelled');
 
-    return this.prisma.event.update({
+    const cancelled = await this.prisma.event.update({
       where: { id: eventId },
       data: {
         status: EventStatus.CANCELLED,
@@ -393,6 +411,15 @@ export class EventsService {
       },
       include: EVENT_DETAIL_INCLUDE,
     });
+    this.auditLogService.log({
+      actorId: userId,
+      actorRole: 'HOST',
+      action: 'EVENT_CANCELLED',
+      entityType: 'EVENT',
+      entityId: eventId,
+      metadata: { reason: dto.cancellationReason },
+    });
+    return cancelled;
   }
 
   async browseEvents(query: BrowseEventsQueryDto) {

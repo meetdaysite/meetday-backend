@@ -14,6 +14,7 @@ import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 async function generateUniqueBookingId(
   check: (id: string) => Promise<boolean>,
@@ -40,6 +41,7 @@ export class OrdersService {
     private readonly notificationsService: NotificationsService,
     private readonly configService: ConfigService,
     @InjectQueue('mail') private readonly mailQueue: Queue,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async createOrder(userId: string, dto: CreateOrderDto) {
@@ -278,6 +280,15 @@ export class OrdersService {
       });
     });
 
+    this.auditLogService.log({
+      actorId: userId,
+      actorRole: 'ATTENDEE',
+      action: 'ORDER_CREATED',
+      entityType: 'ORDER',
+      entityId: order.id,
+      metadata: { bookingId: order.bookingId, eventId: dto.eventId, totalAmount: order.totalAmount },
+    });
+
     return order;
   }
 
@@ -298,6 +309,14 @@ export class OrdersService {
     await this.prisma.order.update({
       where: { id: orderId },
       data: { status: 'CONFIRMED', confirmedAt: new Date() },
+    });
+
+    this.auditLogService.log({
+      actorId: userId,
+      actorRole: 'ATTENDEE',
+      action: 'ORDER_CONFIRMED',
+      entityType: 'ORDER',
+      entityId: orderId,
     });
 
     void this.notificationsService
@@ -428,6 +447,15 @@ export class OrdersService {
         where: { id: orderId },
         data: { status: 'CANCELLED', cancelledAt: new Date(), cancellationReason: 'USER_CANCELLED' },
       });
+    });
+
+    this.auditLogService.log({
+      actorId: userId,
+      actorRole: 'ATTENDEE',
+      action: 'ORDER_CANCELLED',
+      entityType: 'ORDER',
+      entityId: orderId,
+      metadata: { reason: 'USER_CANCELLED' },
     });
 
     void this.notificationsService

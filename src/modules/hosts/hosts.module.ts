@@ -3,6 +3,7 @@ import { BullModule } from '@nestjs/bull';
 import { HostsController } from './hosts.controller';
 import { HostsService } from './hosts.service';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { ConsentModule } from '../consent/consent.module';
 import { KycService } from './kyc.service';
 import { SandboxAuthService } from './sandbox-auth.service';
 import { SubscriptionService } from './subscription.service';
@@ -13,7 +14,7 @@ import { KYC_PROVIDER } from './interfaces/kyc-provider.interface';
 import { StorageModule } from '../../common/storage/storage.module';
 
 @Module({
-  imports: [BullModule.registerQueue({ name: 'mail' }), NotificationsModule, StorageModule],
+  imports: [BullModule.registerQueue({ name: 'mail' }), NotificationsModule, StorageModule, ConsentModule],
   controllers: [HostsController],
   providers: [
     HostsService,

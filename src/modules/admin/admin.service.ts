@@ -28,6 +28,7 @@ import { ListEventsQueryDto } from './dto/list-events-query.dto';
 import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RedisService } from '../../common/redis/redis.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 @Injectable()
 export class AdminService {
@@ -40,6 +41,7 @@ export class AdminService {
     private readonly storageService: StorageService,
     private readonly notificationsService: NotificationsService,
     private readonly redis: RedisService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async listAdmins(query: ListAdminsQueryDto) {
@@ -270,6 +272,14 @@ export class AdminService {
       },
     });
 
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'KYC_APPROVED',
+      entityType: 'HOST',
+      entityId: hostProfileId,
+    });
+
     void this.mailQueue.add('host-approved', {
       to: host.user.email,
       hostName: host.user.firstName,
@@ -451,6 +461,15 @@ export class AdminService {
       data: { approvalStatus: 'REJECTED', rejectionReason: dto.rejectionReason },
     });
 
+    this.auditLogService.log({
+      actorId: _adminId,
+      actorRole: 'ADMIN',
+      action: 'KYC_REJECTED',
+      entityType: 'HOST',
+      entityId: hostProfileId,
+      metadata: { reason: dto.rejectionReason },
+    });
+
     void this.mailQueue.add('host-rejected', {
       to: host.user.email,
       hostName: host.user.firstName,
@@ -587,6 +606,15 @@ export class AdminService {
     const hostUser = event.hostProfile.user;
     const eventTitle = event.title ?? 'Untitled';
 
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'EVENT_APPROVED',
+      entityType: 'EVENT',
+      entityId: eventId,
+      metadata: { eventTitle },
+    });
+
     void this.mailQueue.add('event-approved', {
       to: hostUser.email,
       hostName: hostUser.firstName,
@@ -697,6 +725,15 @@ export class AdminService {
 
     const hostUser = event.hostProfile.user;
     const eventTitle = event.title ?? 'Untitled';
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'EVENT_REJECTED',
+      entityType: 'EVENT',
+      entityId: eventId,
+      metadata: { eventTitle, remark: dto.remark },
+    });
 
     void this.mailQueue.add('event-rejected', {
       to: hostUser.email,

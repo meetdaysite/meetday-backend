@@ -23,6 +23,8 @@ import { BankWebhookDto } from './dto/bank-webhook.dto';
 import { UpgradeSubscriptionDto } from './dto/upgrade-subscription.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { StorageService } from '../../common/storage/storage.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
+import { ConsentService } from '../consent/consent.service';
 
 @Injectable()
 export class HostsService {
@@ -37,6 +39,8 @@ export class HostsService {
     @InjectQueue('mail') private readonly mailQueue: Queue,
     private readonly notificationsService: NotificationsService,
     private readonly storageService: StorageService,
+    private readonly auditLogService: AuditLogService,
+    private readonly consentService: ConsentService,
   ) {}
 
   async applyAsHost(userId: string, dto: ApplyHostDto) {
@@ -297,6 +301,41 @@ export class HostsService {
     const panAlreadyVerified = profile.panVerificationStatus === 'VERIFIED';
     const maskedAccountNumber = 'XXXX' + dto.bankAccount.accountNumber.slice(-4);
     const existingPayout = profile.payoutAccount;
+    const isResubmission = !!(existingPayout && !existingPayout.deactivatedAt);
+
+    // SPDI consent gates (IT Act 2000 / DPDP 2023)
+    const CONSENT_TEXT_KYC = 'I consent to Meetday collecting and processing my PAN and identity documents for KYC verification as required by Indian regulations.';
+    const CONSENT_TEXT_BANK = 'I consent to Meetday collecting and processing my bank account details for payout purposes and penny-drop verification.';
+
+    const [hasKycConsent, hasBankConsent] = await Promise.all([
+      this.consentService.hasActiveConsent(userId, 'HOST_KYC_DATA_SHARING'),
+      this.consentService.hasActiveConsent(userId, 'HOST_BANK_DATA_SHARING'),
+    ]);
+
+    if (!hasKycConsent || !hasBankConsent) {
+      if (!dto.consentVersion) {
+        throw new BadRequestException(
+          'Consent for KYC and bank data processing is required. Provide consentVersion in the request.',
+        );
+      }
+      await Promise.all([
+        !hasKycConsent &&
+          this.consentService.grantConsent({
+            userId,
+            consentType: 'HOST_KYC_DATA_SHARING',
+            version: dto.consentVersion,
+            consentText: CONSENT_TEXT_KYC,
+          }),
+        !hasBankConsent &&
+          this.consentService.grantConsent({
+            userId,
+            consentType: 'HOST_BANK_DATA_SHARING',
+            version: dto.consentVersion,
+            consentText: CONSENT_TEXT_BANK,
+          }),
+      ]);
+    }
+
     let newPayoutAccountId: string;
 
     await this.prisma.$transaction(async (tx) => {
@@ -437,6 +476,23 @@ export class HostsService {
         bankResult.failureReason,
       );
     }
+
+    this.auditLogService.log({
+      actorId: userId,
+      actorRole: 'HOST',
+      action: isResubmission ? 'KYC_RESUBMITTED' : 'KYC_SUBMITTED',
+      entityType: 'HOST',
+      entityId: profile.id,
+      metadata: { payoutAccountId: newPayoutAccountId! },
+    });
+    this.auditLogService.log({
+      actorId: userId,
+      actorRole: 'HOST',
+      action: 'PAYOUT_ACCOUNT_ADDED',
+      entityType: 'PAYOUT_ACCOUNT',
+      entityId: newPayoutAccountId!,
+      metadata: { hostProfileId: profile.id, maskedAccountNumber },
+    });
 
     void this.notificationsService.create(
       userId,

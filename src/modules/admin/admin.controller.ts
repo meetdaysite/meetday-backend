@@ -29,6 +29,8 @@ import {
 } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { ReviewsService } from '../reviews/reviews.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
+import { QueryAuditLogDto } from '../audit-log/dto/query-audit-log.dto';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
@@ -58,6 +60,7 @@ export class AdminController {
   constructor(
     private readonly adminService: AdminService,
     private readonly reviewsService: ReviewsService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   @Get('admins')
@@ -992,6 +995,22 @@ export class AdminController {
     @Body() dto: SetInterestCategoriesDto,
   ) {
     return this.adminService.setInterestCategories(id, dto.categoryIds);
+  }
+
+  // ─── Audit Logs ───────────────────────────────────────────────────────────
+
+  @Get('audit-logs')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @ApiOperation({
+    summary: 'Query audit logs',
+    description:
+      'Returns a paginated, filtered list of audit log entries. ' +
+      'Filter by actor, entity type/ID, action, or date range. ' +
+      'Only SUPER_ADMIN and CITY_ADMIN can access audit logs.',
+  })
+  @ApiOkResponse({ description: 'Paginated audit log entries.' })
+  queryAuditLogs(@Query() query: QueryAuditLogDto) {
+    return this.auditLogService.queryLogs(query);
   }
 
   // ─── Reviews ──────────────────────────────────────────────────────────────
