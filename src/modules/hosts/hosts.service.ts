@@ -303,38 +303,16 @@ export class HostsService {
     const existingPayout = profile.payoutAccount;
     const isResubmission = !!(existingPayout && !existingPayout.deactivatedAt);
 
-    // SPDI consent gates (IT Act 2000 / DPDP 2023)
-    const CONSENT_TEXT_KYC = 'I consent to Meetday collecting and processing my PAN and identity documents for KYC verification as required by Indian regulations.';
-    const CONSENT_TEXT_BANK = 'I consent to Meetday collecting and processing my bank account details for payout purposes and penny-drop verification.';
-
+    // SPDI consent gates (IT Act 2000 / DPDP 2023) — record on first submission if not yet present
     const [hasKycConsent, hasBankConsent] = await Promise.all([
       this.consentService.hasActiveConsent(userId, 'HOST_KYC_DATA_SHARING'),
       this.consentService.hasActiveConsent(userId, 'HOST_BANK_DATA_SHARING'),
     ]);
 
-    if (!hasKycConsent || !hasBankConsent) {
-      if (!dto.consentVersion) {
-        throw new BadRequestException(
-          'Consent for KYC and bank data processing is required. Provide consentVersion in the request.',
-        );
-      }
-      await Promise.all([
-        !hasKycConsent &&
-          this.consentService.grantConsent({
-            userId,
-            consentType: 'HOST_KYC_DATA_SHARING',
-            version: dto.consentVersion,
-            consentText: CONSENT_TEXT_KYC,
-          }),
-        !hasBankConsent &&
-          this.consentService.grantConsent({
-            userId,
-            consentType: 'HOST_BANK_DATA_SHARING',
-            version: dto.consentVersion,
-            consentText: CONSENT_TEXT_BANK,
-          }),
-      ]);
-    }
+    await Promise.all([
+      !hasKycConsent && this.consentService.grantConsent({ userId, consentType: 'HOST_KYC_DATA_SHARING' }),
+      !hasBankConsent && this.consentService.grantConsent({ userId, consentType: 'HOST_BANK_DATA_SHARING' }),
+    ]);
 
     let newPayoutAccountId: string;
 

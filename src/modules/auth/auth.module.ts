@@ -3,8 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import * as firebaseAdmin from 'firebase-admin';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { ConsentModule } from '../consent/consent.module';
 
 @Module({
+  imports: [ConsentModule],
   controllers: [AuthController],
   providers: [AuthService],
 })

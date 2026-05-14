@@ -972,8 +972,6 @@ model ConsentRecord {
 
   userId      String
   consentType ConsentType
-  version     String
-  consentText String
 
   ipAddress String?
   userAgent String?
@@ -1045,8 +1043,6 @@ enum AuditAction {
 enum ConsentType {
   TERMS_OF_SERVICE
   PRIVACY_POLICY
-  MARKETING_EMAILS
   HOST_KYC_DATA_SHARING
   HOST_BANK_DATA_SHARING
-  AGE_VERIFICATION
 }

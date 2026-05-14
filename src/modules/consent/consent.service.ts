@@ -5,8 +5,6 @@ import { PrismaService } from '../../prisma/prisma.service';
 export interface GrantConsentParams {
   userId: string;
   consentType: ConsentType;
-  version: string;
-  consentText: string;
   ipAddress?: string;
   userAgent?: string;
 }
@@ -26,8 +24,6 @@ export class ConsentService {
       data: {
         userId: params.userId,
         consentType: params.consentType,
-        version: params.version,
-        consentText: params.consentText,
         ipAddress: params.ipAddress ?? null,
         userAgent: params.userAgent ?? null,
         consentedAt: new Date(),
