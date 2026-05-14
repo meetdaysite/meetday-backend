@@ -978,7 +978,7 @@ model ConsentRecord {
 
   consentedAt DateTime
   withdrawnAt DateTime?
-  isActive    Boolean   @default(true)
+  isActive    Boolean   @default(true) 
 
   user User @relation(fields: [userId], references: [id])
 
