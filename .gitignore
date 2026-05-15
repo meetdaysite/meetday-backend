@@ -47,3 +47,5 @@ lerna-debug.log*
 
 # prisma
 # prisma/migrations/
+
+interest-images
