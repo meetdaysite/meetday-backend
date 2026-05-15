@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { EventStatus, Visibility } from '@prisma/client';
+import { EventStatus, Prisma, Visibility } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -14,6 +14,7 @@ import { CreateEventDto } from './dto/create-event.dto';
 import { ListMyEventsQueryDto } from './dto/list-my-events-query.dto';
 import { BrowseEventsQueryDto } from './dto/browse-events-query.dto';
 import { CancelEventDto } from './dto/cancel-event.dto';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 const EVENT_DETAIL_INCLUDE = {
   tickets: true,
@@ -30,6 +31,7 @@ export class EventsService {
     private readonly prisma: PrismaService,
     private readonly storageService: StorageService,
     private readonly notificationsService: NotificationsService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   private async withSignedMedia<T extends { media: Array<{ url: string }> }>(obj: T): Promise<T> {
@@ -59,7 +61,7 @@ export class EventsService {
     if (dto.isFree && dto.tickets?.some((t) => (t.price ?? 0) !== 0))
       throw new BadRequestException('All ticket prices must be 0 for a free event');
 
-    return this.prisma.$transaction(async (tx) => {
+    const event = await this.prisma.$transaction(async (tx) => {
       return tx.event.create({
         data: {
           hostProfileId: hostProfile.id,
@@ -120,6 +122,14 @@ export class EventsService {
         include: EVENT_DETAIL_INCLUDE,
       });
     });
+    this.auditLogService.log({
+      actorId: userId,
+      actorRole: 'HOST',
+      action: 'EVENT_CREATED',
+      entityType: 'EVENT',
+      entityId: event.id,
+    });
+    return event;
   }
 
   async updateEvent(userId: string, eventId: string, dto: CreateEventDto) {
@@ -234,7 +244,7 @@ export class EventsService {
     const event = await this.prisma.event.findUnique({
       where: { id: eventId },
       include: {
-        hostProfile: { select: { userId: true } },
+        hostProfile: { select: { userId: true, approvalStatus: true } },
         tickets: { select: { id: true } },
         refundPolicy: { select: { id: true } },
       },
@@ -242,6 +252,8 @@ export class EventsService {
     if (!event) throw new NotFoundException('Event not found');
     if (event.hostProfile.userId !== userId)
       throw new ForbiddenException('You do not own this event');
+    if (event.hostProfile.approvalStatus === 'SUSPENDED')
+      throw new ForbiddenException('Your account is suspended. Please contact support.');
     if (event.status !== EventStatus.DRAFT)
       throw new ForbiddenException('Only DRAFT events can be submitted for review');
 
@@ -275,6 +287,14 @@ export class EventsService {
     const admins = await this.prisma.user.findMany({
       where: { isActive: true, role: { name: { in: adminRoles } } },
       select: { id: true },
+    });
+
+    this.auditLogService.log({
+      actorId: userId,
+      actorRole: 'HOST',
+      action: 'EVENT_SUBMITTED_FOR_REVIEW',
+      entityType: 'EVENT',
+      entityId: eventId,
     });
 
     void Promise.all(
@@ -314,12 +334,20 @@ export class EventsService {
           status: true,
           eventDate: true,
           city: true,
+          venueName: true,
           isFree: true,
           adminRejectionRemark: true,
           submittedAt: true,
           createdAt: true,
           category: { select: { id: true, name: true } },
-          _count: { select: { tickets: true } },
+          media: {
+            where: { type: 'COVER' },
+            select: { url: true },
+            take: 1,
+          },
+          tickets: {
+            select: { totalCapacity: true, price: true },
+          },
         },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
@@ -328,7 +356,26 @@ export class EventsService {
       this.prisma.event.count({ where }),
     ]);
 
-    return { events, total, page, limit };
+    const enriched = await Promise.all(
+      events.map(async (e) => {
+        const cover = e.media[0];
+        const totalCapacity = e.tickets.reduce((sum, t) => sum + t.totalCapacity, 0);
+        const prices = e.tickets.map((t) => Number(t.price)).filter((p) => p > 0);
+        const startingPrice = prices.length ? Math.min(...prices) : null;
+
+        const { media: _media, tickets: _tickets, ...rest } = e;
+        return {
+          ...rest,
+          coverImageUrl: cover
+            ? await this.storageService.getPresignedDownloadUrl(cover.url)
+            : null,
+          totalCapacity,
+          startingPrice,
+        };
+      }),
+    );
+
+    return { events: enriched, total, page, limit };
   }
 
   async getMyEventById(userId: string, eventId: string) {
@@ -337,12 +384,13 @@ export class EventsService {
       include: {
         ...EVENT_DETAIL_INCLUDE,
         hostProfile: { select: { id: true, displayName: true, userId: true } },
+        media: { orderBy: { order: 'asc' } },
       },
     });
     if (!event) throw new NotFoundException('Event not found');
     if (event.hostProfile.userId !== userId)
       throw new ForbiddenException('You do not own this event');
-    return event;
+    return this.withSignedMedia(event);
   }
 
   async cancelEvent(userId: string, eventId: string, dto: CancelEventDto) {
@@ -356,35 +404,111 @@ export class EventsService {
     if (event.status !== EventStatus.PUBLISHED)
       throw new BadRequestException('Only PUBLISHED events can be cancelled');
 
-    return this.prisma.event.update({
-      where: { id: eventId },
-      data: {
-        status: EventStatus.CANCELLED,
-        cancelledAt: new Date(),
-        cancellationReason: dto.cancellationReason,
+    const pendingOrders = await this.prisma.order.findMany({
+      where: { eventId, status: 'PENDING_PAYMENT' },
+      select: {
+        id: true,
+        couponId: true,
+        items: { select: { ticketId: true, quantity: true } },
       },
-      include: EVENT_DETAIL_INCLUDE,
     });
+
+    const cancelled = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.event.update({
+        where: { id: eventId },
+        data: {
+          status: EventStatus.CANCELLED,
+          cancelledAt: new Date(),
+          cancellationReason: dto.cancellationReason,
+        },
+        include: EVENT_DETAIL_INCLUDE,
+      });
+
+      for (const order of pendingOrders) {
+        for (const item of order.items) {
+          await tx.$executeRaw`
+            UPDATE event_tickets
+            SET sold_count = GREATEST(sold_count - ${item.quantity}, 0)
+            WHERE id = ${item.ticketId}
+          `;
+        }
+        if (order.couponId) {
+          await tx.$executeRaw`
+            UPDATE coupons
+            SET usage_count = GREATEST(usage_count - 1, 0)
+            WHERE id = ${order.couponId}
+          `;
+        }
+      }
+
+      if (pendingOrders.length > 0) {
+        await tx.order.updateMany({
+          where: { id: { in: pendingOrders.map((o) => o.id) } },
+          data: { status: 'CANCELLED', cancelledAt: new Date(), cancellationReason: 'EVENT_CANCELLED' },
+        });
+      }
+
+      return result;
+    });
+
+    this.auditLogService.log({
+      actorId: userId,
+      actorRole: 'HOST',
+      action: 'EVENT_CANCELLED',
+      entityType: 'EVENT',
+      entityId: eventId,
+      metadata: { reason: dto.cancellationReason, pendingOrdersCancelled: pendingOrders.length },
+    });
+    return cancelled;
   }
 
   async browseEvents(query: BrowseEventsQueryDto) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
+    const sortOrder = query.sortOrder ?? 'asc';
 
-    const where: any = {
+    // Resolve interest slugs → category IDs via InterestCategory mapping
+    let resolvedCategoryIds: string[] | undefined;
+    if (query.interestSlugs?.length) {
+      const interests = await this.prisma.interest.findMany({
+        where: { slug: { in: query.interestSlugs } },
+        include: { categoryMappings: { select: { categoryId: true } } },
+      });
+      resolvedCategoryIds = [...new Set(interests.flatMap((i) => i.categoryMappings.map((m) => m.categoryId)))];
+    }
+
+    // Union direct categoryId with interest-resolved category IDs
+    const allCategoryIds = [
+      ...(query.categoryId ? [query.categoryId] : []),
+      ...(resolvedCategoryIds ?? []),
+    ];
+    const categoryFilter = allCategoryIds.length
+      ? { categoryId: { in: [...new Set(allCategoryIds)] } }
+      : {};
+
+    // Default to upcoming events; respect explicit dateFrom if provided
+    const dateFilter = {
+      eventDate: {
+        gte: query.dateFrom ? new Date(query.dateFrom) : new Date(),
+        ...(query.dateTo && { lte: new Date(query.dateTo) }),
+      },
+    };
+
+    const where: Prisma.EventWhereInput = {
       status: EventStatus.PUBLISHED,
       visibility: Visibility.PUBLIC,
-      ...(query.city && { city: { contains: query.city, mode: 'insensitive' } }),
-      ...(query.categoryId && { categoryId: query.categoryId }),
+      ...categoryFilter,
+      ...dateFilter,
+      ...(query.city && { city: { contains: query.city, mode: Prisma.QueryMode.insensitive } }),
       ...(query.isFree !== undefined && { isFree: query.isFree }),
-      ...(query.search && { title: { contains: query.search, mode: 'insensitive' } }),
-      ...((query.dateFrom || query.dateTo) && {
-        eventDate: {
-          ...(query.dateFrom && { gte: new Date(query.dateFrom) }),
-          ...(query.dateTo && { lte: new Date(query.dateTo) }),
-        },
-      }),
+      ...(query.search && { title: { contains: query.search, mode: Prisma.QueryMode.insensitive } }),
     };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const orderBy: any =
+      query.sortBy === 'price'
+        ? { tickets: { _min: { price: sortOrder } } }
+        : { eventDate: sortOrder };
 
     const [events, total] = await Promise.all([
       this.prisma.event.findMany({
@@ -395,42 +519,61 @@ export class EventsService {
           eventType: true,
           eventDate: true,
           startTime: true,
-          endTime: true,
-          city: true,
           venueName: true,
-          isFree: true,
-          languages: true,
           tags: true,
           category: { select: { id: true, name: true } },
-          hostProfile: { select: { id: true, displayName: true, averageRating: true } },
           media: { where: { type: 'COVER' }, select: { url: true }, take: 1 },
-          _count: { select: { tickets: true } },
+          tickets: { select: { price: true } },
         },
-        orderBy: { eventDate: 'asc' },
+        orderBy,
         skip: (page - 1) * limit,
         take: limit,
       }),
       this.prisma.event.count({ where }),
     ]);
 
-    const signedEvents = await Promise.all(
-      events.map(async (e) => ({
-        ...e,
-        media: await Promise.all(
-          e.media.map(async (m) => ({ ...m, url: await this.storageService.getPresignedDownloadUrl(m.url) })),
-        ),
-      })),
+    const enriched = await Promise.all(
+      events.map(async (e) => {
+        const cover = e.media[0];
+        const prices = e.tickets.map((t) => Number(t.price)).filter((p) => p > 0);
+        const startingPrice = prices.length ? Math.min(...prices) : null;
+        const { media: _media, tickets: _tickets, ...rest } = e;
+        return {
+          ...rest,
+          coverImageUrl: cover ? await this.storageService.getPresignedDownloadUrl(cover.url) : null,
+          startingPrice,
+        };
+      }),
     );
 
-    return { events: signedEvents, total, page, limit };
+    return { events: enriched, total, page, limit };
   }
 
   async getPublicEventById(eventId: string) {
     const event = await this.prisma.event.findUnique({
-      where: { id: eventId },
-      include: {
-        tickets: true,
-        refundPolicy: true,
+      where: { id: eventId, status: EventStatus.PUBLISHED, visibility: Visibility.PUBLIC },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        eventType: true,
+        languages: true,
+        tags: true,
+        eventDate: true,
+        startTime: true,
+        endTime: true,
+        venueName: true,
+        fullAddress: true,
+        city: true,
+        latitude: true,
+        longitude: true,
+        whatToExpect: true,
+        whoShouldAttend: true,
+        vibeSummary: true,
+        crowdPulse: true,
+        isFree: true,
+        ageRestriction: true,
+        specialInstructions: true,
         category: { select: { id: true, name: true } },
         hostProfile: {
           select: {
@@ -439,17 +582,95 @@ export class EventsService {
             tagline: true,
             averageRating: true,
             totalReviews: true,
+            totalEventsHosted: true,
           },
         },
+        tickets: {
+          select: {
+            id: true,
+            name: true,
+            price: true,
+            totalCapacity: true,
+            maxPerPerson: true,
+            description: true,
+            saleStartDate: true,
+            saleEndDate: true,
+          },
+        },
+        refundPolicy: true,
         media: { orderBy: { order: 'asc' } },
       },
     });
 
     if (!event) throw new NotFoundException('Event not found');
-    if (event.status !== EventStatus.PUBLISHED || event.visibility !== Visibility.PUBLIC)
-      throw new NotFoundException('Event not found');
 
-    return this.withSignedMedia(event);
+    const [signedMedia, reviewAgg, recentReviews] = await Promise.all([
+      Promise.all(
+        event.media.map(async (m) => ({
+          ...m,
+          url: await this.storageService.getPresignedDownloadUrl(m.url),
+        })),
+      ),
+      this.prisma.eventReview.aggregate({
+        where: { eventId, isVisible: true },
+        _avg: { rating: true },
+        _count: { rating: true },
+      }),
+      this.prisma.eventReview.findMany({
+        where: { eventId, isVisible: true },
+        select: {
+          id: true,
+          rating: true,
+          highlights: true,
+          body: true,
+          createdAt: true,
+          user: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
+          photos: {
+            where: { approvalStatus: 'APPROVED' },
+            select: { id: true, key: true },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 3,
+      }),
+    ]);
+
+    const signedReviews = await Promise.all(
+      recentReviews.map(async (r) => ({
+        ...r,
+        photos: await Promise.all(
+          r.photos.map(async (p) => ({
+            id: p.id,
+            url: await this.storageService.getPresignedDownloadUrl(p.key),
+          })),
+        ),
+      })),
+    );
+
+    const prices = event.tickets.map((t) => Number(t.price)).filter((p) => p > 0);
+    const startingPrice = prices.length ? Math.min(...prices) : null;
+
+    const reviewSummary = {
+      averageRating: reviewAgg._avg.rating ? Math.round(reviewAgg._avg.rating * 10) / 10 : null,
+      reviewCount: reviewAgg._count.rating,
+      recentReviews: signedReviews,
+    };
+
+    return { ...event, media: signedMedia, startingPrice, reviewSummary };
+  }
+
+  async deleteEvent(userId: string, eventId: string): Promise<void> {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: { hostProfile: { select: { userId: true } } },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+    if (event.hostProfile.userId !== userId)
+      throw new ForbiddenException('You do not own this event');
+    if (event.status !== EventStatus.DRAFT)
+      throw new BadRequestException('Only DRAFT events can be deleted');
+
+    await this.prisma.event.delete({ where: { id: eventId } });
   }
 
 }

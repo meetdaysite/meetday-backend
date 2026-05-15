@@ -1,11 +1,6 @@
-import { IsEnum, IsString, Matches, ValidateNested } from 'class-validator';
+import { IsString, Matches, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
-
-export enum BankAccountType {
-  SAVINGS = 'SAVINGS',
-  CURRENT = 'CURRENT',
-}
 
 export class BankAccountDto {
   @ApiProperty({
@@ -32,15 +27,14 @@ export class BankAccountDto {
   accountHolderName: string;
 
   @ApiProperty({
-    enum: BankAccountType,
-    description: 'Bank account type',
-    example: 'SAVINGS',
+    description: 'Bank name as shown on the account',
+    example: 'HDFC Bank',
   })
-  @IsEnum(BankAccountType)
-  accountType: BankAccountType;
+  @IsString()
+  bankName: string;
 }
 
-export class SubmitKycDto {
+export class VerifyBankDto {
   @ApiProperty({
     type: BankAccountDto,
     description: 'Bank account details for penny drop verification. Account number is never stored raw.',
@@ -48,4 +42,5 @@ export class SubmitKycDto {
   @ValidateNested()
   @Type(() => BankAccountDto)
   bankAccount: BankAccountDto;
+
 }

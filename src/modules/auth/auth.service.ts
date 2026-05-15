@@ -5,8 +5,10 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { ConsentType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
+import { ConsentService } from '../consent/consent.service';
 import { RegisterDto } from './dto/register.dto';
 import { CompleteProfileDto } from './dto/complete-profile.dto';
 
@@ -24,6 +26,7 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cryptoService: CryptoService,
+    private readonly consentService: ConsentService,
   ) {}
 
   async register(tokenUser: TokenUser, dto: RegisterDto) {
@@ -42,34 +45,64 @@ export class AuthService {
     // Resolve identity fields — token is authoritative for email/phone/avatar
     const resolved = this.resolveIdentity(tokenUser, dto);
 
+    let result: { id: string };
     if (dto.accountType === 'HOST') {
-      return this.registerHost(tokenUser.uid, resolved, dto);
+      result = await this.registerHost(tokenUser.uid, resolved, dto);
+    } else {
+      const userRole = await this.prisma.role.findUniqueOrThrow({ where: { name: 'USER' } });
+
+      result = await this.prisma.user.create({
+        data: {
+          firebaseUid: tokenUser.uid,
+          email: resolved.email,
+          phone: resolved.phone,
+          firstName: resolved.firstName,
+          lastName: resolved.lastName,
+          avatarUrl: resolved.avatarUrl,
+          roleId: userRole.id,
+          ...(dto.vibeType || dto.socialStyle
+            ? {
+                attendeeProfile: {
+                  create: {
+                    vibeType: dto.vibeType,
+                    socialStyle: dto.socialStyle,
+                  },
+                },
+              }
+            : {}),
+          ...(dto.interests?.length
+            ? {
+                interestAffinities: {
+                  createMany: {
+                    data: dto.interests.map(({ interestId, affinity }) => ({
+                      interestId,
+                      affinity,
+                    })),
+                  },
+                },
+              }
+            : {}),
+        },
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          firstName: true,
+          lastName: true,
+          avatarUrl: true,
+          isActive: true,
+          role: { select: { name: true } },
+          createdAt: true,
+        },
+      });
     }
 
-    const userRole = await this.prisma.role.findUniqueOrThrow({ where: { name: 'USER' } });
+    void Promise.all([
+      this.consentService.grantConsent({ userId: result.id, consentType: ConsentType.TERMS_OF_SERVICE }),
+      this.consentService.grantConsent({ userId: result.id, consentType: ConsentType.PRIVACY_POLICY }),
+    ]).catch(() => {});
 
-    return this.prisma.user.create({
-      data: {
-        firebaseUid: tokenUser.uid,
-        email: resolved.email,
-        phone: resolved.phone,
-        firstName: resolved.firstName,
-        lastName: resolved.lastName,
-        avatarUrl: resolved.avatarUrl,
-        roleId: userRole.id,
-      },
-      select: {
-        id: true,
-        email: true,
-        phone: true,
-        firstName: true,
-        lastName: true,
-        avatarUrl: true,
-        isActive: true,
-        role: { select: { name: true } },
-        createdAt: true,
-      },
-    });
+    return result;
   }
 
   private async registerHost(
@@ -127,6 +160,7 @@ export class AuthService {
         data: {
           userId: user.id,
           hostType: dto.hostType,
+          gender: dto.gender,
           displayName: dto.displayName,
           legalName: dto.legalName,
           panEncrypted: dto.pan ? this.cryptoService.encrypt(dto.pan) : undefined,
@@ -280,7 +314,7 @@ export class AuthService {
         isActive: true,
         mustCompleteProfile: true,
         role: { select: { name: true } },
-        userProfile: true,
+        attendeeProfile: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -291,6 +325,14 @@ export class AuthService {
     }
 
     return user;
+  }
+
+  async checkPhoneExists(phone: string): Promise<{ exists: boolean }> {
+    const user = await this.prisma.user.findFirst({
+      where: { phone },
+      select: { id: true },
+    });
+    return { exists: user !== null };
   }
 }
 

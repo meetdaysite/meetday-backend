@@ -1,0 +1,100 @@
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../../common/storage/storage.service';
+import { CreateAttendeeProfileDto } from './dto/create-attendee-profile.dto';
+import { UpdateAttendeeProfileDto } from './dto/update-attendee-profile.dto';
+
+@Injectable()
+export class AttendeeService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storageService: StorageService,
+  ) {}
+
+  async createProfile(firebaseUid: string, dto: CreateAttendeeProfileDto) {
+    const user = await this.findUser(firebaseUid);
+
+    const existing = await this.prisma.attendeeProfile.findUnique({ where: { userId: user.id } });
+    if (existing) {
+      return this.performUpdate(user, dto);
+    }
+
+    if (dto.username) {
+      await this.assertUsernameAvailable(dto.username);
+    }
+
+    const profile = await this.prisma.attendeeProfile.create({
+      data: { userId: user.id, ...dto },
+    });
+
+    return this.toResponse(profile, user.avatarUrl);
+  }
+
+  async getOwnProfile(firebaseUid: string) {
+    const user = await this.findUser(firebaseUid);
+
+    const profile = await this.prisma.attendeeProfile.findUnique({ where: { userId: user.id } });
+    if (!profile) throw new NotFoundException('Attendee profile not found');
+
+    return this.toResponse(profile, user.avatarUrl);
+  }
+
+  async updateProfile(firebaseUid: string, dto: UpdateAttendeeProfileDto) {
+    const user = await this.findUser(firebaseUid);
+
+    const profile = await this.prisma.attendeeProfile.findUnique({ where: { userId: user.id } });
+    if (!profile) throw new NotFoundException('Attendee profile not found');
+
+    return this.performUpdate(user, dto);
+  }
+
+  private async performUpdate(
+    user: { id: string; avatarUrl: string | null },
+    dto: UpdateAttendeeProfileDto,
+  ) {
+    if (dto.username) {
+      const conflict = await this.prisma.attendeeProfile.findUnique({
+        where: { username: dto.username },
+        select: { userId: true },
+      });
+      if (conflict && conflict.userId !== user.id) {
+        throw new ConflictException('Username is already taken');
+      }
+    }
+
+    const profile = await this.prisma.attendeeProfile.update({
+      where: { userId: user.id },
+      data: dto,
+    });
+
+    return this.toResponse(profile, user.avatarUrl);
+  }
+
+  private async toResponse(
+    profile: Awaited<ReturnType<typeof this.prisma.attendeeProfile.findUniqueOrThrow>>,
+    rawAvatarUrl: string | null,
+  ) {
+    const avatarUrl = rawAvatarUrl
+      ? await this.storageService.getPresignedDownloadUrl(rawAvatarUrl)
+      : null;
+
+    return { ...profile, avatarUrl };
+  }
+
+  private async findUser(firebaseUid: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { firebaseUid },
+      select: { id: true, avatarUrl: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    return user;
+  }
+
+  private async assertUsernameAvailable(username: string) {
+    const taken = await this.prisma.attendeeProfile.findUnique({
+      where: { username },
+      select: { id: true },
+    });
+    if (taken) throw new ConflictException('Username is already taken');
+  }
+}

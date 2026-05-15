@@ -1,6 +1,10 @@
 # compiled output
 dist
 node_modules
+*.tsbuildinfo
+prisma/seeders/*.js
+prisma/seeders/*.js.map
+prisma/seeders/*.d.ts
 
 # Logs
 logs
@@ -43,3 +47,5 @@ lerna-debug.log*
 
 # prisma
 # prisma/migrations/
+
+interest-images

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
   ApiBadRequestResponse,
@@ -9,6 +9,7 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiQuery,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -16,6 +17,7 @@ import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { CompleteProfileDto } from './dto/complete-profile.dto';
 import { GetUser } from '../../common/decorators/get-user.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('Auth')
 @ApiBearerAuth('firebase-token')
@@ -36,7 +38,11 @@ export class AuthController {
       '- `password` (email/password) — email from token, firstName + lastName required in body\n' +
       '- `phone` — phone from token, firstName + lastName required in body; **for HOST registration, `email` must also be provided in the body** (phone tokens carry no email, but hosts need one for transactional mail)\n' +
       '- `google.com` / `apple.com` — email + displayName from token, firstName + lastName optional (token name used as fallback)\n\n' +
-      '**accountType: USER** — Creates a standard attendee account.\n\n' +
+      '**accountType: USER** — Creates a standard attendee account. ' +
+      'Optionally accepts `vibeType`, `socialStyle`, and `interestIds` to seed the attendee profile at registration time — ' +
+      'useful for onboarding flows that ask preference questions upfront. ' +
+      '`interests` is an array of `{ interestId, affinity }` objects — UUIDs from `GET /interests`, affinity one of `LIKED | OPEN_TO | DISLIKED`. ' +
+      'All other profile fields (username, bio, city, etc.) are set later via `POST /attendee/profile`.\n\n' +
       '**accountType: HOST** — Creates the user with the HOST role and atomically creates a ' +
       'HostProfile (kycStatus: NOT_SUBMITTED, approvalStatus: PENDING). ' +
       '`categoryIds` and `hostType` are required. `email` is required when the Firebase token carries no email (phone-OTP sign-ups).',
@@ -45,12 +51,18 @@ export class AuthController {
     type: RegisterDto,
     examples: {
       registerAsUser: {
-        summary: 'Register as a regular user',
+        summary: 'Register as a regular user (phone OTP)',
         value: {
           firstName: 'Rahul',
           lastName: 'Sharma',
           phone: '+919876543210',
           accountType: 'USER',
+          vibeType: 'HERE_TO_CONNECT',
+          socialStyle: 'OPEN_TO_MEETING',
+          interests: [
+            { interestId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', affinity: 'LIKED' },
+            { interestId: 'b1ffcd00-0d1c-5f09-cc7e-7cc0ce491b22', affinity: 'OPEN_TO' },
+          ],
         },
       },
       registerAsHost: {
@@ -97,10 +109,10 @@ export class AuthController {
             timestamp: '2026-04-08T10:00:00.000Z',
             data: {
               id: 'user-uuid',
-              email: 'rahul.sharma@example.com',
+              email: null,
+              phone: '+919876543210',
               firstName: 'Rahul',
               lastName: 'Sharma',
-              phone: '+919876543210',
               avatarUrl: null,
               isActive: true,
               role: { name: 'USER' },
@@ -271,7 +283,7 @@ export class AuthController {
           avatarUrl: null,
           isActive: true,
           role: { name: 'USER' },
-          userProfile: null,
+          attendeeProfile: null,
           createdAt: '2026-04-08T10:00:00.000Z',
           updatedAt: '2026-04-08T10:00:00.000Z',
         },
@@ -281,5 +293,30 @@ export class AuthController {
   @ApiNotFoundResponse({ description: 'No DB record found. User must register first.' })
   getMe(@GetUser('uid') firebaseUid: string) {
     return this.authService.getMe(firebaseUid);
+  }
+
+  @Get('check-phone')
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Check if a phone number is registered',
+    description:
+      'Public endpoint — no token required. ' +
+      'Returns `{ exists: true }` if a user account with the given E.164 phone number exists, ' +
+      '`{ exists: false }` otherwise. ' +
+      'Intended for the registration screen to warn the user before they attempt to sign up.',
+  })
+  @ApiQuery({
+    name: 'phone',
+    description: 'E.164 formatted phone number, e.g. +919876543210',
+    example: '+919876543210',
+  })
+  @ApiOkResponse({
+    description: 'Lookup result.',
+    schema: { example: { exists: true } },
+  })
+  checkPhone(@Query('phone') phone: string) {
+    return this.authService.checkPhoneExists(phone);
   }
 }

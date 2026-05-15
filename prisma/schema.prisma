@@ -39,8 +39,8 @@ model User {
   roleId String
   role   Role   @relation(fields: [roleId], references: [id])
 
-  userProfile  UserProfile?
-  hostProfile  HostProfile?  @relation("HostUser")
+  attendeeProfile AttendeeProfile?
+  hostProfile     HostProfile?  @relation("HostUser")
   adminProfile AdminProfile?
 
   // Back-relations for admin audit trails
@@ -56,6 +56,14 @@ model User {
   reviewedEvents Event[]         @relation("EventReviewedBy")
 
   notifications Notification[]
+
+  interestAffinities UserInterestAffinity[]
+  orders                 Order[]
+  reviews                EventReview[]
+  createdScannerSessions EventScannerSession[]
+
+  auditLogs      AuditLog[]      @relation("AuditLogActor")
+  consentRecords ConsentRecord[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -101,6 +109,7 @@ enum HostApprovalStatus {
   PENDING
   APPROVED
   REJECTED
+  SUSPENDED
 }
 
 enum KycStatus {
@@ -142,28 +151,27 @@ enum DiscountType {
   FLAT        // reduce fee rate by X percentage points (e.g. 10 off 15% → 5%)
 }
 
-// ─── User Profile ─────────────────────────────────────────────────────────────
+// ─── Attendee Profile ─────────────────────────────────────────────────────────
 
-model UserProfile {
+model AttendeeProfile {
   id     String @id @default(uuid())
   userId String @unique
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  username    String?           @unique
   bio         String?
-  dateOfBirth DateTime?
-  gender      Gender?
   city        String?
-  languages   String[]
-  visibility  ProfileVisibility @default(MEMBERS_ONLY)
-
-  interests UserInterest[]
+  ageRange    AgeRange?
+  profession  String?
+  vibeType    VibeType?
+  socialStyle SocialStyle?
+  privacy     ProfileVisibility @default(MEMBERS_ONLY)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([city])
-  @@index([languages(ops: ArrayOps)], type: Gin)
-  @@map("user_profiles")
+  @@map("attendee_profiles")
 }
 
 model AdminProfile {
@@ -179,13 +187,42 @@ model AdminProfile {
   @@map("admin_profiles")
 }
 
+model Interest {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  slug        String  @unique
+  description String?
+  image       String?
+
+  userAffinities   UserInterestAffinity[]
+  categoryMappings InterestCategory[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("interests")
+}
+
+model UserInterestAffinity {
+  userId     String
+  interestId String
+  affinity   InterestAffinity
+
+  user     User     @relation(fields: [userId],     references: [id], onDelete: Cascade)
+  interest Interest @relation(fields: [interestId], references: [id], onDelete: Cascade)
+
+  @@id([userId, interestId])
+  @@index([interestId])
+  @@map("user_interest_affinities")
+}
+
 model Category {
   id          String  @id @default(uuid())
   name        String  @unique
   description String?
   isActive    Boolean @default(true)
 
-  userInterests            UserInterest[]
+  interestMappings         InterestCategory[]
   hostExperienceCategories HostExperienceCategory[]
   events                   Event[]
 
@@ -195,16 +232,17 @@ model Category {
   @@map("categories")
 }
 
-model UserInterest {
-  userProfileId String
-  categoryId    String
 
-  userProfile UserProfile @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
-  category    Category    @relation(fields: [categoryId], references: [id])
+model InterestCategory {
+  interestId String
+  categoryId String
 
-  @@id([userProfileId, categoryId])
+  interest Interest  @relation(fields: [interestId], references: [id], onDelete: Cascade)
+  category Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([interestId, categoryId])
   @@index([categoryId])
-  @@map("user_interests")
+  @@map("interest_categories")
 }
 
 // ─── Host Profile ─────────────────────────────────────────────────────────────
@@ -218,6 +256,7 @@ model HostProfile {
   hostType    HostType?
   displayName String?   // Public-facing name shown to attendees
   legalName   String?   // Full legal name or registered company name
+  gender      Gender?
 
   // Legal / Compliance (encrypted or masked)
   panEncrypted  String?  // AES-256-GCM encrypted PAN — required for TDS on payouts
@@ -492,13 +531,19 @@ model Coupon {
   createdBy     String
   createdByUser User   @relation("CouponCreatedBy", fields: [createdBy], references: [id])
 
-  redemptions CouponRedemption[]
+  // Event-specific coupon (null = platform-wide, applies to any event)
+  eventId String?
+  event   Event?  @relation("EventCoupons", fields: [eventId], references: [id])
+
+  redemptions    CouponRedemption[]
+  orderUsages    Order[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([code])
   @@index([target, isActive])
+  @@index([eventId])
   @@map("coupons")
 }
 
@@ -605,11 +650,15 @@ model Event {
   updatedAt DateTime    @updatedAt
 
   // Relations
-  hostProfile  HostProfile        @relation(fields: [hostProfileId], references: [id])
-  category     Category?          @relation(fields: [categoryId], references: [id])
-  tickets      EventTicket[]
-  media        EventMedia[]
-  refundPolicy EventRefundPolicy?
+  hostProfile     HostProfile           @relation(fields: [hostProfileId], references: [id])
+  category        Category?             @relation(fields: [categoryId], references: [id])
+  tickets         EventTicket[]
+  media           EventMedia[]
+  refundPolicy    EventRefundPolicy?
+  orders          Order[]
+  coupons         Coupon[]              @relation("EventCoupons")
+  reviews         EventReview[]
+  scannerSessions EventScannerSession[]
 
   @@index([hostProfileId])
   @@index([categoryId])
@@ -626,6 +675,7 @@ model EventTicket {
   name          String
   price         Decimal
   totalCapacity Int
+  soldCount     Int     @default(0) // held (PENDING) + sold (CONFIRMED); authoritative availability
   maxPerPerson  Int?
   description   String?
   saleStartDate DateTime?
@@ -634,7 +684,8 @@ model EventTicket {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  event      Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
 
   @@index([eventId])
   @@map("event_tickets")
@@ -699,4 +750,300 @@ enum RefundType {
 enum RefundTo {
   ORIGINAL_PAYMENT
   PLATFORM_CREDIT
+}
+
+enum InterestAffinity {
+  LIKED
+  DISLIKED
+  OPEN_TO
+}
+
+enum AgeRange {
+  UNDER_18
+  AGE_18_24
+  AGE_25_34
+  AGE_35_44
+  AGE_45_54
+  AGE_55_PLUS
+}
+
+enum VibeType {
+  LIFE_OF_PARTY
+  CHILL_OBSERVING
+  HERE_TO_CONNECT
+  OPEN_TO_WHATEVER
+}
+
+enum SocialStyle {
+  SOLO_EXPLORER
+  OPEN_TO_MEETING
+  BRINGING_GANG
+}
+
+// ─── Orders ───────────────────────────────────────────────────────────────────
+
+model Order {
+  id        String @id @default(uuid())
+  bookingId String @unique // human-readable ID shown on ticket e.g. MDAY-7X9K-3PL2
+  userId    String
+  eventId   String
+
+  status OrderStatus @default(PENDING_PAYMENT)
+
+  // Financials — snapshotted at creation, never recomputed from live data
+  subtotal       Decimal
+  platformFee    Decimal
+  taxAmount      Decimal
+  totalAmount    Decimal
+
+  // Promo
+  couponId       String?
+  discountAmount Decimal @default(0)
+
+  // Razorpay — nullable until payment is wired in
+  razorpayOrderId   String? @unique
+  razorpayPaymentId String? @unique
+
+  confirmedAt        DateTime?
+  cancelledAt        DateTime?
+  cancellationReason String?
+
+  user   User    @relation(fields: [userId], references: [id])
+  event  Event   @relation(fields: [eventId], references: [id])
+  coupon Coupon? @relation(fields: [couponId], references: [id])
+  items  OrderItem[]
+  review EventReview?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([eventId])
+  @@index([status])
+  @@index([couponId])
+  @@map("orders")
+}
+
+model OrderItem {
+  id      String @id @default(uuid())
+  orderId String
+
+  ticketId  String
+  quantity  Int
+  unitPrice Decimal // snapshot — price at time of purchase
+
+  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  ticket    EventTicket @relation(fields: [ticketId], references: [id])
+  attendees OrderAttendee[]
+
+  @@index([orderId])
+  @@index([ticketId])
+  @@map("order_items")
+}
+
+model OrderAttendee {
+  id          String @id @default(uuid())
+  orderItemId String
+
+  fullName    String
+  email       String
+  isLead      Boolean  @default(false) // true = the buyer themselves
+  ticketCode  String   @unique @default(uuid()) // value encoded in QR code
+  checkedInAt        DateTime?
+  scannedBySessionId String?
+
+  orderItem        OrderItem            @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  scannedBySession EventScannerSession? @relation(fields: [scannedBySessionId], references: [id])
+
+  @@index([orderItemId])
+  @@index([ticketCode])
+  @@map("order_attendees")
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT  // order created, awaiting payment (expires after 15 min)
+  CONFIRMED        // payment verified
+  CANCELLED        // cancelled by user or payment timeout
+  REFUNDED         // refund processed
+}
+
+// ─── Reviews ──────────────────────────────────────────────────────────────────
+
+model EventReview {
+  id      String @id @default(uuid())
+  eventId String
+  userId  String
+  orderId String @unique // one review per order; also enforces one per user+event via @@unique below
+
+  rating     Int      // 1–5
+  highlights String[] // e.g. ["GREAT_MUSIC", "GOOD_CROWD"]
+  body       String?  // optional written review, max 800 chars
+  isVisible  Boolean  @default(true) // admin can hide
+
+  photos ReviewPhoto[]
+
+  event Event @relation(fields: [eventId], references: [id])
+  user  User  @relation(fields: [userId],  references: [id])
+  order Order @relation(fields: [orderId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, eventId])
+  @@index([eventId])
+  @@index([userId])
+  @@map("event_reviews")
+}
+
+model ReviewPhoto {
+  id       String @id @default(uuid())
+  reviewId String
+
+  key            String              // S3 key
+  approvalStatus PhotoApprovalStatus @default(PENDING)
+  approvedAt     DateTime?
+  rejectedAt     DateTime?
+
+  review EventReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([reviewId])
+  @@map("review_photos")
+}
+
+enum PhotoApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// ─── Check-In ─────────────────────────────────────────────────────────────────
+
+model EventScannerSession {
+  id      String @id @default(uuid())
+  eventId String
+  label   String   // display name: "Gate A", "Security Team", etc.
+  token   String   @unique // 32-byte hex — authenticates scanner requests without login
+  expiresAt DateTime
+  isActive  Boolean @default(true) // host can deactivate early
+
+  createdByUserId String
+
+  event     Event           @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  createdBy User            @relation(fields: [createdByUserId], references: [id])
+  checkIns  OrderAttendee[]
+
+  createdAt DateTime @default(now())
+
+  @@index([eventId])
+  @@index([token])
+  @@map("event_scanner_sessions")
+}
+
+// ─── Audit & Consent ──────────────────────────────────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  actorId   String?
+  actorRole String?  // ATTENDEE | HOST | ADMIN | SYSTEM
+  ipAddress String?
+  userAgent String?
+
+  action     AuditAction
+  entityType String      // USER | HOST | EVENT | ORDER | PAYOUT_ACCOUNT | SUBSCRIPTION | SCANNER_SESSION
+  entityId   String
+
+  metadata Json?
+
+  actor User? @relation("AuditLogActor", fields: [actorId], references: [id])
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model ConsentRecord {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  userId      String
+  consentType ConsentType
+
+  ipAddress String?
+  userAgent String?
+
+  consentedAt DateTime
+  withdrawnAt DateTime?
+  isActive    Boolean   @default(true) 
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, consentType])
+  @@index([userId, isActive])
+  @@map("consent_records")
+}
+
+enum AuditAction {
+  // Auth / identity
+  USER_REGISTERED
+  USER_LOGGED_IN
+  USER_DELETED
+  USER_RESTORED
+
+  // Host KYC
+  KYC_SUBMITTED
+  KYC_APPROVED
+  KYC_REJECTED
+  KYC_RESUBMITTED
+
+  // Payout accounts (PMLA / RBI)
+  PAYOUT_ACCOUNT_ADDED
+  PAYOUT_ACCOUNT_APPROVED
+  PAYOUT_ACCOUNT_DEACTIVATED
+
+  // Event lifecycle
+  EVENT_CREATED
+  EVENT_SUBMITTED_FOR_REVIEW
+  EVENT_APPROVED
+  EVENT_REJECTED
+  EVENT_PUBLISHED
+  EVENT_CANCELLED
+
+  // Orders / payments (PMLA / GST)
+  ORDER_CREATED
+  ORDER_CONFIRMED
+  ORDER_CANCELLED
+  REFUND_INITIATED
+  REFUND_COMPLETED
+
+  // Subscriptions
+  SUBSCRIPTION_CREATED
+  SUBSCRIPTION_UPGRADED
+  SUBSCRIPTION_CANCELLED
+
+  // Admin actions
+  ADMIN_HOST_SUSPENDED
+  ADMIN_HOST_RESTORED
+  ADMIN_PLAN_PRICE_CHANGED
+
+  // Check-in
+  SCANNER_SESSION_CREATED
+  SCANNER_SESSION_EXPIRED
+  TICKET_SCANNED
+
+  // DPDP data subject rights (future)
+  DATA_EXPORT_REQUESTED
+  DATA_DELETION_REQUESTED
+}
+
+enum ConsentType {
+  TERMS_OF_SERVICE
+  PRIVACY_POLICY
+  HOST_KYC_DATA_SHARING
+  HOST_BANK_DATA_SHARING
 }

@@ -16,16 +16,23 @@ import { ListHostsQueryDto } from './dto/list-hosts-query.dto';
 import { ListAdminsQueryDto } from './dto/list-admins-query.dto';
 import { ListRolesQueryDto } from './dto/list-roles-query.dto';
 import { RejectHostDto } from './dto/reject-host.dto';
+import { SuspendHostDto } from './dto/suspend-host.dto';
 import { RejectEventDto } from './dto/reject-event.dto';
+import { ForceCancelEventDto } from './dto/force-cancel-event.dto';
 import { InviteAdminDto } from './dto/invite-admin.dto';
 import { CreateCouponDto } from './dto/create-coupon.dto';
 import { ListCouponsQueryDto } from './dto/list-coupons-query.dto';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
+import { CreateInterestDto } from './dto/create-interest.dto';
+import { UpdateInterestDto } from './dto/update-interest.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
+import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RedisService } from '../../common/redis/redis.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
+import { InterestsService } from '../interests/interests.service';
 
 @Injectable()
 export class AdminService {
@@ -38,6 +45,8 @@ export class AdminService {
     private readonly storageService: StorageService,
     private readonly notificationsService: NotificationsService,
     private readonly redis: RedisService,
+    private readonly auditLogService: AuditLogService,
+    private readonly interestsService: InterestsService,
   ) {}
 
   async listAdmins(query: ListAdminsQueryDto) {
@@ -268,6 +277,14 @@ export class AdminService {
       },
     });
 
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'KYC_APPROVED',
+      entityType: 'HOST',
+      entityId: hostProfileId,
+    });
+
     void this.mailQueue.add('host-approved', {
       to: host.user.email,
       hostName: host.user.firstName,
@@ -374,6 +391,7 @@ export class AdminService {
         isActive: true,
         validFrom: dto.validFrom ? new Date(dto.validFrom) : undefined,
         validUntil: dto.validUntil ? new Date(dto.validUntil) : undefined,
+        eventId: dto.eventId ?? null,
         createdBy: creatingAdminId,
       },
     });
@@ -448,6 +466,15 @@ export class AdminService {
       data: { approvalStatus: 'REJECTED', rejectionReason: dto.rejectionReason },
     });
 
+    this.auditLogService.log({
+      actorId: _adminId,
+      actorRole: 'ADMIN',
+      action: 'KYC_REJECTED',
+      entityType: 'HOST',
+      entityId: hostProfileId,
+      metadata: { reason: dto.rejectionReason },
+    });
+
     void this.mailQueue.add('host-rejected', {
       to: host.user.email,
       hostName: host.user.firstName,
@@ -461,6 +488,90 @@ export class AdminService {
     ).catch((err) => this.logger.error('Failed to create host_rejected notification', err));
 
     return { message: 'Host rejected successfully' };
+  }
+
+  async suspendHost(hostProfileId: string, adminId: string, dto: SuspendHostDto) {
+    const host = await this.prisma.hostProfile.findUnique({
+      where: { id: hostProfileId },
+      include: { user: { select: { id: true, email: true, firstName: true } } },
+    });
+
+    if (!host) throw new NotFoundException('Host not found');
+    if (host.approvalStatus !== 'APPROVED')
+      throw new BadRequestException('Only approved hosts can be suspended');
+
+    await this.prisma.hostProfile.update({
+      where: { id: hostProfileId },
+      data: { approvalStatus: 'SUSPENDED', rejectionReason: dto.reason },
+    });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'ADMIN_HOST_SUSPENDED',
+      entityType: 'HOST',
+      entityId: hostProfileId,
+      metadata: { reason: dto.reason },
+    });
+
+    void this.mailQueue
+      .add('host-suspended', {
+        to: host.user.email,
+        hostName: host.user.firstName,
+        reason: dto.reason,
+      })
+      .catch((err) => this.logger.error('Failed to queue host-suspended mail', err));
+    void this.notificationsService
+      .create(
+        host.user.id,
+        'host_suspended',
+        'Account Suspended',
+        'Your host account has been suspended. Please contact support for details.',
+      )
+      .catch((err) => this.logger.error('Failed to create host_suspended notification', err));
+
+    return { message: 'Host suspended successfully' };
+  }
+
+  async restoreHost(hostProfileId: string, adminId: string) {
+    const host = await this.prisma.hostProfile.findUnique({
+      where: { id: hostProfileId },
+      include: { user: { select: { id: true, email: true, firstName: true } } },
+    });
+
+    if (!host) throw new NotFoundException('Host not found');
+    if (host.approvalStatus !== 'SUSPENDED')
+      throw new BadRequestException('Host is not currently suspended');
+
+    await this.prisma.hostProfile.update({
+      where: { id: hostProfileId },
+      data: { approvalStatus: 'APPROVED', rejectionReason: null },
+    });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'ADMIN_HOST_RESTORED',
+      entityType: 'HOST',
+      entityId: hostProfileId,
+    });
+
+    void this.mailQueue
+      .add('host-restored', {
+        to: host.user.email,
+        hostName: host.user.firstName,
+      })
+      .catch((err) => this.logger.error('Failed to queue host-restored mail', err));
+    void this.notificationsService
+      .create(
+        host.user.id,
+        'host_restored',
+        'Account Restored',
+        'Your host account has been restored. You can now create and manage events.',
+      )
+      .catch((err) => this.logger.error('Failed to create host_restored notification', err));
+
+    return { message: 'Host restored successfully' };
   }
 
   // ── Category management ──────────────────────────────────────────────────
@@ -584,6 +695,15 @@ export class AdminService {
     const hostUser = event.hostProfile.user;
     const eventTitle = event.title ?? 'Untitled';
 
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'EVENT_APPROVED',
+      entityType: 'EVENT',
+      entityId: eventId,
+      metadata: { eventTitle },
+    });
+
     void this.mailQueue.add('event-approved', {
       to: hostUser.email,
       hostName: hostUser.firstName,
@@ -695,6 +815,15 @@ export class AdminService {
     const hostUser = event.hostProfile.user;
     const eventTitle = event.title ?? 'Untitled';
 
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'EVENT_REJECTED',
+      entityType: 'EVENT',
+      entityId: eventId,
+      metadata: { eventTitle, remark: dto.remark },
+    });
+
     void this.mailQueue.add('event-rejected', {
       to: hostUser.email,
       hostName: hostUser.firstName,
@@ -709,5 +838,286 @@ export class AdminService {
     ).catch((err) => this.logger.error('Failed to create event_rejected notification', err));
 
     return { message: 'Event rejected successfully' };
+  }
+
+  async forceCancelEvent(eventId: string, adminId: string, dto: ForceCancelEventDto) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: {
+        hostProfile: {
+          include: { user: { select: { id: true, email: true, firstName: true } } },
+        },
+      },
+    });
+
+    if (!event) throw new NotFoundException('Event not found');
+    if (!['PUBLISHED', 'UNDER_REVIEW'].includes(event.status))
+      throw new BadRequestException('Only PUBLISHED or UNDER_REVIEW events can be force-cancelled');
+
+    const pendingOrders = await this.prisma.order.findMany({
+      where: { eventId, status: 'PENDING_PAYMENT' },
+      select: {
+        id: true,
+        couponId: true,
+        items: { select: { ticketId: true, quantity: true } },
+      },
+    });
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.event.update({
+        where: { id: eventId },
+        data: {
+          status: 'CANCELLED',
+          cancelledAt: new Date(),
+          cancellationReason: dto.reason,
+        },
+      });
+
+      for (const order of pendingOrders) {
+        for (const item of order.items) {
+          await tx.$executeRaw`
+            UPDATE event_tickets
+            SET sold_count = GREATEST(sold_count - ${item.quantity}, 0)
+            WHERE id = ${item.ticketId}
+          `;
+        }
+        if (order.couponId) {
+          await tx.$executeRaw`
+            UPDATE coupons
+            SET usage_count = GREATEST(usage_count - 1, 0)
+            WHERE id = ${order.couponId}
+          `;
+        }
+      }
+
+      if (pendingOrders.length > 0) {
+        await tx.order.updateMany({
+          where: { id: { in: pendingOrders.map((o) => o.id) } },
+          data: { status: 'CANCELLED', cancelledAt: new Date(), cancellationReason: 'EVENT_CANCELLED' },
+        });
+      }
+    });
+
+    const hostUser = event.hostProfile.user;
+    const eventTitle = event.title ?? 'Untitled';
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'EVENT_CANCELLED',
+      entityType: 'EVENT',
+      entityId: eventId,
+      metadata: { eventTitle, reason: dto.reason, pendingOrdersCancelled: pendingOrders.length },
+    });
+
+    void this.mailQueue
+      .add('event-force-cancelled', {
+        to: hostUser.email,
+        hostName: hostUser.firstName,
+        eventTitle,
+        reason: dto.reason,
+      })
+      .catch((err) => this.logger.error('Failed to queue event-force-cancelled mail', err));
+    void this.notificationsService
+      .create(
+        hostUser.id,
+        'event_force_cancelled',
+        'Event Cancelled by Admin',
+        `Your event "${eventTitle}" has been cancelled by the platform team.`,
+      )
+      .catch((err) => this.logger.error('Failed to create event_force_cancelled notification', err));
+
+    return {
+      message: 'Event force-cancelled successfully',
+      pendingOrdersCancelled: pendingOrders.length,
+    };
+  }
+
+  // ─── Order management ────────────────────────────────────────────────────────
+
+  async listOrders(query: ListOrdersQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const where: any = {};
+    if (query.eventId) where.eventId = query.eventId;
+    if (query.userId) where.userId = query.userId;
+    if (query.status) where.status = query.status;
+    if (query.bookingId) where.bookingId = { contains: query.bookingId, mode: 'insensitive' };
+    if (query.from || query.to) {
+      where.createdAt = {};
+      if (query.from) where.createdAt.gte = new Date(query.from);
+      if (query.to) where.createdAt.lte = new Date(query.to);
+    }
+    if (query.hostProfileId) {
+      where.event = { hostProfileId: query.hostProfileId };
+    }
+
+    const [orders, total] = await Promise.all([
+      this.prisma.order.findMany({
+        where,
+        select: {
+          id: true,
+          bookingId: true,
+          status: true,
+          subtotal: true,
+          discountAmount: true,
+          platformFee: true,
+          taxAmount: true,
+          totalAmount: true,
+          confirmedAt: true,
+          cancelledAt: true,
+          createdAt: true,
+          user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+          event: {
+            select: {
+              id: true,
+              title: true,
+              eventDate: true,
+              city: true,
+              hostProfile: { select: { id: true, displayName: true } },
+            },
+          },
+          coupon: { select: { code: true, discountType: true, discountValue: true } },
+          items: {
+            select: {
+              id: true,
+              quantity: true,
+              unitPrice: true,
+              ticket: { select: { id: true, name: true } },
+              _count: { select: { attendees: true } },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.order.count({ where }),
+    ]);
+
+    return { orders, total, page, limit };
+  }
+
+  async getOrderDetail(orderId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+        event: {
+          select: {
+            id: true,
+            title: true,
+            eventDate: true,
+            startTime: true,
+            endTime: true,
+            venueName: true,
+            fullAddress: true,
+            city: true,
+            hostProfile: { select: { id: true, displayName: true, userId: true } },
+          },
+        },
+        coupon: { select: { code: true, discountType: true, discountValue: true } },
+        items: {
+          include: {
+            ticket: { select: { id: true, name: true, description: true, price: true } },
+            attendees: true,
+          },
+        },
+      },
+    });
+
+    if (!order) throw new NotFoundException('Order not found');
+    return order;
+  }
+
+  // ─── Interests ───────────────────────────────────────────────────────────────
+
+  private toSlug(name: string): string {
+    return name
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .trim()
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-');
+  }
+
+  async createInterest(dto: CreateInterestDto) {
+    const slug = this.toSlug(dto.name);
+    const existing = await this.prisma.interest.findFirst({
+      where: { OR: [{ name: dto.name }, { slug }] },
+    });
+    if (existing) throw new ConflictException('An interest with this name already exists');
+
+    const interest = await this.prisma.interest.create({
+      data: { name: dto.name, slug, description: dto.description, image: dto.image },
+    });
+    void this.interestsService.invalidateCache();
+    return interest;
+  }
+
+  async getInterests() {
+    return this.prisma.interest.findMany({
+      orderBy: { name: 'asc' },
+      include: {
+        categoryMappings: {
+          include: { category: { select: { id: true, name: true } } },
+        },
+      },
+    });
+  }
+
+  async getInterestById(id: string) {
+    const interest = await this.prisma.interest.findUnique({
+      where: { id },
+      include: {
+        categoryMappings: {
+          include: { category: { select: { id: true, name: true } } },
+        },
+      },
+    });
+    if (!interest) throw new NotFoundException('Interest not found');
+    return interest;
+  }
+
+  async setInterestCategories(id: string, categoryIds: string[]) {
+    const interest = await this.prisma.interest.findUnique({ where: { id } });
+    if (!interest) throw new NotFoundException('Interest not found');
+
+    const uniqueCategoryIds = [...new Set(categoryIds)];
+
+    await this.prisma.$transaction([
+      this.prisma.interestCategory.deleteMany({ where: { interestId: id } }),
+      this.prisma.interestCategory.createMany({
+        data: uniqueCategoryIds.map((categoryId) => ({ interestId: id, categoryId })),
+      }),
+    ]);
+
+    return this.getInterestById(id);
+  }
+
+  async updateInterest(id: string, dto: UpdateInterestDto) {
+    const interest = await this.prisma.interest.findUnique({ where: { id } });
+    if (!interest) throw new NotFoundException('Interest not found');
+
+    const slug = dto.name ? this.toSlug(dto.name) : undefined;
+
+    if (slug && slug !== interest.slug) {
+      const conflict = await this.prisma.interest.findFirst({
+        where: { slug, NOT: { id } },
+      });
+      if (conflict) throw new ConflictException('An interest with this name already exists');
+    }
+
+    const updated = await this.prisma.interest.update({
+      where: { id },
+      data: {
+        ...(dto.name && { name: dto.name, slug }),
+        ...(dto.description !== undefined && { description: dto.description }),
+        ...(dto.image !== undefined && { image: dto.image }),
+      },
+    });
+    void this.interestsService.invalidateCache();
+    return updated;
   }
 }

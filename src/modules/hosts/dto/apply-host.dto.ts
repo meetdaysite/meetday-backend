@@ -16,7 +16,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { HostType } from '@prisma/client';
+import { Gender, HostType } from '@prisma/client';
 
 export class SocialLinksDto {
   @ApiPropertyOptional({ example: 'https://instagram.com/yourhandle' })
@@ -77,6 +77,11 @@ export class ApplyHostDto {
   })
   @IsEnum(HostType)
   hostType: HostType;
+
+  @ApiPropertyOptional({ enum: Gender, description: 'Host gender', example: 'MALE' })
+  @IsOptional()
+  @IsEnum(Gender)
+  gender?: Gender;
 
   @ApiPropertyOptional({
     maxLength: 100,
@@ -165,6 +170,14 @@ export class ApplyHostDto {
   @IsArray()
   @IsUrl({}, { each: true })
   portfolioLinks?: string[];
+
+  @ApiPropertyOptional({
+    description: 'S3 key for the host avatar, returned from POST /storage/upload-url with context USER_AVATAR.',
+    example: 'users/user-uuid/avatar/abc123.jpg',
+  })
+  @IsOptional()
+  @IsString()
+  avatarUrl?: string;
 
   @ApiProperty({
     type: [String],

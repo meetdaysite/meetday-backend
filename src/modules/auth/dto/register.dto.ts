@@ -16,8 +16,18 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { HostType } from '@prisma/client';
+import { Gender, HostType, InterestAffinity, SocialStyle, VibeType } from '@prisma/client';
 import { HostAddressDto, SocialLinksDto } from '../../hosts/dto/apply-host.dto';
+
+export class InterestAffinityDto {
+  @ApiProperty({ description: 'UUID of the interest', example: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' })
+  @IsUUID('4')
+  interestId: string;
+
+  @ApiProperty({ enum: InterestAffinity, description: 'How the user relates to this interest', example: 'LIKED' })
+  @IsEnum(InterestAffinity)
+  affinity: InterestAffinity;
+}
 
 export class RegisterDto {
   @ApiPropertyOptional({
@@ -70,6 +80,28 @@ export class RegisterDto {
   @IsEnum(['USER', 'HOST'], { message: 'accountType must be USER or HOST' })
   accountType?: 'USER' | 'HOST' = 'USER';
 
+  // ── Attendee-specific fields (only used when accountType === 'USER') ─────────
+
+  @ApiPropertyOptional({ enum: VibeType, description: 'How you typically show up at events.', example: 'HERE_TO_CONNECT' })
+  @IsOptional()
+  @IsEnum(VibeType)
+  vibeType?: VibeType;
+
+  @ApiPropertyOptional({ enum: SocialStyle, description: 'How you prefer to attend events.', example: 'OPEN_TO_MEETING' })
+  @IsOptional()
+  @IsEnum(SocialStyle)
+  socialStyle?: SocialStyle;
+
+  @ApiPropertyOptional({
+    description: 'Interest affinities to seed at registration. UUIDs from GET /interests.',
+    type: [InterestAffinityDto],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => InterestAffinityDto)
+  interests?: InterestAffinityDto[];
+
   // ── Host-specific fields (only used when accountType === 'HOST') ─────────────
 
   @ApiPropertyOptional({
@@ -80,6 +112,11 @@ export class RegisterDto {
   @IsOptional()
   @IsEnum(HostType)
   hostType?: HostType;
+
+  @ApiPropertyOptional({ enum: Gender, description: 'Host gender', example: 'FEMALE' })
+  @IsOptional()
+  @IsEnum(Gender)
+  gender?: Gender;
 
   @ApiPropertyOptional({
     description: 'Required when accountType is HOST. UUIDs from GET /categories.',

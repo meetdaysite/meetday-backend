@@ -29,7 +29,7 @@ import { GetUser } from '../../common/decorators/get-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { ApplyHostDto } from './dto/apply-host.dto';
 import { UpdateHostProfileDto } from './dto/update-host-profile.dto';
-import { SubmitKycDto } from './dto/submit-kyc.dto';
+import { VerifyBankDto } from './dto/submit-kyc.dto';
 import { PanWebhookDto } from './dto/pan-webhook.dto';
 import { BankWebhookDto } from './dto/bank-webhook.dto';
 import { UpgradeSubscriptionDto } from './dto/upgrade-subscription.dto';
@@ -269,21 +269,57 @@ export class HostsController {
     return this.hostsService.updateHostProfile(userId, dto);
   }
 
-  @Post('kyc/submit')
+  @Post('kyc/pan/verify')
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Verify PAN (standalone)',
+    description:
+      'Verifies the PAN already stored on the host profile via the KYC provider. ' +
+      'Must be called after saving legalName and pan via PATCH /hosts/profile. ' +
+      'On success, panVerificationStatus becomes VERIFIED. ' +
+      'The host can then call POST /hosts/kyc/bank/verify without re-running PAN. ' +
+      'kycStatus is not updated here — it is managed by POST /hosts/kyc/bank/verify.',
+  })
+  @ApiOkResponse({
+    description: 'PAN verification result.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-05-12T10:00:00.000Z',
+        data: {
+          referenceId: 'KYC-PAN-STUB-a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+          panVerificationStatus: 'VERIFIED',
+          failureReason: null,
+        },
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'PAN or legal name not set on profile.' })
+  @ApiConflictResponse({ description: 'PAN is already verified.' })
+  @ApiNotFoundResponse({ description: 'Host profile not found.' })
+  verifyPan(@GetUser('id') userId: string) {
+    return this.hostsService.verifyPanOnly(userId);
+  }
+
+  @Post('kyc/bank/verify')
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @UseGuards(RolesGuard)
   @Roles('HOST')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Submit KYC for verification',
+    summary: 'Verify bank account (penny drop)',
     description:
-      'Initiates PAN verification (via KYC provider) and bank account penny drop (via Razorpay) simultaneously. ' +
+      'Verifies the host\'s bank account via Razorpay penny drop. ' +
+      'If PAN was pre-verified via POST /hosts/kyc/pan/verify, the PAN step is skipped. ' +
+      'Otherwise PAN is verified inline before bank verification runs. ' +
       'Raw account number is never stored — only the last 4 digits are persisted. ' +
-      'kycStatus becomes PENDING. Both verifications must succeed for kycStatus to become VERIFIED. ' +
-      'Results are delivered asynchronously via POST /hosts/kyc/pan-webhook and POST /hosts/kyc/bank-webhook.',
+      'kycStatus becomes PENDING. Both PAN and bank must be VERIFIED for kycStatus to become VERIFIED.',
   })
   @ApiBody({
-    type: SubmitKycDto,
+    type: VerifyBankDto,
     examples: {
       default: {
         summary: 'Submit bank account for verification',
@@ -292,29 +328,36 @@ export class HostsController {
             accountNumber: '1234567890',
             ifscCode: 'HDFC0001234',
             accountHolderName: 'Rahul Sharma',
-            accountType: 'SAVINGS',
+            bankName: 'HDFC Bank',
           },
         },
       },
     },
   })
   @ApiOkResponse({
-    description: 'KYC initiated. Awaiting PAN and bank verification webhooks.',
+    description:
+      'Bank verification initiated. For the Sandbox provider (synchronous) the response already reflects the outcome. ' +
+      'For async providers, statuses remain PENDING until webhooks arrive. ' +
+      'pennyDropReference is null when PAN failed synchronously (bank step skipped to avoid a duplicate failure email).',
     schema: {
       example: {
         success: true,
-        timestamp: '2026-04-13T10:00:00.000Z',
+        timestamp: '2026-05-12T10:00:00.000Z',
         data: {
           panReferenceId: 'KYC-PAN-STUB-a1b2c3d4-e5f6-7890-abcd-ef1234567890',
           pennyDropReference: 'PENNY-STUB-b2c3d4e5-f6a7-8901-bcde-f12345678901',
+          kycStatus: 'PENDING',
+          panVerificationStatus: 'PENDING',
+          bankVerificationStatus: 'PENDING',
+          kycFailureReason: null,
         },
       },
     },
   })
   @ApiNotFoundResponse({ description: 'Host profile not found.' })
-  @ApiConflictResponse({ description: 'KYC is already in progress or already verified.' })
-  submitKyc(@GetUser('id') userId: string, @Body() dto: SubmitKycDto) {
-    return this.hostsService.submitKyc(userId, dto);
+  @ApiConflictResponse({ description: 'KYC is already verified.' })
+  verifyBank(@GetUser('id') userId: string, @Body() dto: VerifyBankDto) {
+    return this.hostsService.verifyBank(userId, dto);
   }
 
   @Post('kyc/pan-webhook')

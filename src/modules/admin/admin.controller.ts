@@ -5,9 +5,11 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseIntPipe,
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -26,11 +28,17 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
+import { ReviewsService } from '../reviews/reviews.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
+import { QueryAuditLogDto } from '../audit-log/dto/query-audit-log.dto';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { RejectHostDto } from './dto/reject-host.dto';
+import { SuspendHostDto } from './dto/suspend-host.dto';
 import { RejectEventDto } from './dto/reject-event.dto';
+import { ForceCancelEventDto } from './dto/force-cancel-event.dto';
+import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { ListHostsQueryDto } from './dto/list-hosts-query.dto';
 import { ListAdminsQueryDto } from './dto/list-admins-query.dto';
 import { ListRolesQueryDto } from './dto/list-roles-query.dto';
@@ -39,6 +47,9 @@ import { CreateCouponDto } from './dto/create-coupon.dto';
 import { ListCouponsQueryDto } from './dto/list-coupons-query.dto';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
+import { CreateInterestDto } from './dto/create-interest.dto';
+import { UpdateInterestDto } from './dto/update-interest.dto';
+import { SetInterestCategoriesDto } from './dto/set-interest-categories.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
 
 @ApiTags('Admin')
@@ -49,7 +60,11 @@ import { ListEventsQueryDto } from './dto/list-events-query.dto';
 @ApiForbiddenResponse({ description: 'Authenticated user does not have a required admin role' })
 @Controller('admin')
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly reviewsService: ReviewsService,
+    private readonly auditLogService: AuditLogService,
+  ) {}
 
   @Get('admins')
   @Roles('SUPER_ADMIN')
@@ -509,6 +524,57 @@ export class AdminController {
     return this.adminService.rejectHost(id, adminId, dto);
   }
 
+  @Post('hosts/:id/suspend')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Suspend an approved host',
+    description:
+      'Immediately suspends an approved host account. ' +
+      'The host can no longer submit new events or accept new orders. ' +
+      'Existing PUBLISHED events remain visible but new orders will be blocked. ' +
+      'A suspension reason is required and is sent to the host via email and in-app notification.',
+  })
+  @ApiParam({ name: 'id', description: 'Host profile UUID' })
+  @ApiBody({ type: SuspendHostDto })
+  @ApiOkResponse({
+    description: 'Host suspended.',
+    schema: { example: { success: true, timestamp: '2026-05-15T10:00:00.000Z', data: { message: 'Host suspended successfully' } } },
+  })
+  @ApiNotFoundResponse({ description: 'Host profile not found.' })
+  @ApiBadRequestResponse({ description: 'Host is not currently approved.' })
+  suspendHost(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') adminId: string,
+    @Body() dto: SuspendHostDto,
+  ) {
+    return this.adminService.suspendHost(id, adminId, dto);
+  }
+
+  @Post('hosts/:id/restore')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Restore a suspended host',
+    description:
+      'Restores a suspended host back to APPROVED status. ' +
+      'The host can immediately create and submit events again. ' +
+      'No body required.',
+  })
+  @ApiParam({ name: 'id', description: 'Host profile UUID' })
+  @ApiOkResponse({
+    description: 'Host restored.',
+    schema: { example: { success: true, timestamp: '2026-05-15T10:00:00.000Z', data: { message: 'Host restored successfully' } } },
+  })
+  @ApiNotFoundResponse({ description: 'Host profile not found.' })
+  @ApiBadRequestResponse({ description: 'Host is not currently suspended.' })
+  restoreHost(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') adminId: string,
+  ) {
+    return this.adminService.restoreHost(id, adminId);
+  }
+
   // ─── Coupon endpoints ────────────────────────────────────────────────────────
 
   @Post('coupons')
@@ -914,5 +980,197 @@ export class AdminController {
     @Body() dto: RejectEventDto,
   ) {
     return this.adminService.rejectEvent(id, adminId, dto);
+  }
+
+  @Post('events/:id/force-cancel')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Force-cancel an event (admin override)',
+    description:
+      'Immediately cancels a PUBLISHED or UNDER_REVIEW event regardless of host action. ' +
+      'All PENDING_PAYMENT orders for the event are atomically cancelled and capacity is released. ' +
+      'The host is notified via email and in-app notification. ' +
+      'Use for policy violations, fraud, or safety concerns.',
+  })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiBody({ type: ForceCancelEventDto })
+  @ApiOkResponse({
+    description: 'Event cancelled. Returns count of pending orders also cancelled.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-05-15T10:00:00.000Z',
+        data: { message: 'Event force-cancelled successfully', pendingOrdersCancelled: 3 },
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Event not found.' })
+  @ApiBadRequestResponse({ description: 'Event is not in PUBLISHED or UNDER_REVIEW status.' })
+  forceCancelEvent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') adminId: string,
+    @Body() dto: ForceCancelEventDto,
+  ) {
+    return this.adminService.forceCancelEvent(id, adminId, dto);
+  }
+
+  // ─── Order management ────────────────────────────────────────────────────────
+
+  @Get('orders')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'SUPPORT')
+  @ApiOperation({
+    summary: 'List all orders',
+    description:
+      'Paginated list of all orders across the platform. ' +
+      'Filterable by event, user, host, status, booking ID, and date range. ' +
+      'Useful for support investigations and finance reconciliation.',
+  })
+  @ApiOkResponse({
+    description: 'Paginated order list.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-05-15T10:00:00.000Z',
+        data: {
+          orders: [
+            {
+              id: 'order-uuid',
+              bookingId: 'MDAY-AB12-CD34',
+              status: 'CONFIRMED',
+              totalAmount: 1180,
+              createdAt: '2026-05-10T10:00:00.000Z',
+              user: { id: 'user-uuid', firstName: 'Rahul', lastName: 'Sharma', email: 'rahul@example.com' },
+              event: { id: 'event-uuid', title: 'Mumbai Heritage Walk', city: 'Mumbai' },
+            },
+          ],
+          total: 1,
+          page: 1,
+          limit: 20,
+        },
+      },
+    },
+  })
+  listOrders(@Query() query: ListOrdersQueryDto) {
+    return this.adminService.listOrders(query);
+  }
+
+  @Get('orders/:id')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'SUPPORT')
+  @ApiOperation({
+    summary: 'Get order detail',
+    description: 'Full order detail including attendees, ticket codes, coupon, and financials. No ownership restriction.',
+  })
+  @ApiParam({ name: 'id', description: 'Order UUID' })
+  @ApiOkResponse({ description: 'Order detail.' })
+  @ApiNotFoundResponse({ description: 'Order not found.' })
+  getOrderDetail(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.getOrderDetail(id);
+  }
+
+  // ─── Interests ───────────────────────────────────────────────────────────────
+
+  @Post('interests')
+  @Roles('SUPER_ADMIN')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Create an interest',
+    description: 'Creates a new interest. Slug is auto-generated from the name. Only SUPER_ADMIN.',
+  })
+  @ApiBody({ type: CreateInterestDto })
+  @ApiCreatedResponse({ description: 'Interest created.' })
+  @ApiConflictResponse({ description: 'An interest with this name already exists.' })
+  createInterest(@Body() dto: CreateInterestDto) {
+    return this.adminService.createInterest(dto);
+  }
+
+  @Get('interests')
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({ summary: 'List all interests', description: 'Returns all interests ordered by name. Only SUPER_ADMIN.' })
+  @ApiOkResponse({ description: 'List of interests.' })
+  getInterests() {
+    return this.adminService.getInterests();
+  }
+
+  @Get('interests/:id')
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({ summary: 'Get interest by ID', description: 'Returns a single interest by UUID. Only SUPER_ADMIN.' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ description: 'Interest detail.' })
+  @ApiNotFoundResponse({ description: 'Interest not found.' })
+  getInterestById(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.getInterestById(id);
+  }
+
+  @Patch('interests/:id')
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({
+    summary: 'Update an interest',
+    description: 'Partially updates an interest. Slug is re-generated if name changes. Only SUPER_ADMIN.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiBody({ type: UpdateInterestDto })
+  @ApiOkResponse({ description: 'Interest updated.' })
+  @ApiNotFoundResponse({ description: 'Interest not found.' })
+  @ApiConflictResponse({ description: 'An interest with this name already exists.' })
+  updateInterest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateInterestDto,
+  ) {
+    return this.adminService.updateInterest(id, dto);
+  }
+
+  @Put('interests/:id/categories')
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({
+    summary: 'Replace category mappings for an interest',
+    description: 'Full replace — existing mappings are deleted and replaced with the provided list. Pass an empty array to clear all mappings. Duplicate categoryIds in the request are ignored.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiBody({ type: SetInterestCategoriesDto })
+  @ApiOkResponse({ description: 'Interest with updated category mappings.' })
+  @ApiNotFoundResponse({ description: 'Interest not found.' })
+  setInterestCategories(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetInterestCategoriesDto,
+  ) {
+    return this.adminService.setInterestCategories(id, dto.categoryIds);
+  }
+
+  // ─── Audit Logs ───────────────────────────────────────────────────────────
+
+  @Get('audit-logs')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @ApiOperation({
+    summary: 'Query audit logs',
+    description:
+      'Returns a paginated, filtered list of audit log entries. ' +
+      'Filter by actor, entity type/ID, action, or date range. ' +
+      'Only SUPER_ADMIN and CITY_ADMIN can access audit logs.',
+  })
+  @ApiOkResponse({ description: 'Paginated audit log entries.' })
+  queryAuditLogs(@Query() query: QueryAuditLogDto) {
+    return this.auditLogService.queryLogs(query);
+  }
+
+  // ─── Reviews ──────────────────────────────────────────────────────────────
+
+  @Get('reviews')
+  @ApiOperation({ summary: 'List all reviews with moderation status' })
+  listReviews(
+    @Query('page', new ParseIntPipe({ optional: true })) page?: number,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+  ) {
+    return this.reviewsService.listAllReviews(page, limit);
+  }
+
+  @Patch('reviews/:id/visibility')
+  @ApiOperation({ summary: 'Show or hide a review' })
+  @ApiParam({ name: 'id', type: String })
+  setReviewVisibility(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('isVisible') isVisible: boolean,
+  ) {
+    return this.reviewsService.setReviewVisibility(id, isVisible);
   }
 }
