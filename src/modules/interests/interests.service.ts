@@ -13,11 +13,11 @@ export class InterestsService {
   ) {}
 
   async listPublic() {
-    const cached = await this.redis.get<{ id: string; name: string; slug: string; image: string | null }[]>(INTERESTS_KEY);
+    const cached = await this.redis.get<{ id: string; name: string; slug: string; description: string | null; image: string | null }[]>(INTERESTS_KEY);
     if (cached) return cached;
 
     const interests = await this.prisma.interest.findMany({
-      select: { id: true, name: true, slug: true, image: true },
+      select: { id: true, name: true, slug: true, description: true, image: true },
       orderBy: { name: 'asc' },
     });
 

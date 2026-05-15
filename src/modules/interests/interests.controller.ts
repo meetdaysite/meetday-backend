@@ -23,8 +23,8 @@ export class InterestsController {
         success: true,
         timestamp: '2026-05-15T10:00:00.000Z',
         data: [
-          { id: 'interest-uuid-1', name: 'Photography', slug: 'photography', image: null },
-          { id: 'interest-uuid-2', name: 'Food & Drink', slug: 'food-drink', image: 'https://cdn.meetday.app/interests/food.jpg' },
+          { id: 'interest-uuid-1', name: 'Photography', slug: 'photography', description: 'Capture moments and explore visual storytelling', image: null },
+          { id: 'interest-uuid-2', name: 'Food & Drink', slug: 'food-drink', description: 'Culinary experiences, food tours, and tastings', image: 'https://cdn.meetday.app/interests/food.jpg' },
         ],
       },
     },
