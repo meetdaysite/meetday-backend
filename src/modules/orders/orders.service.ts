@@ -483,8 +483,15 @@ export class OrdersService {
       for (const item of order.items) {
         await tx.$executeRaw`
           UPDATE event_tickets
-          SET sold_count = sold_count - ${item.quantity}
+          SET sold_count = GREATEST(sold_count - ${item.quantity}, 0)
           WHERE id = ${item.ticketId}
+        `;
+      }
+      if (order.couponId) {
+        await tx.$executeRaw`
+          UPDATE coupons
+          SET usage_count = GREATEST(usage_count - 1, 0)
+          WHERE id = ${order.couponId}
         `;
       }
       await tx.order.update({
@@ -514,7 +521,11 @@ export class OrdersService {
     const cutoff = new Date(Date.now() - PENDING_EXPIRY_MINUTES * 60 * 1000);
     const expired = await this.prisma.order.findMany({
       where: { status: 'PENDING_PAYMENT', createdAt: { lt: cutoff } },
-      include: { items: { select: { ticketId: true, quantity: true } } },
+      select: {
+        id: true,
+        couponId: true,
+        items: { select: { ticketId: true, quantity: true } },
+      },
     });
 
     for (const order of expired) {
@@ -523,8 +534,15 @@ export class OrdersService {
           for (const item of order.items) {
             await tx.$executeRaw`
               UPDATE event_tickets
-              SET sold_count = sold_count - ${item.quantity}
+              SET sold_count = GREATEST(sold_count - ${item.quantity}, 0)
               WHERE id = ${item.ticketId}
+            `;
+          }
+          if (order.couponId) {
+            await tx.$executeRaw`
+              UPDATE coupons
+              SET usage_count = GREATEST(usage_count - 1, 0)
+              WHERE id = ${order.couponId}
             `;
           }
           await tx.order.update({

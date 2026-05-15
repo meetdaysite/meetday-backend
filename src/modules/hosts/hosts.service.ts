@@ -830,55 +830,63 @@ export class HostsService {
       hostProfileId: profile.id,
     });
 
-    const newSubscription = await this.prisma.$transaction(async (tx) => {
-      await tx.hostSubscription.updateMany({
-        where: { hostProfileId: profile.id, status: SubscriptionStatus.ACTIVE },
-        data: {
-          status: SubscriptionStatus.CANCELLED,
-          cancelledAt: new Date(),
-          cancelReason: 'UPGRADE',
-        },
-      });
-
-      const subscription = await tx.hostSubscription.create({
-        data: {
-          hostProfileId: profile.id,
-          plan: dto.plan,
-          status: SubscriptionStatus.ACTIVE,
-          billingCycle: dto.billingCycle,
-          lockedYearlyPrice: planRecord.yearlyPrice,
-          lockedMonthlyPrice: planRecord.monthlyPrice,
-          lockedFeeRate: effectiveFeeRate,
-          razorpaySubscriptionId: razorpayResult.razorpaySubscriptionId,
-          razorpayPlanId: razorpayResult.razorpayPlanId,
-          currentPeriodStart: razorpayResult.currentPeriodStart,
-          currentPeriodEnd: razorpayResult.currentPeriodEnd,
-        },
-      });
-
-      await tx.hostProfile.update({
-        where: { id: profile.id },
-        data: { currentPlan: dto.plan },
-      });
-
-      if (appliedCoupon) {
-        await tx.couponRedemption.create({
+    let newSubscription: Awaited<ReturnType<typeof this.prisma.hostSubscription.create>>;
+    try {
+      newSubscription = await this.prisma.$transaction(async (tx) => {
+        await tx.hostSubscription.updateMany({
+          where: { hostProfileId: profile.id, status: SubscriptionStatus.ACTIVE },
           data: {
-            couponId: appliedCoupon.id,
-            userId: profile.userId,
-            hostSubscriptionId: subscription.id,
-            originalFeeRate: appliedCoupon.originalFeeRate,
-            discountedFeeRate: appliedCoupon.discountedFeeRate,
+            status: SubscriptionStatus.CANCELLED,
+            cancelledAt: new Date(),
+            cancelReason: 'UPGRADE',
           },
         });
-        await tx.coupon.update({
-          where: { id: appliedCoupon.id },
-          data: { usageCount: { increment: 1 } },
-        });
-      }
 
-      return subscription;
-    });
+        const subscription = await tx.hostSubscription.create({
+          data: {
+            hostProfileId: profile.id,
+            plan: dto.plan,
+            status: SubscriptionStatus.ACTIVE,
+            billingCycle: dto.billingCycle,
+            lockedYearlyPrice: planRecord.yearlyPrice,
+            lockedMonthlyPrice: planRecord.monthlyPrice,
+            lockedFeeRate: effectiveFeeRate,
+            razorpaySubscriptionId: razorpayResult.razorpaySubscriptionId,
+            razorpayPlanId: razorpayResult.razorpayPlanId,
+            currentPeriodStart: razorpayResult.currentPeriodStart,
+            currentPeriodEnd: razorpayResult.currentPeriodEnd,
+          },
+        });
+
+        await tx.hostProfile.update({
+          where: { id: profile.id },
+          data: { currentPlan: dto.plan },
+        });
+
+        if (appliedCoupon) {
+          await tx.couponRedemption.create({
+            data: {
+              couponId: appliedCoupon.id,
+              userId: profile.userId,
+              hostSubscriptionId: subscription.id,
+              originalFeeRate: appliedCoupon.originalFeeRate,
+              discountedFeeRate: appliedCoupon.discountedFeeRate,
+            },
+          });
+          await tx.coupon.update({
+            where: { id: appliedCoupon.id },
+            data: { usageCount: { increment: 1 } },
+          });
+        }
+
+        return subscription;
+      });
+    } catch (err) {
+      await this.subscriptionService
+        .cancelSubscription(razorpayResult.razorpaySubscriptionId)
+        .catch((cancelErr) => this.logger.error('Failed to rollback Razorpay subscription', cancelErr));
+      throw err;
+    }
 
     void this.mailQueue.add('subscription-activated', {
       to: profile.user.email,

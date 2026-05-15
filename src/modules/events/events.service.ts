@@ -402,22 +402,60 @@ export class EventsService {
     if (event.status !== EventStatus.PUBLISHED)
       throw new BadRequestException('Only PUBLISHED events can be cancelled');
 
-    const cancelled = await this.prisma.event.update({
-      where: { id: eventId },
-      data: {
-        status: EventStatus.CANCELLED,
-        cancelledAt: new Date(),
-        cancellationReason: dto.cancellationReason,
+    const pendingOrders = await this.prisma.order.findMany({
+      where: { eventId, status: 'PENDING_PAYMENT' },
+      select: {
+        id: true,
+        couponId: true,
+        items: { select: { ticketId: true, quantity: true } },
       },
-      include: EVENT_DETAIL_INCLUDE,
     });
+
+    const cancelled = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.event.update({
+        where: { id: eventId },
+        data: {
+          status: EventStatus.CANCELLED,
+          cancelledAt: new Date(),
+          cancellationReason: dto.cancellationReason,
+        },
+        include: EVENT_DETAIL_INCLUDE,
+      });
+
+      for (const order of pendingOrders) {
+        for (const item of order.items) {
+          await tx.$executeRaw`
+            UPDATE event_tickets
+            SET sold_count = GREATEST(sold_count - ${item.quantity}, 0)
+            WHERE id = ${item.ticketId}
+          `;
+        }
+        if (order.couponId) {
+          await tx.$executeRaw`
+            UPDATE coupons
+            SET usage_count = GREATEST(usage_count - 1, 0)
+            WHERE id = ${order.couponId}
+          `;
+        }
+      }
+
+      if (pendingOrders.length > 0) {
+        await tx.order.updateMany({
+          where: { id: { in: pendingOrders.map((o) => o.id) } },
+          data: { status: 'CANCELLED', cancelledAt: new Date(), cancellationReason: 'EVENT_CANCELLED' },
+        });
+      }
+
+      return result;
+    });
+
     this.auditLogService.log({
       actorId: userId,
       actorRole: 'HOST',
       action: 'EVENT_CANCELLED',
       entityType: 'EVENT',
       entityId: eventId,
-      metadata: { reason: dto.cancellationReason },
+      metadata: { reason: dto.cancellationReason, pendingOrdersCancelled: pendingOrders.length },
     });
     return cancelled;
   }
