@@ -4,7 +4,7 @@ import { RedisService } from '../../common/redis/redis.service';
 import { StorageService } from '../../common/storage/storage.service';
 
 const INTERESTS_KEY = 'interests:public';
-const INTERESTS_TTL = 300;
+const INTERESTS_TTL = 300; // 5 minutes
 
 type InterestRow = { id: string; name: string; slug: string; description: string | null; image: string | null };
 
