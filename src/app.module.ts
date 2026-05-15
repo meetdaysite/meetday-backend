@@ -21,6 +21,7 @@ import { CheckInModule } from './modules/check-in/check-in.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AuditLogModule } from './modules/audit-log/audit-log.module';
 import { ConsentModule } from './modules/consent/consent.module';
+import { InterestsModule } from './modules/interests/interests.module';
 import { FirebaseAuthGuard } from './common/guards/firebase-auth.guard';
 import { HealthModule } from './common/health/health.module';
 import { MailModule } from './common/mail/mail.module';
@@ -68,6 +69,7 @@ import { StorageModule } from './common/storage/storage.module';
     NotificationsModule,
     AuditLogModule,
     ConsentModule,
+    InterestsModule,
   ],
   providers: [
     Logger,

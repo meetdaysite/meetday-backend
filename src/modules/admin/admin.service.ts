@@ -32,6 +32,7 @@ import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RedisService } from '../../common/redis/redis.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { InterestsService } from '../interests/interests.service';
 
 @Injectable()
 export class AdminService {
@@ -45,6 +46,7 @@ export class AdminService {
     private readonly notificationsService: NotificationsService,
     private readonly redis: RedisService,
     private readonly auditLogService: AuditLogService,
+    private readonly interestsService: InterestsService,
   ) {}
 
   async listAdmins(query: ListAdminsQueryDto) {
@@ -1047,9 +1049,11 @@ export class AdminService {
     });
     if (existing) throw new ConflictException('An interest with this name already exists');
 
-    return this.prisma.interest.create({
+    const interest = await this.prisma.interest.create({
       data: { name: dto.name, slug, description: dto.description, image: dto.image },
     });
+    void this.interestsService.invalidateCache();
+    return interest;
   }
 
   async getInterests() {
@@ -1105,7 +1109,7 @@ export class AdminService {
       if (conflict) throw new ConflictException('An interest with this name already exists');
     }
 
-    return this.prisma.interest.update({
+    const updated = await this.prisma.interest.update({
       where: { id },
       data: {
         ...(dto.name && { name: dto.name, slug }),
@@ -1113,5 +1117,7 @@ export class AdminService {
         ...(dto.image !== undefined && { image: dto.image }),
       },
     });
+    void this.interestsService.invalidateCache();
+    return updated;
   }
 }
