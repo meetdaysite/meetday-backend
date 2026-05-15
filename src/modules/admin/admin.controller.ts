@@ -38,6 +38,7 @@ import { RejectHostDto } from './dto/reject-host.dto';
 import { SuspendHostDto } from './dto/suspend-host.dto';
 import { RejectEventDto } from './dto/reject-event.dto';
 import { ForceCancelEventDto } from './dto/force-cancel-event.dto';
+import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { ListHostsQueryDto } from './dto/list-hosts-query.dto';
 import { ListAdminsQueryDto } from './dto/list-admins-query.dto';
 import { ListRolesQueryDto } from './dto/list-roles-query.dto';
@@ -1012,6 +1013,59 @@ export class AdminController {
     @Body() dto: ForceCancelEventDto,
   ) {
     return this.adminService.forceCancelEvent(id, adminId, dto);
+  }
+
+  // ─── Order management ────────────────────────────────────────────────────────
+
+  @Get('orders')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'SUPPORT')
+  @ApiOperation({
+    summary: 'List all orders',
+    description:
+      'Paginated list of all orders across the platform. ' +
+      'Filterable by event, user, host, status, booking ID, and date range. ' +
+      'Useful for support investigations and finance reconciliation.',
+  })
+  @ApiOkResponse({
+    description: 'Paginated order list.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-05-15T10:00:00.000Z',
+        data: {
+          orders: [
+            {
+              id: 'order-uuid',
+              bookingId: 'MDAY-AB12-CD34',
+              status: 'CONFIRMED',
+              totalAmount: 1180,
+              createdAt: '2026-05-10T10:00:00.000Z',
+              user: { id: 'user-uuid', firstName: 'Rahul', lastName: 'Sharma', email: 'rahul@example.com' },
+              event: { id: 'event-uuid', title: 'Mumbai Heritage Walk', city: 'Mumbai' },
+            },
+          ],
+          total: 1,
+          page: 1,
+          limit: 20,
+        },
+      },
+    },
+  })
+  listOrders(@Query() query: ListOrdersQueryDto) {
+    return this.adminService.listOrders(query);
+  }
+
+  @Get('orders/:id')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'SUPPORT')
+  @ApiOperation({
+    summary: 'Get order detail',
+    description: 'Full order detail including attendees, ticket codes, coupon, and financials. No ownership restriction.',
+  })
+  @ApiParam({ name: 'id', description: 'Order UUID' })
+  @ApiOkResponse({ description: 'Order detail.' })
+  @ApiNotFoundResponse({ description: 'Order not found.' })
+  getOrderDetail(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.getOrderDetail(id);
   }
 
   // ─── Interests ───────────────────────────────────────────────────────────────

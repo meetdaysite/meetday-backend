@@ -27,6 +27,7 @@ import { UpdateCategoryDto } from './dto/update-category.dto';
 import { CreateInterestDto } from './dto/create-interest.dto';
 import { UpdateInterestDto } from './dto/update-interest.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
+import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RedisService } from '../../common/redis/redis.service';
@@ -928,6 +929,104 @@ export class AdminService {
       message: 'Event force-cancelled successfully',
       pendingOrdersCancelled: pendingOrders.length,
     };
+  }
+
+  // ─── Order management ────────────────────────────────────────────────────────
+
+  async listOrders(query: ListOrdersQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const where: any = {};
+    if (query.eventId) where.eventId = query.eventId;
+    if (query.userId) where.userId = query.userId;
+    if (query.status) where.status = query.status;
+    if (query.bookingId) where.bookingId = { contains: query.bookingId, mode: 'insensitive' };
+    if (query.from || query.to) {
+      where.createdAt = {};
+      if (query.from) where.createdAt.gte = new Date(query.from);
+      if (query.to) where.createdAt.lte = new Date(query.to);
+    }
+    if (query.hostProfileId) {
+      where.event = { hostProfileId: query.hostProfileId };
+    }
+
+    const [orders, total] = await Promise.all([
+      this.prisma.order.findMany({
+        where,
+        select: {
+          id: true,
+          bookingId: true,
+          status: true,
+          subtotal: true,
+          discountAmount: true,
+          platformFee: true,
+          taxAmount: true,
+          totalAmount: true,
+          confirmedAt: true,
+          cancelledAt: true,
+          createdAt: true,
+          user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+          event: {
+            select: {
+              id: true,
+              title: true,
+              eventDate: true,
+              city: true,
+              hostProfile: { select: { id: true, displayName: true } },
+            },
+          },
+          coupon: { select: { code: true, discountType: true, discountValue: true } },
+          items: {
+            select: {
+              id: true,
+              quantity: true,
+              unitPrice: true,
+              ticket: { select: { id: true, name: true } },
+              _count: { select: { attendees: true } },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.order.count({ where }),
+    ]);
+
+    return { orders, total, page, limit };
+  }
+
+  async getOrderDetail(orderId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+        event: {
+          select: {
+            id: true,
+            title: true,
+            eventDate: true,
+            startTime: true,
+            endTime: true,
+            venueName: true,
+            fullAddress: true,
+            city: true,
+            hostProfile: { select: { id: true, displayName: true, userId: true } },
+          },
+        },
+        coupon: { select: { code: true, discountType: true, discountValue: true } },
+        items: {
+          include: {
+            ticket: { select: { id: true, name: true, description: true, price: true } },
+            attendees: true,
+          },
+        },
+      },
+    });
+
+    if (!order) throw new NotFoundException('Order not found');
+    return order;
   }
 
   // ─── Interests ───────────────────────────────────────────────────────────────
