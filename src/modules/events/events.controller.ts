@@ -231,7 +231,31 @@ export class EventsController {
   @Post(':id/scanner-sessions')
   @UseGuards(RolesGuard)
   @Roles('HOST')
-  @ApiOperation({ summary: 'Create a scanner session (time-limited link for staff to scan tickets)' })
+  @ApiOperation({
+    summary: 'Invite staff to scan tickets',
+    description:
+      'Creates a time-limited scanner link for a staff member and emails it to them. No login is required to use the link.',
+  })
+  @ApiCreatedResponse({
+    description: 'Scanner session created and invite email sent to staff member.',
+    schema: {
+      example: {
+        id: 'uuid',
+        eventId: 'uuid',
+        staffName: 'Rahul Sharma',
+        staffEmail: 'rahul@example.com',
+        staffPhone: '+919876543210',
+        label: 'Gate A',
+        isActive: true,
+        expiresAt: '2026-05-24T23:59:00.000Z',
+        createdAt: '2026-05-16T10:00:00.000Z',
+        scannerUrl: 'https://app.meetday.app/scan?token=abc123',
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'expiresAt is in the past.' })
+  @ApiForbiddenResponse({ description: 'Caller does not own this event.' })
+  @ApiNotFoundResponse({ description: 'Event not found.' })
   createScannerSession(
     @GetUser('id') userId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -243,7 +267,13 @@ export class EventsController {
   @Get(':id/scanner-sessions')
   @UseGuards(RolesGuard)
   @Roles('HOST')
-  @ApiOperation({ summary: 'List scanner sessions for an event with check-in counts' })
+  @ApiOperation({
+    summary: 'List staff scanner sessions',
+    description: 'Returns all scanner sessions for the event, including per-session check-in counts.',
+  })
+  @ApiOkResponse({ description: 'List of scanner sessions with check-in counts.' })
+  @ApiForbiddenResponse({ description: 'Caller does not own this event.' })
+  @ApiNotFoundResponse({ description: 'Event not found.' })
   listScannerSessions(
     @GetUser('id') userId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -254,7 +284,14 @@ export class EventsController {
   @Patch(':id/scanner-sessions/:sessionId/deactivate')
   @UseGuards(RolesGuard)
   @Roles('HOST')
-  @ApiOperation({ summary: 'Deactivate a scanner session early' })
+  @ApiOperation({
+    summary: 'Deactivate a scanner session',
+    description: "Revokes a staff member's scanner link before it expires.",
+  })
+  @ApiOkResponse({ description: 'Session deactivated.' })
+  @ApiBadRequestResponse({ description: 'Session is already inactive.' })
+  @ApiForbiddenResponse({ description: 'Caller does not own this event.' })
+  @ApiNotFoundResponse({ description: 'Session not found.' })
   deactivateScannerSession(
     @GetUser('id') userId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -266,7 +303,13 @@ export class EventsController {
   @Get(':id/check-in-stats')
   @UseGuards(RolesGuard)
   @Roles('HOST')
-  @ApiOperation({ summary: 'Get check-in progress and per-session breakdown for an event' })
+  @ApiOperation({
+    summary: 'Get real-time check-in stats',
+    description: 'Returns total, checked-in, and remaining attendee counts, with a per-session breakdown.',
+  })
+  @ApiOkResponse({ description: 'Check-in statistics.' })
+  @ApiForbiddenResponse({ description: 'Caller does not own this event.' })
+  @ApiNotFoundResponse({ description: 'Event not found.' })
   getCheckInStats(
     @GetUser('id') userId: string,
     @Param('id', ParseUUIDPipe) id: string,
