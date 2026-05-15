@@ -1,6 +1,5 @@
 import {
   IsArray,
-  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -11,17 +10,6 @@ import {
   ArrayMaxSize,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-
-export const REVIEW_HIGHLIGHTS = [
-  'GREAT_MUSIC',
-  'GOOD_CROWD',
-  'NICE_VENUE',
-  'HELPFUL_HOST',
-  'SMOOTH_ENTRY',
-  'FELT_SAFE',
-] as const;
-
-export type ReviewHighlight = (typeof REVIEW_HIGHLIGHTS)[number];
 
 export class CreateReviewDto {
   @ApiProperty()
@@ -38,10 +26,24 @@ export class CreateReviewDto {
   @Max(5)
   rating: number;
 
-  @ApiPropertyOptional({ type: [String], enum: REVIEW_HIGHLIGHTS })
+  @ApiPropertyOptional({ description: 'Rating for the host (1–5)', minimum: 1, maximum: 5 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  hostRating?: number;
+
+  @ApiPropertyOptional({ description: 'Written review for the host', maxLength: 800 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(800)
+  hostBody?: string;
+
+  @ApiPropertyOptional({ type: [String], description: 'Highlight keys for this event category (fetch valid keys from GET /reviews/highlights?eventId=)' })
   @IsOptional()
   @IsArray()
-  @IsIn(REVIEW_HIGHLIGHTS, { each: true })
+  @IsString({ each: true })
+  @ArrayMaxSize(10)
   highlights?: string[];
 
   @ApiPropertyOptional({ maxLength: 800 })

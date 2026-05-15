@@ -225,6 +225,7 @@ model Category {
   interestMappings         InterestCategory[]
   hostExperienceCategories HostExperienceCategory[]
   events                   Event[]
+  highlights               CategoryHighlight[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -232,6 +233,19 @@ model Category {
   @@map("categories")
 }
 
+model CategoryHighlight {
+  id         String @id @default(uuid())
+  categoryId String
+  key        String // e.g. "GREAT_NETWORKING"
+  label      String // e.g. "Great Networking"
+  sortOrder  Int    @default(0)
+
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryId, key])
+  @@index([categoryId])
+  @@map("category_highlights")
+}
 
 model InterestCategory {
   interestId String
@@ -876,6 +890,8 @@ model EventReview {
   orderId String @unique // one review per order; also enforces one per user+event via @@unique below
 
   rating     Int      // 1–5
+  hostRating Int?     // 1–5, optional separate rating for the host
+  hostBody   String?  // optional written review for the host, max 800 chars
   highlights String[] // e.g. ["GREAT_MUSIC", "GOOD_CROWD"]
   body       String?  // optional written review, max 800 chars
   isVisible  Boolean  @default(true) // admin can hide

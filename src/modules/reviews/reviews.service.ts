@@ -32,11 +32,15 @@ export class ReviewsService {
     // Verify event has already taken place
     const event = await this.prisma.event.findUnique({
       where: { id: dto.eventId },
-      select: { id: true, eventDate: true, title: true },
+      select: { id: true, eventDate: true, title: true, categoryId: true },
     });
     if (!event) throw new NotFoundException('Event not found');
     if (!event.eventDate || event.eventDate > new Date())
       throw new BadRequestException('You can only review an event after it has taken place');
+
+    if (dto.highlights?.length) {
+      await this.validateHighlights(dto.highlights, event.categoryId);
+    }
 
     // Check for duplicate (unique constraint covers this, but give a clear message)
     const existing = await this.prisma.eventReview.findUnique({
@@ -51,6 +55,8 @@ export class ReviewsService {
         userId,
         orderId: dto.orderId,
         rating: dto.rating,
+        hostRating: dto.hostRating ?? null,
+        hostBody: dto.hostBody ?? null,
         highlights: dto.highlights ?? [],
         body: dto.body ?? null,
         photos: dto.photoKeys?.length
@@ -60,17 +66,26 @@ export class ReviewsService {
       include: { photos: true },
     });
 
+    void this.syncHostRating(dto.eventId);
     return review;
   }
 
   async updateReview(reviewId: string, userId: string, dto: UpdateReviewDto) {
     const review = await this.prisma.eventReview.findUnique({
       where: { id: reviewId },
-      select: { id: true, userId: true },
+      select: { id: true, userId: true, eventId: true },
     });
 
     if (!review) throw new NotFoundException('Review not found');
     if (review.userId !== userId) throw new ForbiddenException('You do not own this review');
+
+    if (dto.highlights?.length) {
+      const event = await this.prisma.event.findUnique({
+        where: { id: review.eventId },
+        select: { categoryId: true },
+      });
+      await this.validateHighlights(dto.highlights, event?.categoryId ?? null);
+    }
 
     // If photoKeys provided, replace all photos
     const photosUpdate = dto.photoKeys !== undefined
@@ -80,28 +95,34 @@ export class ReviewsService {
         }
       : undefined;
 
-    return this.prisma.eventReview.update({
+    const updated = await this.prisma.eventReview.update({
       where: { id: reviewId },
       data: {
         ...(dto.rating !== undefined && { rating: dto.rating }),
+        ...(dto.hostRating !== undefined && { hostRating: dto.hostRating }),
+        ...(dto.hostBody !== undefined && { hostBody: dto.hostBody }),
         ...(dto.highlights !== undefined && { highlights: dto.highlights }),
         ...(dto.body !== undefined && { body: dto.body }),
         ...(photosUpdate && { photos: photosUpdate }),
       },
       include: { photos: true },
     });
+
+    void this.syncHostRating(review.eventId);
+    return updated;
   }
 
   async deleteReview(reviewId: string, userId: string) {
     const review = await this.prisma.eventReview.findUnique({
       where: { id: reviewId },
-      select: { id: true, userId: true },
+      select: { id: true, userId: true, eventId: true },
     });
 
     if (!review) throw new NotFoundException('Review not found');
     if (review.userId !== userId) throw new ForbiddenException('You do not own this review');
 
     await this.prisma.eventReview.delete({ where: { id: reviewId } });
+    void this.syncHostRating(review.eventId);
     return { message: 'Review deleted' };
   }
 
@@ -136,12 +157,14 @@ export class ReviewsService {
     const event = await this.prisma.event.findUnique({ where: { id: eventId }, select: { id: true } });
     if (!event) throw new NotFoundException('Event not found');
 
-    const [reviews, total, agg] = await Promise.all([
+    const [reviews, total, agg, hostAgg] = await Promise.all([
       this.prisma.eventReview.findMany({
         where: { eventId, isVisible: true },
         select: {
           id: true,
           rating: true,
+          hostRating: true,
+          hostBody: true,
           highlights: true,
           body: true,
           createdAt: true,
@@ -161,6 +184,10 @@ export class ReviewsService {
         _avg: { rating: true },
         _count: { rating: true },
       }),
+      this.prisma.eventReview.aggregate({
+        where: { eventId, isVisible: true, hostRating: { not: null } },
+        _avg: { hostRating: true },
+      }),
     ]);
 
     const signed = await Promise.all(
@@ -178,6 +205,7 @@ export class ReviewsService {
       page,
       limit,
       averageRating: agg._avg.rating ? Math.round(agg._avg.rating * 10) / 10 : null,
+      averageHostRating: hostAgg._avg.hostRating ? Math.round(hostAgg._avg.hostRating * 10) / 10 : null,
       reviewCount: agg._count.rating,
     };
   }
@@ -241,14 +269,16 @@ export class ReviewsService {
   async setReviewVisibility(reviewId: string, isVisible: boolean) {
     const review = await this.prisma.eventReview.findUnique({
       where: { id: reviewId },
-      select: { id: true },
+      select: { id: true, eventId: true },
     });
     if (!review) throw new NotFoundException('Review not found');
 
-    return this.prisma.eventReview.update({
+    const updated = await this.prisma.eventReview.update({
       where: { id: reviewId },
       data: { isVisible },
     });
+    void this.syncHostRating(review.eventId);
+    return updated;
   }
 
   async listAllReviews(page = 1, limit = 20) {
@@ -267,5 +297,62 @@ export class ReviewsService {
     ]);
 
     return { reviews, total, page, limit };
+  }
+
+  async getHighlightsForEvent(eventId: string) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: { categoryId: true },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+    if (!event.categoryId) return [];
+
+    return this.prisma.categoryHighlight.findMany({
+      where: { categoryId: event.categoryId },
+      select: { key: true, label: true },
+      orderBy: { sortOrder: 'asc' },
+    });
+  }
+
+  private async validateHighlights(highlights: string[], categoryId: string | null) {
+    if (!categoryId) return;
+
+    const validKeys = new Set(
+      (await this.prisma.categoryHighlight.findMany({
+        where: { categoryId },
+        select: { key: true },
+      })).map((h) => h.key),
+    );
+
+    const invalid = highlights.filter((h) => !validKeys.has(h));
+    if (invalid.length) {
+      throw new BadRequestException(`Invalid highlights for this event category: ${invalid.join(', ')}`);
+    }
+  }
+
+  private async syncHostRating(eventId: string) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: { hostProfileId: true },
+    });
+    if (!event?.hostProfileId) return;
+
+    const agg = await this.prisma.eventReview.aggregate({
+      where: {
+        isVisible: true,
+        hostRating: { not: null },
+        event: { hostProfileId: event.hostProfileId },
+      },
+      _avg: { hostRating: true },
+      _count: { hostRating: true },
+    });
+
+    await this.prisma.hostProfile.update({
+      where: { id: event.hostProfileId },
+      data: {
+        averageRating: agg._avg.hostRating ?? null,
+        totalReviews: agg._count.hostRating,
+      },
+    });
   }
 }
