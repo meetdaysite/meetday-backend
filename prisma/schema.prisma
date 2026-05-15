@@ -921,13 +921,15 @@ enum PhotoApprovalStatus {
 // ─── Check-In ─────────────────────────────────────────────────────────────────
 
 model EventScannerSession {
-  id      String @id @default(uuid())
-  eventId String
-  label   String   // display name: "Gate A", "Security Team", etc.
-  token   String   @unique // 32-byte hex — authenticates scanner requests without login
-  expiresAt DateTime
-  isActive  Boolean @default(true) // host can deactivate early
-
+  id             String    @id @default(uuid())
+  eventId        String
+  staffName      String
+  staffEmail     String
+  staffPhone     String?
+  label          String?   // optional positional label e.g. "Gate A", "VIP Entrance"
+  token          String    @unique
+  expiresAt      DateTime
+  isActive       Boolean   @default(true)
   createdByUserId String
 
   event     Event           @relation(fields: [eventId], references: [id], onDelete: Cascade)
@@ -1035,6 +1037,7 @@ enum AuditAction {
   SCANNER_SESSION_CREATED
   SCANNER_SESSION_EXPIRED
   TICKET_SCANNED
+  DUPLICATE_SCAN_ATTEMPT
 
   // DPDP data subject rights (future)
   DATA_EXPORT_REQUESTED

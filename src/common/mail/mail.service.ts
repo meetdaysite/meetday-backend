@@ -9,6 +9,7 @@ import { subscriptionLapsedTemplate } from './templates/subscription-lapsed.temp
 import { adminInviteTemplate } from './templates/admin-invite.template';
 import { eventApprovedTemplate } from './templates/event-approved.template';
 import { eventRejectedTemplate } from './templates/event-rejected.template';
+import { scannerInviteTemplate } from './templates/scanner-invite.template';
 
 @Injectable()
 export class MailService {
@@ -98,5 +99,19 @@ export class MailService {
 
   async sendEventRejected(to: string, hostName: string, eventTitle: string, remark: string): Promise<void> {
     await this.sendMail(to, 'Update on your Meetday event listing', eventRejectedTemplate(hostName, eventTitle, remark));
+  }
+
+  async sendScannerInvite(
+    to: string,
+    staffName: string,
+    eventTitle: string,
+    scannerUrl: string,
+    expiresAt: Date,
+  ): Promise<void> {
+    await this.sendMail(
+      to,
+      `You've been assigned as a ticket scanner for ${eventTitle} — Meetday`,
+      scannerInviteTemplate(staffName, eventTitle, scannerUrl, expiresAt),
+    );
   }
 }
