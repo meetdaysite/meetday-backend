@@ -13,6 +13,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { Public } from '../../common/decorators/public.decorator';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -32,6 +33,14 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 @Controller('reviews')
 export class ReviewsController {
   constructor(private readonly reviewsService: ReviewsService) {}
+
+  @Get('highlights')
+  @Public()
+  @ApiOperation({ summary: 'Get available review highlights for an event' })
+  @ApiQuery({ name: 'eventId', type: String })
+  getHighlights(@Query('eventId', ParseUUIDPipe) eventId: string) {
+    return this.reviewsService.getHighlightsForEvent(eventId);
+  }
 
   @Post()
   @UseGuards(RolesGuard)
