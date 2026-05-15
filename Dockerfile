@@ -8,6 +8,8 @@ WORKDIR /app
 COPY package*.json ./
 COPY prisma ./prisma
 
+# Skip Puppeteer Chrome download — not needed to compile TypeScript
+ENV PUPPETEER_SKIP_DOWNLOAD=1
 # Install all deps (including devDeps needed for build + prisma generate)
 RUN npm ci
 
@@ -22,7 +24,9 @@ RUN npm run build
 # ─── Stage 2: Production ──────────────────────────────────────────────────────
 FROM node:20-alpine AS production
 
-RUN apk add --no-cache openssl
+# Install system Chromium + OpenSSL. Chromium replaces Puppeteer's bundled Chrome
+# so we can skip the ~300MB download during npm ci.
+RUN apk add --no-cache openssl chromium
 
 WORKDIR /app
 
@@ -32,7 +36,12 @@ RUN addgroup -g 1001 -S nodejs && adduser -S nestjs -u 1001
 COPY package*.json ./
 COPY prisma ./prisma
 
-# Install only production dependencies
+# Skip Puppeteer's Chrome download — we use system Chromium instead.
+# PRISMA_SKIP_POSTINSTALL_GENERATE skips @prisma/client postinstall (prisma CLI
+# is a devDep, not available here; generated client is copied from builder).
+ENV PUPPETEER_SKIP_DOWNLOAD=1
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+ENV PRISMA_SKIP_POSTINSTALL_GENERATE=1
 RUN npm ci --omit=dev && npm cache clean --force
 
 # Copy generated Prisma client from builder (prisma generate output)
