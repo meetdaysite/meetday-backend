@@ -109,6 +109,7 @@ enum HostApprovalStatus {
   PENDING
   APPROVED
   REJECTED
+  SUSPENDED
 }
 
 enum KycStatus {

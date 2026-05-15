@@ -60,6 +60,7 @@ export class OrdersService {
         platformFeeWaived: true,
         hostProfile: {
           select: {
+            approvalStatus: true,
             subscriptions: {
               where: { status: 'ACTIVE' },
               select: { lockedFeeRate: true },
@@ -72,6 +73,7 @@ export class OrdersService {
 
     if (!event) throw new NotFoundException('Event not found');
     if (event.status !== 'PUBLISHED') throw new BadRequestException('Event is not available for booking');
+    if (event.hostProfile.approvalStatus === 'SUSPENDED') throw new BadRequestException('Event is not available for booking');
     if (event.eventDate && event.eventDate < new Date()) throw new BadRequestException('Event has already passed');
 
     const ticketIds = dto.items.map((i) => i.ticketId);

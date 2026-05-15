@@ -35,7 +35,9 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { RejectHostDto } from './dto/reject-host.dto';
+import { SuspendHostDto } from './dto/suspend-host.dto';
 import { RejectEventDto } from './dto/reject-event.dto';
+import { ForceCancelEventDto } from './dto/force-cancel-event.dto';
 import { ListHostsQueryDto } from './dto/list-hosts-query.dto';
 import { ListAdminsQueryDto } from './dto/list-admins-query.dto';
 import { ListRolesQueryDto } from './dto/list-roles-query.dto';
@@ -521,6 +523,57 @@ export class AdminController {
     return this.adminService.rejectHost(id, adminId, dto);
   }
 
+  @Post('hosts/:id/suspend')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Suspend an approved host',
+    description:
+      'Immediately suspends an approved host account. ' +
+      'The host can no longer submit new events or accept new orders. ' +
+      'Existing PUBLISHED events remain visible but new orders will be blocked. ' +
+      'A suspension reason is required and is sent to the host via email and in-app notification.',
+  })
+  @ApiParam({ name: 'id', description: 'Host profile UUID' })
+  @ApiBody({ type: SuspendHostDto })
+  @ApiOkResponse({
+    description: 'Host suspended.',
+    schema: { example: { success: true, timestamp: '2026-05-15T10:00:00.000Z', data: { message: 'Host suspended successfully' } } },
+  })
+  @ApiNotFoundResponse({ description: 'Host profile not found.' })
+  @ApiBadRequestResponse({ description: 'Host is not currently approved.' })
+  suspendHost(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') adminId: string,
+    @Body() dto: SuspendHostDto,
+  ) {
+    return this.adminService.suspendHost(id, adminId, dto);
+  }
+
+  @Post('hosts/:id/restore')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Restore a suspended host',
+    description:
+      'Restores a suspended host back to APPROVED status. ' +
+      'The host can immediately create and submit events again. ' +
+      'No body required.',
+  })
+  @ApiParam({ name: 'id', description: 'Host profile UUID' })
+  @ApiOkResponse({
+    description: 'Host restored.',
+    schema: { example: { success: true, timestamp: '2026-05-15T10:00:00.000Z', data: { message: 'Host restored successfully' } } },
+  })
+  @ApiNotFoundResponse({ description: 'Host profile not found.' })
+  @ApiBadRequestResponse({ description: 'Host is not currently suspended.' })
+  restoreHost(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') adminId: string,
+  ) {
+    return this.adminService.restoreHost(id, adminId);
+  }
+
   // ─── Coupon endpoints ────────────────────────────────────────────────────────
 
   @Post('coupons')
@@ -926,6 +979,39 @@ export class AdminController {
     @Body() dto: RejectEventDto,
   ) {
     return this.adminService.rejectEvent(id, adminId, dto);
+  }
+
+  @Post('events/:id/force-cancel')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Force-cancel an event (admin override)',
+    description:
+      'Immediately cancels a PUBLISHED or UNDER_REVIEW event regardless of host action. ' +
+      'All PENDING_PAYMENT orders for the event are atomically cancelled and capacity is released. ' +
+      'The host is notified via email and in-app notification. ' +
+      'Use for policy violations, fraud, or safety concerns.',
+  })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiBody({ type: ForceCancelEventDto })
+  @ApiOkResponse({
+    description: 'Event cancelled. Returns count of pending orders also cancelled.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-05-15T10:00:00.000Z',
+        data: { message: 'Event force-cancelled successfully', pendingOrdersCancelled: 3 },
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Event not found.' })
+  @ApiBadRequestResponse({ description: 'Event is not in PUBLISHED or UNDER_REVIEW status.' })
+  forceCancelEvent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') adminId: string,
+    @Body() dto: ForceCancelEventDto,
+  ) {
+    return this.adminService.forceCancelEvent(id, adminId, dto);
   }
 
   // ─── Interests ───────────────────────────────────────────────────────────────

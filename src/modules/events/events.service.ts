@@ -244,7 +244,7 @@ export class EventsService {
     const event = await this.prisma.event.findUnique({
       where: { id: eventId },
       include: {
-        hostProfile: { select: { userId: true } },
+        hostProfile: { select: { userId: true, approvalStatus: true } },
         tickets: { select: { id: true } },
         refundPolicy: { select: { id: true } },
       },
@@ -252,6 +252,8 @@ export class EventsService {
     if (!event) throw new NotFoundException('Event not found');
     if (event.hostProfile.userId !== userId)
       throw new ForbiddenException('You do not own this event');
+    if (event.hostProfile.approvalStatus === 'SUSPENDED')
+      throw new ForbiddenException('Your account is suspended. Please contact support.');
     if (event.status !== EventStatus.DRAFT)
       throw new ForbiddenException('Only DRAFT events can be submitted for review');
 

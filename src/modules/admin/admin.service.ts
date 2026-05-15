@@ -16,7 +16,9 @@ import { ListHostsQueryDto } from './dto/list-hosts-query.dto';
 import { ListAdminsQueryDto } from './dto/list-admins-query.dto';
 import { ListRolesQueryDto } from './dto/list-roles-query.dto';
 import { RejectHostDto } from './dto/reject-host.dto';
+import { SuspendHostDto } from './dto/suspend-host.dto';
 import { RejectEventDto } from './dto/reject-event.dto';
+import { ForceCancelEventDto } from './dto/force-cancel-event.dto';
 import { InviteAdminDto } from './dto/invite-admin.dto';
 import { CreateCouponDto } from './dto/create-coupon.dto';
 import { ListCouponsQueryDto } from './dto/list-coupons-query.dto';
@@ -485,6 +487,90 @@ export class AdminService {
     return { message: 'Host rejected successfully' };
   }
 
+  async suspendHost(hostProfileId: string, adminId: string, dto: SuspendHostDto) {
+    const host = await this.prisma.hostProfile.findUnique({
+      where: { id: hostProfileId },
+      include: { user: { select: { id: true, email: true, firstName: true } } },
+    });
+
+    if (!host) throw new NotFoundException('Host not found');
+    if (host.approvalStatus !== 'APPROVED')
+      throw new BadRequestException('Only approved hosts can be suspended');
+
+    await this.prisma.hostProfile.update({
+      where: { id: hostProfileId },
+      data: { approvalStatus: 'SUSPENDED', rejectionReason: dto.reason },
+    });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'ADMIN_HOST_SUSPENDED',
+      entityType: 'HOST',
+      entityId: hostProfileId,
+      metadata: { reason: dto.reason },
+    });
+
+    void this.mailQueue
+      .add('host-suspended', {
+        to: host.user.email,
+        hostName: host.user.firstName,
+        reason: dto.reason,
+      })
+      .catch((err) => this.logger.error('Failed to queue host-suspended mail', err));
+    void this.notificationsService
+      .create(
+        host.user.id,
+        'host_suspended',
+        'Account Suspended',
+        'Your host account has been suspended. Please contact support for details.',
+      )
+      .catch((err) => this.logger.error('Failed to create host_suspended notification', err));
+
+    return { message: 'Host suspended successfully' };
+  }
+
+  async restoreHost(hostProfileId: string, adminId: string) {
+    const host = await this.prisma.hostProfile.findUnique({
+      where: { id: hostProfileId },
+      include: { user: { select: { id: true, email: true, firstName: true } } },
+    });
+
+    if (!host) throw new NotFoundException('Host not found');
+    if (host.approvalStatus !== 'SUSPENDED')
+      throw new BadRequestException('Host is not currently suspended');
+
+    await this.prisma.hostProfile.update({
+      where: { id: hostProfileId },
+      data: { approvalStatus: 'APPROVED', rejectionReason: null },
+    });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'ADMIN_HOST_RESTORED',
+      entityType: 'HOST',
+      entityId: hostProfileId,
+    });
+
+    void this.mailQueue
+      .add('host-restored', {
+        to: host.user.email,
+        hostName: host.user.firstName,
+      })
+      .catch((err) => this.logger.error('Failed to queue host-restored mail', err));
+    void this.notificationsService
+      .create(
+        host.user.id,
+        'host_restored',
+        'Account Restored',
+        'Your host account has been restored. You can now create and manage events.',
+      )
+      .catch((err) => this.logger.error('Failed to create host_restored notification', err));
+
+    return { message: 'Host restored successfully' };
+  }
+
   // ── Category management ──────────────────────────────────────────────────
 
   async createCategory(dto: CreateCategoryDto) {
@@ -749,6 +835,99 @@ export class AdminService {
     ).catch((err) => this.logger.error('Failed to create event_rejected notification', err));
 
     return { message: 'Event rejected successfully' };
+  }
+
+  async forceCancelEvent(eventId: string, adminId: string, dto: ForceCancelEventDto) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: {
+        hostProfile: {
+          include: { user: { select: { id: true, email: true, firstName: true } } },
+        },
+      },
+    });
+
+    if (!event) throw new NotFoundException('Event not found');
+    if (!['PUBLISHED', 'UNDER_REVIEW'].includes(event.status))
+      throw new BadRequestException('Only PUBLISHED or UNDER_REVIEW events can be force-cancelled');
+
+    const pendingOrders = await this.prisma.order.findMany({
+      where: { eventId, status: 'PENDING_PAYMENT' },
+      select: {
+        id: true,
+        couponId: true,
+        items: { select: { ticketId: true, quantity: true } },
+      },
+    });
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.event.update({
+        where: { id: eventId },
+        data: {
+          status: 'CANCELLED',
+          cancelledAt: new Date(),
+          cancellationReason: dto.reason,
+        },
+      });
+
+      for (const order of pendingOrders) {
+        for (const item of order.items) {
+          await tx.$executeRaw`
+            UPDATE event_tickets
+            SET sold_count = GREATEST(sold_count - ${item.quantity}, 0)
+            WHERE id = ${item.ticketId}
+          `;
+        }
+        if (order.couponId) {
+          await tx.$executeRaw`
+            UPDATE coupons
+            SET usage_count = GREATEST(usage_count - 1, 0)
+            WHERE id = ${order.couponId}
+          `;
+        }
+      }
+
+      if (pendingOrders.length > 0) {
+        await tx.order.updateMany({
+          where: { id: { in: pendingOrders.map((o) => o.id) } },
+          data: { status: 'CANCELLED', cancelledAt: new Date(), cancellationReason: 'EVENT_CANCELLED' },
+        });
+      }
+    });
+
+    const hostUser = event.hostProfile.user;
+    const eventTitle = event.title ?? 'Untitled';
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'EVENT_CANCELLED',
+      entityType: 'EVENT',
+      entityId: eventId,
+      metadata: { eventTitle, reason: dto.reason, pendingOrdersCancelled: pendingOrders.length },
+    });
+
+    void this.mailQueue
+      .add('event-force-cancelled', {
+        to: hostUser.email,
+        hostName: hostUser.firstName,
+        eventTitle,
+        reason: dto.reason,
+      })
+      .catch((err) => this.logger.error('Failed to queue event-force-cancelled mail', err));
+    void this.notificationsService
+      .create(
+        hostUser.id,
+        'event_force_cancelled',
+        'Event Cancelled by Admin',
+        `Your event "${eventTitle}" has been cancelled by the platform team.`,
+      )
+      .catch((err) => this.logger.error('Failed to create event_force_cancelled notification', err));
+
+    return {
+      message: 'Event force-cancelled successfully',
+      pendingOrdersCancelled: pendingOrders.length,
+    };
   }
 
   // ─── Interests ───────────────────────────────────────────────────────────────
