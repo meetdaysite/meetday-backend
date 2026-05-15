@@ -79,22 +79,20 @@ export class TicketPdfService {
       qrDataUrl: string;
     };
 
-    const attendees: AttendeeEntry[] = [];
-    for (const item of order.items) {
-      for (const attendee of item.attendees) {
-        const qrDataUrl = await QRCode.toDataURL(attendee.ticketCode, {
-          width: 200,
-          margin: 1,
-          color: { dark: '#c0392b', light: '#ffffff' },
-        });
-        attendees.push({
+    const attendees: AttendeeEntry[] = await Promise.all(
+      order.items.flatMap((item) =>
+        item.attendees.map(async (attendee) => ({
           fullName: attendee.fullName,
           ticketName: item.ticket.name,
           ticketCode: attendee.ticketCode,
-          qrDataUrl,
-        });
-      }
-    }
+          qrDataUrl: await QRCode.toDataURL(attendee.ticketCode, {
+            width: 200,
+            margin: 1,
+            color: { dark: '#c0392b', light: '#ffffff' },
+          }),
+        })),
+      ),
+    );
 
     const eventDate = order.event.eventDate
       ? new Date(order.event.eventDate).toLocaleDateString('en-IN', {
