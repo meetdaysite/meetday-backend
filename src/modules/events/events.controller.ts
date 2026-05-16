@@ -29,6 +29,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { EventsService } from './events.service';
+import { EventsVibeService } from './events-vibe.service';
 import { ReviewsService } from '../reviews/reviews.service';
 import { CheckInService } from '../check-in/check-in.service';
 import { CreateScannerSessionDto } from '../check-in/dto/create-scanner-session.dto';
@@ -36,6 +37,7 @@ import { CreateEventDto } from './dto/create-event.dto';
 import { ListMyEventsQueryDto } from './dto/list-my-events-query.dto';
 import { BrowseEventsQueryDto } from './dto/browse-events-query.dto';
 import { CancelEventDto } from './dto/cancel-event.dto';
+import { VibeMatchDto } from './dto/vibe-match.dto';
 
 @ApiTags('Events')
 @ApiBearerAuth('firebase-token')
@@ -43,6 +45,7 @@ import { CancelEventDto } from './dto/cancel-event.dto';
 export class EventsController {
   constructor(
     private readonly eventsService: EventsService,
+    private readonly eventsVibeService: EventsVibeService,
     private readonly reviewsService: ReviewsService,
     private readonly checkInService: CheckInService,
   ) {}
@@ -72,6 +75,32 @@ export class EventsController {
     @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
   ) {
     return this.reviewsService.getEventReviews(id, page, limit);
+  }
+
+  @Post(':id/vibe-match')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get personalised vibe match for an event',
+    description:
+      'Stateless, no auth required. Pass vibeType, socialStyle, and interests with affinity ' +
+      '(LIKED / DISLIKED / OPEN_TO) to receive a 0–100 score, 3 reason blocks, and similar attendee avatars.',
+  })
+  getVibeMatch(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: VibeMatchDto,
+  ) {
+    return this.eventsVibeService.getVibeMatch(id, dto);
+  }
+
+  @Get(':id/crowd-pulse')
+  @Public()
+  @ApiOperation({
+    summary: 'Get crowd pulse for an event',
+    description: 'Returns energy level, crowd style, social friendliness, and top attendee avatars.',
+  })
+  getCrowdPulse(@Param('id', ParseUUIDPipe) id: string) {
+    return this.eventsVibeService.getCrowdPulse(id);
   }
 
   @Get(':id/public')

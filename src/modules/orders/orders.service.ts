@@ -13,6 +13,7 @@ import { Queue } from 'bull';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { EventsVibeService } from '../events/events-vibe.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { AuditLogService } from '../audit-log/audit-log.service';
 
@@ -42,6 +43,7 @@ export class OrdersService {
     private readonly configService: ConfigService,
     @InjectQueue('mail') private readonly mailQueue: Queue,
     private readonly auditLogService: AuditLogService,
+    private readonly eventsVibeService: EventsVibeService,
   ) {}
 
   async createOrder(userId: string, dto: CreateOrderDto) {
@@ -222,9 +224,9 @@ export class OrdersService {
         const ticket = ticketMap.get(item.ticketId)!;
         const updated = await tx.$executeRaw`
           UPDATE event_tickets
-          SET sold_count = sold_count + ${item.quantity}
+          SET "soldCount" = "soldCount" + ${item.quantity}
           WHERE id = ${ticket.id}
-            AND sold_count + ${item.quantity} <= total_capacity
+            AND "soldCount" + ${item.quantity} <= "totalCapacity"
         `;
         if (updated === 0) {
           const fresh = await tx.eventTicket.findUnique({
@@ -314,6 +316,7 @@ export class OrdersService {
       select: {
         id: true,
         userId: true,
+        eventId: true,
         status: true,
         event: { select: { status: true } },
         items: {
@@ -361,6 +364,8 @@ export class OrdersService {
     void this.mailQueue
       .add('ticket-confirmation', { orderId })
       .catch((err) => this.logger.error('Failed to queue ticket-confirmation mail', err));
+
+    void this.eventsVibeService.recomputeCrowdPulse(order.eventId);
 
     return { message: 'Order confirmed' };
   }
@@ -485,7 +490,7 @@ export class OrdersService {
       for (const item of order.items) {
         await tx.$executeRaw`
           UPDATE event_tickets
-          SET sold_count = GREATEST(sold_count - ${item.quantity}, 0)
+          SET "soldCount" = GREATEST("soldCount" - ${item.quantity}, 0)
           WHERE id = ${item.ticketId}
         `;
       }
@@ -536,7 +541,7 @@ export class OrdersService {
           for (const item of order.items) {
             await tx.$executeRaw`
               UPDATE event_tickets
-              SET sold_count = GREATEST(sold_count - ${item.quantity}, 0)
+              SET "soldCount" = GREATEST("soldCount" - ${item.quantity}, 0)
               WHERE id = ${item.ticketId}
             `;
           }
