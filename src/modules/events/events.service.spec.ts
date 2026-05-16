@@ -33,6 +33,7 @@ function makePrisma() {
     interest: { findMany: jest.fn() },
   };
   prisma.$transaction = jest.fn().mockImplementation(async (fn: any) => fn(prisma));
+  prisma.$executeRaw = jest.fn().mockResolvedValue(1);
   return prisma;
 }
 
@@ -329,6 +330,340 @@ describe('EventsService', () => {
       prisma.event.findMany.mockResolvedValue([{ ...eventRow, tickets: [{ price: '0' }] }]);
       const result = await service.browseEvents({});
       expect(result.events[0].startingPrice).toBeNull();
+    });
+  });
+
+  // ── updateEvent — success paths ───────────────────────────────────────────
+
+  describe('updateEvent() — success paths', () => {
+    beforeEach(() => {
+      prisma.event.findUnique.mockResolvedValue(draftEvent);
+      prisma.event.update.mockResolvedValue(draftEvent);
+    });
+
+    it('replaces tickets when dto.tickets is provided', async () => {
+      prisma.eventTicket.deleteMany.mockResolvedValue({});
+      prisma.eventTicket.createMany.mockResolvedValue({});
+
+      await service.updateEvent(userId, eventId, { tickets: [{ name: 'GA', price: 0, totalCapacity: 100 }] } as any);
+
+      expect(prisma.eventTicket.deleteMany).toHaveBeenCalledWith({ where: { eventId } });
+      expect(prisma.eventTicket.createMany).toHaveBeenCalled();
+    });
+
+    it('upserts refundPolicy when dto.refundPolicy is provided', async () => {
+      prisma.eventRefundPolicy.upsert.mockResolvedValue({});
+
+      await service.updateEvent(userId, eventId, {
+        refundPolicy: { type: 'NO_REFUND', refundTo: 'ORIGINAL_PAYMENT_METHOD' },
+      } as any);
+
+      expect(prisma.eventRefundPolicy.upsert).toHaveBeenCalled();
+    });
+
+    it('replaces media when dto.media is provided', async () => {
+      prisma.eventMedia.deleteMany.mockResolvedValue({});
+      prisma.eventMedia.createMany.mockResolvedValue({});
+
+      await service.updateEvent(userId, eventId, {
+        media: [{ key: 'covers/img.jpg', type: 'COVER', order: 0 }],
+      } as any);
+
+      expect(prisma.eventMedia.deleteMany).toHaveBeenCalledWith({ where: { eventId } });
+      expect(prisma.eventMedia.createMany).toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException when categoryId is invalid', async () => {
+      prisma.category.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.updateEvent(userId, eventId, { categoryId: 'bad-cat' } as any),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ── getMyEvents() ─────────────────────────────────────────────────────────
+
+  describe('getMyEvents()', () => {
+    const myEventRow = {
+      id: eventId,
+      title: 'Indie Night',
+      status: 'DRAFT',
+      eventDate: new Date(Date.now() + 86400_000),
+      city: 'Mumbai',
+      venueName: 'The Venue',
+      isFree: false,
+      adminRejectionRemark: null,
+      submittedAt: null,
+      createdAt: new Date(),
+      category: { id: 'c1', name: 'Music' },
+      media: [{ url: 'covers/img.jpg' }],
+      tickets: [{ totalCapacity: 100, price: '500' }],
+    };
+
+    beforeEach(() => {
+      prisma.hostProfile.findUnique.mockResolvedValue(approvedHost);
+      prisma.event.findMany.mockResolvedValue([myEventRow]);
+      prisma.event.count.mockResolvedValue(1);
+    });
+
+    it('throws NotFoundException when host profile not found', async () => {
+      prisma.hostProfile.findUnique.mockResolvedValue(null);
+      await expect(service.getMyEvents(userId, {})).rejects.toThrow(NotFoundException);
+    });
+
+    it('returns enriched list with signed cover URL and pricing', async () => {
+      const result = await service.getMyEvents(userId, {});
+
+      expect(result.total).toBe(1);
+      expect(result.events[0].coverImageUrl).toBe('https://cdn.example.com/img');
+      expect(result.events[0].totalCapacity).toBe(100);
+      expect(result.events[0].startingPrice).toBe(500);
+    });
+
+    it('returns null coverImageUrl and startingPrice when event has no media or paid tickets', async () => {
+      prisma.event.findMany.mockResolvedValue([{
+        ...myEventRow,
+        media: [],
+        tickets: [{ totalCapacity: 50, price: '0' }],
+      }]);
+
+      const result = await service.getMyEvents(userId, {});
+      expect(result.events[0].coverImageUrl).toBeNull();
+      expect(result.events[0].startingPrice).toBeNull();
+    });
+
+    it('filters by status when provided in query', async () => {
+      await service.getMyEvents(userId, { status: 'DRAFT' as any });
+      expect(prisma.event.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ status: 'DRAFT' }) }),
+      );
+    });
+  });
+
+  // ── getMyEventById() ──────────────────────────────────────────────────────
+
+  describe('getMyEventById()', () => {
+    const eventWithMedia = {
+      ...draftEvent,
+      media: [{ url: 'covers/photo.jpg', type: 'COVER', order: 0 }],
+    };
+
+    it('returns event with signed media URLs', async () => {
+      prisma.event.findUnique.mockResolvedValue(eventWithMedia);
+
+      const result = await service.getMyEventById(userId, eventId);
+      expect(result.media[0].url).toBe('https://cdn.example.com/img');
+    });
+
+    it('throws NotFoundException when event not found', async () => {
+      prisma.event.findUnique.mockResolvedValue(null);
+      await expect(service.getMyEventById(userId, eventId)).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws ForbiddenException when user does not own the event', async () => {
+      prisma.event.findUnique.mockResolvedValue({
+        ...eventWithMedia,
+        hostProfile: { id: 'hp-uuid', displayName: 'Test Host', userId: 'other-user' },
+      });
+      await expect(service.getMyEventById(userId, eventId)).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  // ── cancelEvent — with pending orders ────────────────────────────────────
+
+  describe('cancelEvent() — with pending orders', () => {
+    const publishedEvent = { ...draftEvent, status: 'PUBLISHED' };
+
+    beforeEach(() => {
+      prisma.event.findUnique.mockResolvedValue(publishedEvent);
+      prisma.event.update.mockResolvedValue({ ...publishedEvent, status: 'CANCELLED' });
+      prisma.order.updateMany.mockResolvedValue({});
+    });
+
+    it('rolls back soldCount for each item and cancels pending orders', async () => {
+      prisma.order.findMany.mockResolvedValue([{
+        id: 'order-uuid',
+        couponId: null,
+        items: [{ ticketId: 'ticket-uuid', quantity: 2 }],
+      }]);
+
+      await service.cancelEvent(userId, eventId, { cancellationReason: 'Venue issue' });
+
+      expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(prisma.order.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: 'CANCELLED', cancellationReason: 'EVENT_CANCELLED' }),
+        }),
+      );
+    });
+
+    it('also decrements coupon usageCount when order has a coupon', async () => {
+      prisma.order.findMany.mockResolvedValue([{
+        id: 'order-uuid',
+        couponId: 'coupon-uuid',
+        items: [{ ticketId: 'ticket-uuid', quantity: 1 }],
+      }]);
+
+      await service.cancelEvent(userId, eventId, { cancellationReason: 'Venue issue' });
+
+      // twice: once for soldCount, once for coupon usageCount
+      expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
+    });
+
+    it('skips raw SQL and updateMany when no pending orders exist', async () => {
+      prisma.order.findMany.mockResolvedValue([]);
+
+      await service.cancelEvent(userId, eventId, { cancellationReason: 'Venue issue' });
+
+      expect(prisma.$executeRaw).not.toHaveBeenCalled();
+      expect(prisma.order.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── browseEvents — additional filters ────────────────────────────────────
+
+  describe('browseEvents() — additional filters', () => {
+    const baseRow = {
+      id: eventId,
+      title: 'Indie Night',
+      eventType: 'IN_PERSON',
+      eventDate: new Date(Date.now() + 86400_000),
+      startTime: '07:00 PM',
+      venueName: 'The Venue',
+      tags: [],
+      category: { id: 'c1', name: 'Music' },
+      media: [],
+      tickets: [],
+    };
+
+    beforeEach(() => {
+      prisma.event.findMany.mockResolvedValue([baseRow]);
+      prisma.event.count.mockResolvedValue(1);
+    });
+
+    it('resolves interest slugs to category IDs and applies filter', async () => {
+      prisma.interest.findMany.mockResolvedValue([
+        { categoryMappings: [{ categoryId: 'cat-1' }, { categoryId: 'cat-2' }] },
+      ]);
+
+      await service.browseEvents({ interestSlugs: ['music'] } as any);
+
+      expect(prisma.interest.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { slug: { in: ['music'] } } }),
+      );
+      expect(prisma.event.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ categoryId: { in: expect.arrayContaining(['cat-1', 'cat-2']) } }),
+        }),
+      );
+    });
+
+    it('sorts by ticket price when sortBy=price', async () => {
+      await service.browseEvents({ sortBy: 'price' as any });
+
+      expect(prisma.event.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ orderBy: { tickets: { _min: { price: 'asc' } } } }),
+      );
+    });
+
+    it('sorts by eventDate when sortBy is not price', async () => {
+      await service.browseEvents({ sortBy: 'date' as any, sortOrder: 'desc' as any });
+
+      expect(prisma.event.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ orderBy: { eventDate: 'desc' } }),
+      );
+    });
+  });
+
+  // ── getPublicEventById() ──────────────────────────────────────────────────
+
+  describe('getPublicEventById()', () => {
+    const publicEvent = {
+      id: eventId,
+      title: 'Indie Night',
+      description: 'Music event',
+      eventType: 'IN_PERSON',
+      languages: ['en'],
+      tags: ['live'],
+      eventDate: new Date(Date.now() + 86400_000),
+      startTime: '07:00 PM',
+      endTime: '10:00 PM',
+      venueName: 'The Venue',
+      fullAddress: '123 Main St',
+      city: 'Mumbai',
+      latitude: 19.076,
+      longitude: 72.877,
+      whatToExpect: ['fun'],
+      whoShouldAttend: ['music lovers'],
+      vibeSummary: null,
+      crowdPulse: null,
+      isFree: false,
+      ageRestriction: null,
+      specialInstructions: null,
+      category: { id: 'c1', name: 'Music' },
+      hostProfile: { id: 'hp-uuid', displayName: 'Test Host', tagline: null, averageRating: null, totalReviews: 0, totalEventsHosted: 0 },
+      tickets: [{ id: 't1', name: 'GA', price: '500', totalCapacity: 100, maxPerPerson: 4, description: null, saleStartDate: null, saleEndDate: null }],
+      refundPolicy: { id: 'rp1', type: 'NO_REFUND', cutoffHours: null, refundPercent: null, refundTo: 'ORIGINAL_PAYMENT_METHOD' },
+      media: [{ url: 'covers/photo.jpg', type: 'COVER', order: 0 }],
+    };
+
+    beforeEach(() => {
+      prisma.event.findUnique.mockResolvedValue(publicEvent);
+      prisma.eventReview.aggregate.mockResolvedValue({ _avg: { rating: 4.5 }, _count: { rating: 10 } });
+      prisma.eventReview.findMany.mockResolvedValue([{
+        id: 'rev-1',
+        rating: 5,
+        highlights: [],
+        body: 'Great event!',
+        createdAt: new Date(),
+        user: { id: 'u1', firstName: 'Jane', lastName: 'Doe', avatarUrl: null },
+        photos: [],
+      }]);
+    });
+
+    it('returns event with signed media, starting price, and review summary', async () => {
+      const result = await service.getPublicEventById(eventId);
+
+      expect(result.media[0].url).toBe('https://cdn.example.com/img');
+      expect(result.startingPrice).toBe(500);
+      expect(result.reviewSummary.averageRating).toBe(4.5);
+      expect(result.reviewSummary.reviewCount).toBe(10);
+      expect(result.reviewSummary.recentReviews).toHaveLength(1);
+    });
+
+    it('throws NotFoundException when event is not found or not published/public', async () => {
+      prisma.event.findUnique.mockResolvedValue(null);
+      await expect(service.getPublicEventById(eventId)).rejects.toThrow(NotFoundException);
+    });
+
+    it('returns null startingPrice and averageRating for free event with no reviews', async () => {
+      prisma.event.findUnique.mockResolvedValue({
+        ...publicEvent,
+        media: [],
+        tickets: [{ ...publicEvent.tickets[0], price: '0' }],
+      });
+      prisma.eventReview.aggregate.mockResolvedValue({ _avg: { rating: null }, _count: { rating: 0 } });
+      prisma.eventReview.findMany.mockResolvedValue([]);
+
+      const result = await service.getPublicEventById(eventId);
+      expect(result.startingPrice).toBeNull();
+      expect(result.reviewSummary.averageRating).toBeNull();
+    });
+
+    it('signs photo URLs on recent reviews', async () => {
+      prisma.eventReview.findMany.mockResolvedValue([{
+        id: 'rev-1',
+        rating: 5,
+        highlights: [],
+        body: 'Great!',
+        createdAt: new Date(),
+        user: { id: 'u1', firstName: 'Jane', lastName: 'Doe', avatarUrl: null },
+        photos: [{ id: 'photo-1', key: 'reviews/photo.jpg' }],
+      }]);
+
+      const result = await service.getPublicEventById(eventId);
+      expect(result.reviewSummary.recentReviews[0].photos[0].url).toBe('https://cdn.example.com/img');
     });
   });
 });

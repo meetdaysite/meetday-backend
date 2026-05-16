@@ -157,6 +157,31 @@ describe('ReviewsService', () => {
       prisma.eventReview.findUnique.mockResolvedValue({ ...reviewRecord, userId: 'other' });
       await expect(service.updateReview(reviewId, userId, dto)).rejects.toThrow(ForbiddenException);
     });
+
+    it('validates highlights when provided', async () => {
+      prisma.event.findUnique.mockResolvedValue({ ...pastEvent, categoryId: 'cat-uuid' });
+      prisma.categoryHighlight.findMany.mockResolvedValue([{ key: 'GREAT_MUSIC' }]);
+      prisma.eventReview.update.mockResolvedValue({ ...reviewRecord, highlights: ['GREAT_MUSIC'], photos: [] });
+
+      await service.updateReview(reviewId, userId, { highlights: ['GREAT_MUSIC'] } as any);
+      expect(prisma.categoryHighlight.findMany).toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException for invalid highlights on update', async () => {
+      prisma.event.findUnique.mockResolvedValue({ ...pastEvent, categoryId: 'cat-uuid' });
+      prisma.categoryHighlight.findMany.mockResolvedValue([{ key: 'GREAT_MUSIC' }]);
+
+      await expect(service.updateReview(reviewId, userId, { highlights: ['INVALID'] } as any)).rejects.toThrow(BadRequestException);
+    });
+
+    it('replaces photos when photoKeys are provided', async () => {
+      prisma.eventReview.update.mockResolvedValue({ ...reviewRecord, photos: [{ id: 'p-1', key: 'photos/new.jpg' }] });
+
+      await service.updateReview(reviewId, userId, { photoKeys: ['photos/new.jpg'] } as any);
+      expect(prisma.eventReview.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ photos: expect.objectContaining({ deleteMany: {} }) }) }),
+      );
+    });
   });
 
   // ── deleteReview ──────────────────────────────────────────────────────────
@@ -210,6 +235,50 @@ describe('ReviewsService', () => {
       const result = await service.getEventReviews(eventId);
       expect(result).toMatchObject({ total: 0, page: 1, limit: 20 });
     });
+
+    it('signs photo URLs in review results', async () => {
+      const reviewWithPhoto = {
+        id: reviewId, rating: 4, hostRating: null, hostBody: null, highlights: [], body: 'Great!', createdAt: new Date(),
+        user: { id: userId, firstName: 'Riya', lastName: 'Sen', avatarUrl: null },
+        photos: [{ id: 'p-1', key: 'photos/img.jpg' }],
+      };
+      prisma.eventReview.findMany.mockResolvedValue([reviewWithPhoto]);
+      prisma.eventReview.count.mockResolvedValue(1);
+      prisma.eventReview.aggregate
+        .mockResolvedValueOnce({ _avg: { rating: 4.0 }, _count: { rating: 1 } })
+        .mockResolvedValueOnce({ _avg: { hostRating: null } });
+      mockStorage.getPresignedDownloadUrl.mockResolvedValue('https://cdn.example.com/photo');
+
+      const result = await service.getEventReviews(eventId);
+      expect(result.reviews[0].photos[0].url).toBe('https://cdn.example.com/photo');
+    });
+  });
+
+  // ── getMyReviews ──────────────────────────────────────────────────────────
+
+  describe('getMyReviews()', () => {
+    it('returns signed reviews with photos', async () => {
+      const reviewWithPhoto = {
+        id: reviewId,
+        event: { id: eventId, title: 'Past Event', eventDate: new Date(), venueName: 'Venue', city: 'Mumbai' },
+        photos: [{ id: 'p-1', key: 'photos/img.jpg' }],
+      };
+      prisma.eventReview.findMany.mockResolvedValue([reviewWithPhoto]);
+      prisma.eventReview.count.mockResolvedValue(1);
+      mockStorage.getPresignedDownloadUrl.mockResolvedValue('https://cdn.example.com/photo');
+
+      const result = await service.getMyReviews(userId);
+      expect(result.total).toBe(1);
+      expect(result.reviews[0].photos[0].url).toBe('https://cdn.example.com/photo');
+    });
+
+    it('returns empty list when user has no reviews', async () => {
+      prisma.eventReview.findMany.mockResolvedValue([]);
+      prisma.eventReview.count.mockResolvedValue(0);
+
+      const result = await service.getMyReviews(userId);
+      expect(result).toEqual({ reviews: [], total: 0, page: 1, limit: 20 });
+    });
   });
 
   // ── moderatePhoto ─────────────────────────────────────────────────────────
@@ -252,6 +321,69 @@ describe('ReviewsService', () => {
     it('throws BadRequestException when photo is already moderated', async () => {
       prisma.reviewPhoto.findUnique.mockResolvedValue({ ...photoRecord, approvalStatus: 'APPROVED' });
       await expect(service.moderatePhoto('photo-uuid', 'host-uuid', 'REJECTED')).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  // ── getPendingPhotos ──────────────────────────────────────────────────────
+
+  describe('getPendingPhotos()', () => {
+    it('returns pending photos with signed URLs', async () => {
+      prisma.hostProfile.findUnique.mockResolvedValue({ id: 'hp-uuid' });
+      prisma.reviewPhoto.findMany.mockResolvedValue([
+        { id: 'p-1', key: 'photos/img.jpg', review: { id: reviewId, eventId, user: { id: userId, firstName: 'Riya', lastName: 'Sen' } } },
+      ]);
+      mockStorage.getPresignedDownloadUrl.mockResolvedValue('https://cdn.example.com/photo');
+
+      const result = await service.getPendingPhotos('host-uuid');
+      expect(result).toHaveLength(1);
+      expect(result[0].url).toBe('https://cdn.example.com/photo');
+    });
+
+    it('throws NotFoundException when host profile does not exist', async () => {
+      prisma.hostProfile.findUnique.mockResolvedValue(null);
+      await expect(service.getPendingPhotos('unknown-host')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ── setReviewVisibility ───────────────────────────────────────────────────
+
+  describe('setReviewVisibility()', () => {
+    beforeEach(() => {
+      prisma.eventReview.findUnique.mockResolvedValue({ id: reviewId, eventId });
+      prisma.eventReview.update.mockResolvedValue({ id: reviewId, isVisible: true });
+    });
+
+    it('sets review visibility to true', async () => {
+      await service.setReviewVisibility(reviewId, true);
+      expect(prisma.eventReview.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { isVisible: true } }),
+      );
+    });
+
+    it('sets review visibility to false', async () => {
+      prisma.eventReview.update.mockResolvedValue({ id: reviewId, isVisible: false });
+      await service.setReviewVisibility(reviewId, false);
+      expect(prisma.eventReview.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { isVisible: false } }),
+      );
+    });
+
+    it('throws NotFoundException when review does not exist', async () => {
+      prisma.eventReview.findUnique.mockResolvedValue(null);
+      await expect(service.setReviewVisibility(reviewId, true)).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ── listAllReviews ────────────────────────────────────────────────────────
+
+  describe('listAllReviews()', () => {
+    it('returns paginated list of all reviews', async () => {
+      const reviews = [{ id: reviewId, event: { id: eventId, title: 'Past Event' }, user: { id: userId }, photos: [] }];
+      prisma.eventReview.findMany.mockResolvedValue(reviews);
+      prisma.eventReview.count.mockResolvedValue(1);
+
+      const result = await service.listAllReviews();
+      expect(result).toEqual({ reviews, total: 1, page: 1, limit: 20 });
     });
   });
 

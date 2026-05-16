@@ -346,5 +346,228 @@ describe('CheckInService', () => {
         service.lookupForManualCheckIn('valid-token-abc', { bookingId: 'X', ticketCode: 'Y' }),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it('returns booking details via ticketCode', async () => {
+      prisma.orderAttendee.findUnique.mockResolvedValue({ orderItem: { orderId: 'order-uuid' } });
+      prisma.order.findUnique.mockResolvedValue({
+        bookingId: 'MDAY-AA-BB',
+        eventId,
+        status: 'CONFIRMED',
+        items: [{ id: 'oi-1', ticket: { name: 'General' }, attendees: [{ checkedInAt: null }] }],
+      });
+
+      const result = await service.lookupForManualCheckIn('valid-token-abc', { ticketCode: 'MDAY-TICKET-001' });
+      expect(result.bookingCode).toBe('MDAY-AA-BB');
+      expect(result.items).toHaveLength(1);
+    });
+
+    it('returns booking details via bookingId', async () => {
+      prisma.order.findFirst.mockResolvedValue({ id: 'order-uuid' });
+      prisma.order.findUnique.mockResolvedValue({
+        bookingId: 'MDAY-AA-BB',
+        eventId,
+        status: 'CONFIRMED',
+        items: [{ id: 'oi-1', ticket: { name: 'General' }, attendees: [{ checkedInAt: null }] }],
+      });
+
+      const result = await service.lookupForManualCheckIn('valid-token-abc', { bookingId: 'MDAY-AA-BB' });
+      expect(result.bookingCode).toBe('MDAY-AA-BB');
+    });
+
+    it('throws NotFoundException when ticketCode does not exist', async () => {
+      prisma.orderAttendee.findUnique.mockResolvedValue(null);
+      await expect(service.lookupForManualCheckIn('valid-token-abc', { ticketCode: 'INVALID' })).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws NotFoundException when bookingId is not found for this event', async () => {
+      prisma.order.findFirst.mockResolvedValue(null);
+      await expect(service.lookupForManualCheckIn('valid-token-abc', { bookingId: 'INVALID' })).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws UnauthorizedException for an invalid scanner token', async () => {
+      prisma.eventScannerSession.findUnique.mockResolvedValue(null);
+      await expect(service.lookupForManualCheckIn('bad-token', { bookingId: 'X' })).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('throws GoneException when session is deactivated', async () => {
+      prisma.eventScannerSession.findUnique.mockResolvedValue({ ...activeSession, isActive: false });
+      await expect(service.lookupForManualCheckIn('valid-token-abc', { bookingId: 'X' })).rejects.toThrow(GoneException);
+    });
   });
+
+  // ── listScannerSessions ───────────────────────────────────────────────────
+
+  describe('listScannerSessions()', () => {
+    const sessionListItem = { ...activeSession, token: 'tok-1', _count: { checkIns: 3 } };
+
+    beforeEach(() => {
+      prisma.event.findUnique.mockResolvedValue({ ...ownedEvent, hostProfile: { userId: hostUserId } });
+      prisma.eventScannerSession.findMany.mockResolvedValue([sessionListItem]);
+    });
+
+    it('returns sessions with scannerUrl and checkInCount', async () => {
+      const result = await service.listScannerSessions(hostUserId, eventId);
+      expect(result).toHaveLength(1);
+      expect(result[0].scannerUrl).toMatch(/\/scan\?token=tok-1$/);
+      expect(result[0].checkInCount).toBe(3);
+    });
+
+    it('throws NotFoundException when event does not exist', async () => {
+      prisma.event.findUnique.mockResolvedValue(null);
+      await expect(service.listScannerSessions(hostUserId, eventId)).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws ForbiddenException when user does not own the event', async () => {
+      prisma.event.findUnique.mockResolvedValue({ ...ownedEvent, hostProfile: { userId: 'other' } });
+      await expect(service.listScannerSessions(hostUserId, eventId)).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  // ── getCheckInStats ───────────────────────────────────────────────────────
+
+  describe('getCheckInStats()', () => {
+    const sessionsWithCount = [
+      { id: 'sess-1', staffName: 'Staff A', staffEmail: 'a@test.com', label: 'Gate A', isActive: true, expiresAt: new Date(), _count: { checkIns: 5 } },
+    ];
+
+    beforeEach(() => {
+      prisma.event.findUnique.mockResolvedValue({ ...ownedEvent, hostProfile: { userId: hostUserId } });
+      prisma.orderAttendee.count
+        .mockResolvedValueOnce(100)
+        .mockResolvedValueOnce(42);
+      prisma.eventScannerSession.findMany.mockResolvedValue(sessionsWithCount);
+    });
+
+    it('returns totalAttendees, checkedIn, remaining and per-session breakdown', async () => {
+      const result = await service.getCheckInStats(hostUserId, eventId);
+      expect(result.totalAttendees).toBe(100);
+      expect(result.checkedIn).toBe(42);
+      expect(result.remaining).toBe(58);
+      expect(result.bySession[0].checkInCount).toBe(5);
+    });
+
+    it('throws NotFoundException when event does not exist', async () => {
+      prisma.event.findUnique.mockResolvedValue(null);
+      await expect(service.getCheckInStats(hostUserId, eventId)).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws ForbiddenException when user does not own the event', async () => {
+      prisma.event.findUnique.mockResolvedValue({ ...ownedEvent, hostProfile: { userId: 'other' } });
+      await expect(service.getCheckInStats(hostUserId, eventId)).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  // ── getScannerLiveStats ───────────────────────────────────────────────────
+
+  describe('getScannerLiveStats()', () => {
+    const activeSessionStub = { id: sessionId, eventId, isActive: true, expiresAt: new Date(Date.now() + 3600_000) };
+
+    beforeEach(() => {
+      prisma.eventScannerSession.findUnique.mockResolvedValue(activeSessionStub);
+      prisma.orderAttendee.count
+        .mockResolvedValueOnce(7)
+        .mockResolvedValueOnce(93);
+    });
+
+    it('returns checkedInThisGate and totalRemaining', async () => {
+      const result = await service.getScannerLiveStats('valid-token');
+      expect(result).toEqual({ checkedInThisGate: 7, totalRemaining: 93 });
+    });
+
+    it('throws UnauthorizedException for an unknown token', async () => {
+      prisma.eventScannerSession.findUnique.mockResolvedValue(null);
+      await expect(service.getScannerLiveStats('bad-token')).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('throws GoneException when session is deactivated', async () => {
+      prisma.eventScannerSession.findUnique.mockResolvedValue({ ...activeSessionStub, isActive: false });
+      await expect(service.getScannerLiveStats('valid-token')).rejects.toThrow(GoneException);
+    });
+
+    it('throws GoneException when session is expired', async () => {
+      prisma.eventScannerSession.findUnique.mockResolvedValue({ ...activeSessionStub, expiresAt: new Date(Date.now() - 1000) });
+      await expect(service.getScannerLiveStats('valid-token')).rejects.toThrow(GoneException);
+    });
+  });
+
+  // ── manualCheckIn ─────────────────────────────────────────────────────────
+
+  describe('manualCheckIn()', () => {
+    const dto = { attendeeId: 'att-uuid', scannerToken: 'valid-token-abc' };
+    const attendeeRecord = {
+      id: 'att-uuid',
+      fullName: 'Riya Sen',
+      isLead: true,
+      checkedInAt: null,
+      orderItem: {
+        ticket: { name: 'General' },
+        order: { eventId, status: 'CONFIRMED', event: { status: 'PUBLISHED' } },
+      },
+    };
+
+    beforeEach(() => {
+      prisma.eventScannerSession.findUnique.mockResolvedValue({
+        id: sessionId, eventId, isActive: true, expiresAt: new Date(Date.now() + 3600_000),
+      });
+      prisma.orderAttendee.findUnique.mockResolvedValue(attendeeRecord);
+      prisma.orderAttendee.update.mockResolvedValue({
+        ...attendeeRecord,
+        checkedInAt: new Date(),
+        orderItem: { ...attendeeRecord.orderItem },
+      });
+    });
+
+    it('checks in the attendee and returns alreadyCheckedIn false', async () => {
+      const result = await service.manualCheckIn(dto);
+      expect(result.alreadyCheckedIn).toBe(false);
+      expect(prisma.orderAttendee.update).toHaveBeenCalled();
+    });
+
+    it('returns alreadyCheckedIn true for a duplicate check-in', async () => {
+      prisma.orderAttendee.findUnique.mockResolvedValue({ ...attendeeRecord, checkedInAt: new Date() });
+      const result = await service.manualCheckIn(dto);
+      expect(result.alreadyCheckedIn).toBe(true);
+      expect(prisma.orderAttendee.update).not.toHaveBeenCalled();
+    });
+
+    it('throws UnauthorizedException for an invalid scanner token', async () => {
+      prisma.eventScannerSession.findUnique.mockResolvedValue(null);
+      await expect(service.manualCheckIn(dto)).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('throws GoneException when session is deactivated', async () => {
+      prisma.eventScannerSession.findUnique.mockResolvedValue({ id: sessionId, eventId, isActive: false, expiresAt: new Date(Date.now() + 3600_000) });
+      await expect(service.manualCheckIn(dto)).rejects.toThrow(GoneException);
+    });
+
+    it('throws NotFoundException when attendee does not exist', async () => {
+      prisma.orderAttendee.findUnique.mockResolvedValue(null);
+      await expect(service.manualCheckIn(dto)).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws BadRequestException when attendee belongs to a different event', async () => {
+      prisma.orderAttendee.findUnique.mockResolvedValue({
+        ...attendeeRecord,
+        orderItem: { ...attendeeRecord.orderItem, order: { ...attendeeRecord.orderItem.order, eventId: 'other-event' } },
+      });
+      await expect(service.manualCheckIn(dto)).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when the event is cancelled', async () => {
+      prisma.orderAttendee.findUnique.mockResolvedValue({
+        ...attendeeRecord,
+        orderItem: { ...attendeeRecord.orderItem, order: { ...attendeeRecord.orderItem.order, event: { status: 'CANCELLED' } } },
+      });
+      await expect(service.manualCheckIn(dto)).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when the order is not confirmed', async () => {
+      prisma.orderAttendee.findUnique.mockResolvedValue({
+        ...attendeeRecord,
+        orderItem: { ...attendeeRecord.orderItem, order: { ...attendeeRecord.orderItem.order, status: 'PENDING_PAYMENT' } },
+      });
+      await expect(service.manualCheckIn(dto)).rejects.toThrow(BadRequestException);
+    });
+  });
+
 });
