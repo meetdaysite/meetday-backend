@@ -393,6 +393,60 @@ export class EventsService {
     return this.withSignedMedia(event);
   }
 
+  async getEventAttendees(hostUserId: string, eventId: string, page = 1, limit = 50) {
+    const hostProfile = await this.prisma.hostProfile.findUnique({
+      where: { userId: hostUserId },
+      select: { id: true },
+    });
+    if (!hostProfile) throw new NotFoundException('Host profile not found');
+
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: { hostProfileId: true },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+    if (event.hostProfileId !== hostProfile.id) throw new ForbiddenException('You do not own this event');
+
+    const [attendees, total] = await Promise.all([
+      this.prisma.orderAttendee.findMany({
+        where: { orderItem: { order: { eventId, status: 'CONFIRMED' } } },
+        select: {
+          fullName: true,
+          checkedInAt: true,
+          orderItem: {
+            select: {
+              unitPrice: true,
+              ticket: { select: { name: true } },
+              order: { select: { confirmedAt: true, bookingId: true } },
+            },
+          },
+        },
+        orderBy: { orderItem: { order: { confirmedAt: 'desc' } } },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.orderAttendee.count({
+        where: { orderItem: { order: { eventId, status: 'CONFIRMED' } } },
+      }),
+    ]);
+
+    const rows = attendees.map((a) => {
+      const spaceIdx = a.fullName.indexOf(' ');
+      return {
+        firstName:   spaceIdx === -1 ? a.fullName : a.fullName.slice(0, spaceIdx),
+        lastName:    spaceIdx === -1 ? ''         : a.fullName.slice(spaceIdx + 1),
+        ticketType:  a.orderItem.ticket.name,
+        bookingDate: a.orderItem.order.confirmedAt,
+        bookingId:   a.orderItem.order.bookingId,
+        amountPaid:  a.orderItem.unitPrice,
+        isCheckedIn: !!a.checkedInAt,
+        checkedInAt: a.checkedInAt ?? null,
+      };
+    });
+
+    return { attendees: rows, total, page, limit };
+  }
+
   async cancelEvent(userId: string, eventId: string, dto: CancelEventDto) {
     const event = await this.prisma.event.findUnique({
       where: { id: eventId },

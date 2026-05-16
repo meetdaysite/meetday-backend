@@ -174,6 +174,25 @@ export class EventsController {
     return this.eventsService.getMyEventById(userId, id);
   }
 
+  @Get('me/:id/attendees')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'List attendees for own event',
+    description: 'Returns a paginated list of all confirmed attendees for the host\'s event.',
+  })
+  @ApiOkResponse({ description: 'Paginated attendee list.' })
+  @ApiNotFoundResponse({ description: 'Event not found.' })
+  @ApiForbiddenResponse({ description: 'Event belongs to a different host.' })
+  getEventAttendees(
+    @GetUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('page', new ParseIntPipe({ optional: true })) page?: number,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+  ) {
+    return this.eventsService.getEventAttendees(userId, id, page, limit);
+  }
+
   @Patch(':id')
   @UseGuards(RolesGuard)
   @Roles('HOST')
