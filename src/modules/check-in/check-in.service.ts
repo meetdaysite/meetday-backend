@@ -69,7 +69,7 @@ export class CheckInService {
       metadata: { eventId, staffEmail: dto.email, label: dto.label ?? null, expiresAt: session.expiresAt },
     });
 
-    const appUrl = this.configService.get<string>('app.url') ?? 'https://app.meetday.app';
+    const appUrl = this.configService.get<string>('frontendUrl');
     const scannerUrl = `${appUrl}/scan?token=${token}`;
 
     void this.mailService
@@ -93,7 +93,7 @@ export class CheckInService {
       orderBy: { createdAt: 'desc' },
     });
 
-    const appUrl = this.configService.get<string>('app.url') ?? 'https://app.meetday.app';
+    const appUrl = this.configService.get<string>('frontendUrl');
     return sessions.map((s) => ({
       ...s,
       checkInCount: s._count.checkIns,

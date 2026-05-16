@@ -13,17 +13,17 @@ export class TicketPdfService {
     private readonly storageService: StorageService,
   ) {}
 
-  async getOrderSummary(orderId: string): Promise<{ email: string; eventTitle: string }> {
+  async getOrderSummary(orderId: string): Promise<{ email: string | null; eventTitle: string }> {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       select: {
-        user: { select: { email: true, phone: true } },
+        user: { select: { email: true } },
         event: { select: { title: true } },
       },
     });
     if (!order) throw new Error(`Order ${orderId} not found`);
     return {
-      email: order.user.email ?? order.user.phone ?? '',
+      email: order.user.email ?? null,
       eventTitle: order.event.title,
     };
   }

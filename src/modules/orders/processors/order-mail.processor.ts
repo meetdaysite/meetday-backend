@@ -20,6 +20,10 @@ export class OrderMailProcessor {
         this.ticketPdfService.generateForOrder(job.data.orderId),
         this.ticketPdfService.getOrderSummary(job.data.orderId),
       ]);
+      if (!summary.email) {
+        this.logger.warn(`Skipping ticket confirmation email for order ${job.data.orderId}: user has no email address`);
+        return;
+      }
       await this.mailService.sendTicketConfirmation(summary.email, summary.eventTitle, pdfBuffer);
     } catch (error) {
       this.logger.error(`Failed to process ticket-confirmation mail job: ${(error as Error).message}`);
