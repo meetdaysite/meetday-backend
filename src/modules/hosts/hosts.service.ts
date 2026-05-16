@@ -374,6 +374,7 @@ export class HostsService {
     // --- PAN verification ---
     // Skip if PAN was pre-verified via POST /hosts/kyc/pan/verify; run inline otherwise.
     let panReferenceId: string;
+    let panSucceededSync = false;
 
     if (panAlreadyVerified) {
       panReferenceId = profile.panVerificationReference!;
@@ -399,6 +400,7 @@ export class HostsService {
           panResult.verificationStatus,
           panResult.failureReason,
         );
+        panSucceededSync = panResult.verificationStatus === 'VERIFIED';
       }
 
       // Skip bank verification if PAN already failed synchronously — prevents a duplicate kyc-failed
@@ -445,7 +447,7 @@ export class HostsService {
     if (bankResult.verificationStatus !== undefined) {
       // Use panAlreadyVerified flag rather than the stale profile.panVerificationStatus
       // (which was reset to PENDING in the transaction above if PAN wasn't pre-verified).
-      const effectivePanStatus = panAlreadyVerified ? 'VERIFIED' : (profile.panVerificationStatus as string);
+      const effectivePanStatus = (panAlreadyVerified || panSucceededSync) ? 'VERIFIED' : (profile.panVerificationStatus as string);
       await this.applyBankVerificationResult(
         newPayoutAccountId!,
         { ...profile, panVerificationStatus: effectivePanStatus },

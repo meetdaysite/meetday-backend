@@ -15,6 +15,9 @@ import { SubscriptionService } from './subscription.service';
 import { PennyDropService } from './penny-drop.service';
 import { VerifyBankDto } from './dto/submit-kyc.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { StorageService } from '../../common/storage/storage.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
+import { ConsentService } from '../consent/consent.service';
 
 // ── Mock factories ───────────────────────────────────────────────────────────
 
@@ -56,7 +59,7 @@ const mockCrypto = {
 const mockKycProvider = { initiateVerification: jest.fn() };
 const mockSubscriptionService = { createPlanAndSubscription: jest.fn(), cancelSubscription: jest.fn() };
 const mockPennyDropService = { initiatePennyDrop: jest.fn() };
-const mockMailQueue = { add: jest.fn() };
+const mockMailQueue = { add: jest.fn().mockResolvedValue(undefined) };
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -101,7 +104,10 @@ describe('HostsService', () => {
         { provide: SubscriptionService, useValue: mockSubscriptionService },
         { provide: PennyDropService, useValue: mockPennyDropService },
         { provide: getQueueToken('mail'), useValue: mockMailQueue },
-        { provide: NotificationsService, useValue: { create: jest.fn() } },
+        { provide: NotificationsService, useValue: { create: jest.fn().mockResolvedValue(undefined) } },
+        { provide: StorageService, useValue: { getPresignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/img') } },
+        { provide: AuditLogService, useValue: { log: jest.fn() } },
+        { provide: ConsentService, useValue: { hasActiveConsent: jest.fn().mockResolvedValue(true), recordConsent: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 

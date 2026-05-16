@@ -8,6 +8,7 @@ import {
 import { AuthService, TokenUser } from './auth.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
+import { ConsentService } from '../consent/consent.service';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -63,6 +64,7 @@ describe('AuthService', () => {
         AuthService,
         { provide: PrismaService, useValue: prisma },
         { provide: CryptoService, useValue: mockCrypto },
+        { provide: ConsentService, useValue: { hasActiveConsent: jest.fn().mockResolvedValue(false), grantConsent: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 
