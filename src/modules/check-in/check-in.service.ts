@@ -40,8 +40,14 @@ export class CheckInService {
       throw new BadRequestException('Event must have a date and end time set before inviting scanner staff');
     }
 
-    const [hours, minutes] = event.endTime.split(':').map(Number);
     const expiresAt = new Date(event.eventDate);
+    const timeMatch = event.endTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+    if (!timeMatch) throw new BadRequestException(`Unrecognised endTime format: "${event.endTime}"`);
+    let hours = parseInt(timeMatch[1], 10);
+    const minutes = parseInt(timeMatch[2], 10);
+    const meridiem = timeMatch[3]?.toUpperCase();
+    if (meridiem === 'PM' && hours !== 12) hours += 12;
+    if (meridiem === 'AM' && hours === 12) hours = 0;
     expiresAt.setHours(hours, minutes, 0, 0);
     expiresAt.setTime(expiresAt.getTime() + 60 * 60 * 1000); // 1-hour buffer after event ends
 
