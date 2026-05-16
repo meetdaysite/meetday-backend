@@ -25,6 +25,10 @@ import { AdminService } from './admin.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { NotificationsService } from '../notifications/notifications.service';
+import { StorageService } from '../../common/storage/storage.service';
+import { RedisService } from '../../common/redis/redis.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
+import { InterestsService } from '../interests/interests.service';
 
 // ── Mock factories ───────────────────────────────────────────────────────────
 
@@ -47,7 +51,7 @@ function makePrisma() {
   return prisma;
 }
 
-const mockMailQueue = { add: jest.fn() };
+const mockMailQueue = { add: jest.fn().mockResolvedValue(undefined) };
 const mockConfig = { get: jest.fn().mockReturnValue('http://localhost:3000') };
 
 // Convenience: reference the mocked firebase-admin auth singleton
@@ -96,7 +100,11 @@ describe('AdminService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: ConfigService, useValue: mockConfig },
         { provide: getQueueToken('mail'), useValue: mockMailQueue },
-        { provide: NotificationsService, useValue: { create: jest.fn() } },
+        { provide: NotificationsService, useValue: { create: jest.fn().mockResolvedValue(undefined) } },
+        { provide: StorageService, useValue: { getPresignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/img') } },
+        { provide: RedisService, useValue: { get: jest.fn().mockResolvedValue(null), set: jest.fn(), del: jest.fn() } },
+        { provide: AuditLogService, useValue: { log: jest.fn() } },
+        { provide: InterestsService, useValue: { invalidateCache: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 
