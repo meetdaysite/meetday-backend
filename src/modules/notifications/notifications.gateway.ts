@@ -10,6 +10,7 @@ import { createAdapter } from '@socket.io/redis-adapter';
 import * as firebaseAdmin from 'firebase-admin';
 import { Redis } from 'ioredis';
 import { Namespace, Socket } from 'socket.io';
+import { PrismaService } from '../../prisma/prisma.service';
 
 @WebSocketGateway({
   namespace: '/notifications',
@@ -23,7 +24,10 @@ export class NotificationsGateway implements OnGatewayInit, OnGatewayConnection 
 
   private readonly logger = new Logger(NotificationsGateway.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   afterInit(namespace: Namespace) {
     const pubClient = new Redis({
@@ -37,23 +41,39 @@ export class NotificationsGateway implements OnGatewayInit, OnGatewayConnection 
   }
 
   async handleConnection(client: Socket) {
-    const token = client.handshake.auth?.token as string | undefined;
+    const token = (client.handshake.auth?.token ?? client.handshake.query?.token) as string | undefined;
 
     if (!token) {
+      this.logger.warn(`Socket rejected: no token in handshake socketId=${client.id}`);
       client.disconnect();
       return;
     }
 
     try {
       const decoded = await firebaseAdmin.auth().verifyIdToken(token);
-      client.join(decoded.uid);
-      this.logger.log(`Socket connected: user=${decoded.uid} socketId=${client.id}`);
-    } catch {
+
+      const user = await this.prisma.user.findUnique({
+        where: { firebaseUid: decoded.uid },
+        select: { id: true },
+      });
+
+      if (!user) {
+        this.logger.warn(`Socket rejected: no DB user for firebaseUid=${decoded.uid}`);
+        client.disconnect();
+        return;
+      }
+
+      // Join the room by DB user ID — must match the userId passed to sendToUser()
+      client.join(user.id);
+      this.logger.log(`Socket connected: userId=${user.id} socketId=${client.id}`);
+    } catch (err) {
+      this.logger.warn(`Socket rejected: token verification failed — ${(err as Error).message}`);
       client.disconnect();
     }
   }
 
   sendToUser(userId: string, event: string, data: unknown): void {
     this.server.to(userId).emit(event, data);
+    this.logger.log(`WS emit: event=${event} userId=${userId}`);
   }
 }
