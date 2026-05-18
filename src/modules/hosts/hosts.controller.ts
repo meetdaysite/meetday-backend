@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
@@ -33,6 +34,7 @@ import { VerifyBankDto } from './dto/submit-kyc.dto';
 import { PanWebhookDto } from './dto/pan-webhook.dto';
 import { BankWebhookDto } from './dto/bank-webhook.dto';
 import { UpgradeSubscriptionDto } from './dto/upgrade-subscription.dto';
+import { DashboardQueryDto } from './dto/dashboard-query.dto';
 
 @ApiTags('Hosts')
 @ApiBearerAuth('firebase-token')
@@ -156,6 +158,70 @@ export class HostsController {
   @ApiBadRequestResponse({ description: 'One or more categoryIds are invalid UUIDs or do not exist.' })
   applyAsHost(@GetUser('id') userId: string, @Body() dto: ApplyHostDto) {
     return this.hostsService.applyAsHost(userId, dto);
+  }
+
+  @Get('me/dashboard')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'Host dashboard summary',
+    description:
+      'Returns all data needed for the host dashboard in a single call: ' +
+      'event status counts, overview stats with period deltas, the 5 most recently updated events, ' +
+      'and the 5 most recent notifications. ' +
+      'The `period` query param controls the window for overview stats and their % change vs the preceding equivalent window. ' +
+      'ALL_TIME skips date filters and returns null for all delta fields. ' +
+      '"completed" in eventCounts is a derived status (PUBLISHED events whose eventDate is in the past) — no schema enum change.',
+  })
+  @ApiOkResponse({
+    description: 'Dashboard summary for the authenticated host.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-05-18T10:00:00.000Z',
+        data: {
+          eventCounts: { draft: 2, underReview: 1, published: 3, completed: 5, cancelled: 1 },
+          overview: {
+            period: 'THIS_MONTH',
+            totalEvents: 4,
+            totalEventsDelta: 33,
+            liveRegistrations: 312,
+            liveRegistrationsDelta: 18,
+            revenue: 51620,
+            revenueDelta: 24,
+            avgSatisfaction: 4.7,
+            avgSatisfactionDelta: 0.3,
+          },
+          recentEvents: [
+            {
+              id: 'evt-uuid',
+              title: 'Summer Music Festival',
+              coverImageUrl: 'https://cdn.example.com/signed-url',
+              city: 'Austin',
+              eventDate: '2025-06-21T00:00:00.000Z',
+              endTime: '23:00',
+              status: 'PUBLISHED',
+              registrations: 1248,
+              revenue: 24560,
+            },
+          ],
+          recentNotifications: [
+            {
+              id: 'notif-uuid',
+              type: 'event_approved',
+              title: 'Summer Music Festival was approved',
+              body: 'Your event is now live.',
+              isRead: false,
+              createdAt: '2026-05-18T09:45:00.000Z',
+            },
+          ],
+        },
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Host profile not found.' })
+  getDashboard(@GetUser('id') userId: string, @Query() query: DashboardQueryDto) {
+    return this.hostsService.getDashboard(userId, query.period);
   }
 
   @Get('me')
