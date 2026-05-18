@@ -10,6 +10,7 @@ import {
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { BillingCycle, CouponTarget, DiscountType, HostPlan, SubscriptionStatus } from '@prisma/client';
+import { DashboardPeriod } from './dto/dashboard-query.dto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
 import { KYC_PROVIDER, KycProvider } from './interfaces/kyc-provider.interface';
@@ -905,5 +906,288 @@ export class HostsService {
     ).catch((err) => this.logger.error('Failed to create subscription_activated notification', err));
 
     return newSubscription;
+  }
+
+  private getPeriodBounds(period: DashboardPeriod): {
+    start: Date | null;
+    end: Date | null;
+    prevStart: Date | null;
+    prevEnd: Date | null;
+  } {
+    if (period === DashboardPeriod.ALL_TIME) {
+      return { start: null, end: null, prevStart: null, prevEnd: null };
+    }
+
+    const now = new Date();
+
+    if (period === DashboardPeriod.THIS_MONTH) {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      const prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const prevEnd = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { start, end: now, prevStart, prevEnd };
+    }
+
+    if (period === DashboardPeriod.LAST_30_DAYS) {
+      const start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const prevStart = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+      const prevEnd = start;
+      return { start, end: now, prevStart, prevEnd };
+    }
+
+    // THIS_YEAR
+    const start = new Date(now.getFullYear(), 0, 1);
+    const prevStart = new Date(now.getFullYear() - 1, 0, 1);
+    const prevEnd = new Date(now.getFullYear(), 0, 1);
+    return { start, end: now, prevStart, prevEnd };
+  }
+
+  private computeDelta(current: number, prev: number): number | null {
+    if (prev === 0) return null;
+    return Math.round(((current - prev) / prev) * 100 * 10) / 10;
+  }
+
+  async getDashboard(userId: string, period: DashboardPeriod) {
+    const hostProfile = await this.prisma.hostProfile.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    if (!hostProfile) throw new NotFoundException('Host profile not found');
+
+    const hostProfileId = hostProfile.id;
+    const now = new Date();
+    const { start, end, prevStart, prevEnd } = this.getPeriodBounds(period);
+
+    const periodFilter = start ? { gte: start, lte: end! } : undefined;
+    const prevPeriodFilter = prevStart ? { gte: prevStart, lt: prevEnd! } : undefined;
+
+    // ── 1. Event counts (all-time, grouped by status + derived "completed") ──
+    const eventCountsQuery = this.prisma.event.groupBy({
+      by: ['status'],
+      where: { hostProfileId },
+      _count: { _all: true },
+    });
+
+    // ── 2. Overview aggregates (current period) ──
+    const registrationsCurrentQuery = this.prisma.orderAttendee.count({
+      where: {
+        orderItem: {
+          order: {
+            status: 'CONFIRMED',
+            ...(periodFilter && { confirmedAt: periodFilter }),
+            event: { hostProfileId },
+          },
+        },
+      },
+    });
+
+    const revenueCurrentQuery = this.prisma.order.aggregate({
+      where: {
+        status: 'CONFIRMED',
+        ...(periodFilter && { confirmedAt: periodFilter }),
+        event: { hostProfileId },
+      },
+      _sum: { totalAmount: true },
+    });
+
+    const satisfactionCurrentQuery = this.prisma.eventReview.aggregate({
+      where: {
+        isVisible: true,
+        ...(periodFilter && { createdAt: periodFilter }),
+        event: { hostProfileId },
+      },
+      _avg: { rating: true },
+    });
+
+    const totalEventsCurrentQuery = this.prisma.event.count({
+      where: {
+        hostProfileId,
+        ...(periodFilter && { createdAt: periodFilter }),
+      },
+    });
+
+    // ── 3. Overview aggregates (previous period for deltas) ──
+    const registrationsPrevQuery = prevPeriodFilter
+      ? this.prisma.orderAttendee.count({
+          where: {
+            orderItem: {
+              order: {
+                status: 'CONFIRMED',
+                confirmedAt: prevPeriodFilter,
+                event: { hostProfileId },
+              },
+            },
+          },
+        })
+      : Promise.resolve(0);
+
+    const revenuePrevQuery = prevPeriodFilter
+      ? this.prisma.order.aggregate({
+          where: {
+            status: 'CONFIRMED',
+            confirmedAt: prevPeriodFilter,
+            event: { hostProfileId },
+          },
+          _sum: { totalAmount: true },
+        })
+      : Promise.resolve({ _sum: { totalAmount: null } });
+
+    const satisfactionPrevQuery = prevPeriodFilter
+      ? this.prisma.eventReview.aggregate({
+          where: {
+            isVisible: true,
+            createdAt: prevPeriodFilter,
+            event: { hostProfileId },
+          },
+          _avg: { rating: true },
+        })
+      : Promise.resolve({ _avg: { rating: null } });
+
+    const totalEventsPrevQuery = prevPeriodFilter
+      ? this.prisma.event.count({
+          where: { hostProfileId, createdAt: prevPeriodFilter },
+        })
+      : Promise.resolve(0);
+
+    // ── 4. Recent events (last 5 by updatedAt) ──
+    const recentEventsQuery = this.prisma.event.findMany({
+      where: { hostProfileId },
+      orderBy: { updatedAt: 'desc' },
+      take: 5,
+      select: {
+        id: true,
+        title: true,
+        city: true,
+        eventDate: true,
+        endTime: true,
+        status: true,
+        tickets: { select: { soldCount: true } },
+        media: {
+          where: { type: 'COVER' },
+          select: { url: true },
+          take: 1,
+        },
+      },
+    });
+
+    // ── 5. Recent notifications (last 5) ──
+    const recentNotificationsQuery = this.prisma.notification.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+      select: { id: true, type: true, title: true, body: true, isRead: true, createdAt: true },
+    });
+
+    // Run everything in parallel
+    const [
+      rawEventCounts,
+      registrationsCurrent,
+      revenueCurrent,
+      satisfactionCurrent,
+      totalEventsCurrent,
+      registrationsPrev,
+      revenuePrev,
+      satisfactionPrev,
+      totalEventsPrev,
+      recentEventsRaw,
+      recentNotifications,
+    ] = await Promise.all([
+      eventCountsQuery,
+      registrationsCurrentQuery,
+      revenueCurrentQuery,
+      satisfactionCurrentQuery,
+      totalEventsCurrentQuery,
+      registrationsPrevQuery,
+      revenuePrevQuery,
+      satisfactionPrevQuery,
+      totalEventsPrevQuery,
+      recentEventsQuery,
+      recentNotificationsQuery,
+    ]);
+
+    // ── Build eventCounts ──
+    const countMap: Record<string, number> = {};
+    for (const row of rawEventCounts) {
+      countMap[row.status] = row._count._all;
+    }
+    const publishedAll = countMap['PUBLISHED'] ?? 0;
+    const completedCount = await this.prisma.event.count({
+      where: { hostProfileId, status: 'PUBLISHED', eventDate: { lt: now } },
+    });
+    const eventCounts = {
+      draft: countMap['DRAFT'] ?? 0,
+      underReview: countMap['UNDER_REVIEW'] ?? 0,
+      published: publishedAll - completedCount,
+      completed: completedCount,
+      cancelled: countMap['CANCELLED'] ?? 0,
+    };
+
+    // ── Build overview ──
+    const revCurrentNum = Number(revenueCurrent._sum.totalAmount ?? 0);
+    const revPrevNum = Number(revenuePrev._sum.totalAmount ?? 0);
+    const satCurrent = satisfactionCurrent._avg.rating
+      ? Math.round(satisfactionCurrent._avg.rating * 10) / 10
+      : null;
+    const satPrev = satisfactionPrev._avg.rating
+      ? Math.round(satisfactionPrev._avg.rating * 10) / 10
+      : null;
+
+    const overview = {
+      period,
+      totalEvents: totalEventsCurrent,
+      totalEventsDelta: period !== DashboardPeriod.ALL_TIME
+        ? this.computeDelta(totalEventsCurrent, totalEventsPrev)
+        : null,
+      liveRegistrations: registrationsCurrent,
+      liveRegistrationsDelta: period !== DashboardPeriod.ALL_TIME
+        ? this.computeDelta(registrationsCurrent, registrationsPrev)
+        : null,
+      revenue: revCurrentNum,
+      revenueDelta: period !== DashboardPeriod.ALL_TIME
+        ? this.computeDelta(revCurrentNum, revPrevNum)
+        : null,
+      avgSatisfaction: satCurrent,
+      avgSatisfactionDelta: period !== DashboardPeriod.ALL_TIME && satCurrent !== null && satPrev !== null
+        ? Math.round((satCurrent - satPrev) * 10) / 10
+        : null,
+    };
+
+    // ── Build recentEvents — fetch per-event revenue, presign covers ──
+    const eventIds = recentEventsRaw.map((e) => e.id);
+    const [revenuePerEvent] = await Promise.all([
+      eventIds.length
+        ? this.prisma.order.groupBy({
+            by: ['eventId'],
+            where: { eventId: { in: eventIds }, status: 'CONFIRMED' },
+            _sum: { totalAmount: true },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const revenueByEventId = new Map(
+      revenuePerEvent.map((r) => [r.eventId, Number(r._sum.totalAmount ?? 0)]),
+    );
+
+    const recentEvents = await Promise.all(
+      recentEventsRaw.map(async (e) => {
+        const coverUrl = e.media[0]?.url
+          ? await this.storageService.getPresignedDownloadUrl(e.media[0].url)
+          : null;
+        const derivedStatus =
+          e.status === 'PUBLISHED' && e.eventDate < now ? 'COMPLETED' : e.status;
+        return {
+          id: e.id,
+          title: e.title,
+          coverImageUrl: coverUrl,
+          city: e.city,
+          eventDate: e.eventDate,
+          endTime: e.endTime,
+          status: derivedStatus,
+          registrations: e.tickets.reduce((sum, t) => sum + t.soldCount, 0),
+          revenue: revenueByEventId.get(e.id) ?? 0,
+        };
+      }),
+    );
+
+    return { eventCounts, overview, recentEvents, recentNotifications };
   }
 }
