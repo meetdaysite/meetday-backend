@@ -40,6 +40,7 @@ export default () => {
       encryptionKey: env.ENCRYPTION_KEY,
     },
     frontendUrl: env.FRONTEND_URL,
+    internalApiKey: env.INTERNAL_API_KEY,
     s3: {
       region: env.AWS_REGION,
       accessKeyId: env.AWS_ACCESS_KEY_ID,
