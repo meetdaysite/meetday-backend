@@ -41,6 +41,7 @@ export default () => {
     },
     frontendUrl: env.FRONTEND_URL,
     internalApiKey: env.INTERNAL_API_KEY,
+    aiServerUrl: env.AI_SERVER_URL,
     s3: {
       region: env.AWS_REGION,
       accessKeyId: env.AWS_ACCESS_KEY_ID,

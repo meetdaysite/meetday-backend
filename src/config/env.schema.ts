@@ -32,6 +32,8 @@ export const envSchema = z.object({
 
   INTERNAL_API_KEY: z.string().min(32, 'INTERNAL_API_KEY must be at least 32 characters'),
 
+  AI_SERVER_URL: z.string().url('AI_SERVER_URL must be a valid URL'),
+
   AWS_REGION: z.string().min(1, 'AWS_REGION is required'),
   AWS_ACCESS_KEY_ID: z.string().min(1, 'AWS_ACCESS_KEY_ID is required'),
   AWS_SECRET_ACCESS_KEY: z.string().min(1, 'AWS_SECRET_ACCESS_KEY is required'),
