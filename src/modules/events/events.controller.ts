@@ -33,6 +33,7 @@ import { EventsVibeService } from './events-vibe.service';
 import { CopilotService } from './copilot.service';
 import { ReviewsService } from '../reviews/reviews.service';
 import { CheckInService } from '../check-in/check-in.service';
+import { GraphService } from '../graph/graph.service';
 import { CreateScannerSessionDto } from '../check-in/dto/create-scanner-session.dto';
 import { CreateEventDto } from './dto/create-event.dto';
 import { GenerateDraftDto } from './dto/generate-draft.dto';
@@ -51,6 +52,7 @@ export class EventsController {
     private readonly copilotService: CopilotService,
     private readonly reviewsService: ReviewsService,
     private readonly checkInService: CheckInService,
+    private readonly graphService: GraphService,
   ) {}
 
   // ─── Public endpoints ──────────────────────────────────────────────────────
@@ -104,6 +106,32 @@ export class EventsController {
   })
   getCrowdPulse(@Param('id', ParseUUIDPipe) id: string) {
     return this.eventsVibeService.getCrowdPulse(id);
+  }
+
+  @Get(':id/social-proximity')
+  @ApiOperation({
+    summary: "Get the caller's social proximity to an event",
+    description:
+      'Returns how many of the confirmed attendees the authenticated user has crossed paths with ' +
+      'at past events (real-world co-attendance graph), up to 5 avatars, and the strongest ties ' +
+      'with shared-event counts. Attendees with PRIVATE profiles are never included.',
+  })
+  @ApiOkResponse({
+    description: 'Social proximity summary.',
+    schema: {
+      example: {
+        knownAttendeeCount: 4,
+        avatars: ['https://signed-url-1', 'https://signed-url-2'],
+        strongestTies: [{ firstName: 'Priya', sharedEventCount: 3 }],
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Event not found or not published.' })
+  getSocialProximity(
+    @GetUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.graphService.getSocialProximity(userId, id);
   }
 
   @Get(':id/public')

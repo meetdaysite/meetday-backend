@@ -61,6 +61,10 @@ model User {
   orders                 Order[]
   reviews                EventReview[]
   createdScannerSessions EventScannerSession[]
+  orderAttendances       OrderAttendee[]
+
+  connectionsAsA UserConnection[] @relation("ConnectionUserA")
+  connectionsAsB UserConnection[] @relation("ConnectionUserB")
 
   auditLogs      AuditLog[]      @relation("AuditLogActor")
   consentRecords ConsentRecord[]
@@ -658,6 +662,9 @@ model Event {
   // Submission tracking
   submittedAt DateTime?
 
+  // Social graph — set once post-event edge computation has run for this event
+  graphProcessedAt DateTime?
+
   // Meta
   status    EventStatus @default(DRAFT)
   createdAt DateTime    @default(now())
@@ -866,11 +873,17 @@ model OrderAttendee {
   checkedInAt        DateTime?
   scannedBySessionId String?
 
+  // Resolved platform identity — lead is always the buyer; non-leads matched by email
+  // at booking time or retroactively on signup. Null = attendee has no account yet.
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
   orderItem        OrderItem            @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
   scannedBySession EventScannerSession? @relation(fields: [scannedBySessionId], references: [id])
 
   @@index([orderItemId])
   @@index([ticketCode])
+  @@index([userId])
   @@map("order_attendees")
 }
 
@@ -957,6 +970,36 @@ model EventScannerSession {
   @@index([eventId])
   @@index([token])
   @@map("event_scanner_sessions")
+}
+
+// ─── Social Graph ─────────────────────────────────────────────────────────────
+
+// Behavioural edge between two users, derived from real-world co-attendance.
+// Invariant: userAId < userBId (lexicographic) so each pair has exactly one row.
+// Counters are recomputed from full order/check-in history (idempotent), and
+// weight is a deterministic function of the counters (see graph.constants.ts).
+model UserConnection {
+  userAId String
+  userBId String
+
+  weight                Float @default(0)
+  coAttendCount         Int   @default(0) // distinct ended events both had confirmed orders for
+  verifiedCoAttendCount Int   @default(0) // subset of coAttendCount where both checked in
+  groupBookingCount     Int   @default(0) // events where both were on the same order
+  sharedHostCount       Int   @default(0) // distinct hosts across shared events
+  sharedCategoryCount   Int   @default(0) // distinct categories across shared events
+
+  firstCoAttendedAt DateTime?
+  lastCoAttendedAt  DateTime?
+  computedAt        DateTime  @default(now())
+
+  userA User @relation("ConnectionUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB User @relation("ConnectionUserB", fields: [userBId], references: [id], onDelete: Cascade)
+
+  @@id([userAId, userBId])
+  @@index([userAId, weight(sort: Desc)])
+  @@index([userBId, weight(sort: Desc)])
+  @@map("user_connections")
 }
 
 // ─── Audit & Consent ──────────────────────────────────────────────────────────

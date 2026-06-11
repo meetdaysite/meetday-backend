@@ -23,6 +23,7 @@ function makePrisma() {
     role: { findUniqueOrThrow: jest.fn() },
     category: { findMany: jest.fn() },
     hostProfile: { create: jest.fn() },
+    orderAttendee: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
   };
   prisma.$transaction = jest.fn().mockImplementation(async (fn: any) => fn(prisma));
   return prisma;

@@ -102,6 +102,17 @@ export class AuthService {
       this.consentService.grantConsent({ userId: result.id, consentType: ConsentType.PRIVACY_POLICY }),
     ]).catch(() => {});
 
+    // Claim past group-booking attendee rows that match this email, so the new
+    // account's event history feeds the social graph.
+    if (resolved.email) {
+      void this.prisma.orderAttendee
+        .updateMany({
+          where: { userId: null, email: resolved.email },
+          data: { userId: result.id },
+        })
+        .catch(() => {});
+    }
+
     return result;
   }
 

@@ -22,6 +22,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { AuditLogModule } from './modules/audit-log/audit-log.module';
 import { ConsentModule } from './modules/consent/consent.module';
 import { InterestsModule } from './modules/interests/interests.module';
+import { GraphModule } from './modules/graph/graph.module';
 import { FirebaseAuthGuard } from './common/guards/firebase-auth.guard';
 import { HealthModule } from './common/health/health.module';
 import { MailModule } from './common/mail/mail.module';
@@ -70,6 +71,7 @@ import { StorageModule } from './common/storage/storage.module';
     AuditLogModule,
     ConsentModule,
     InterestsModule,
+    GraphModule,
   ],
   providers: [
     Logger,
