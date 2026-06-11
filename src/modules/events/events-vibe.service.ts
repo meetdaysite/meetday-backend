@@ -1,8 +1,21 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { OrderStatus, VibeType, SocialStyle } from '@prisma/client';
+import { OrderStatus, VibeType, SocialStyle, InterestAffinity } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
+import { GraphService } from '../graph/graph.service';
 import { InterestAffinityInputDto, VibeMatchDto } from './dto/vibe-match.dto';
+import {
+  CROWD_CONFIDENCE_N0,
+  DOMINANT_MARGIN,
+  ENERGY_THRESHOLD,
+  GRAPH_SATURATION_K,
+  INTEREST_FIT_UNKNOWN,
+  MATCH_WEIGHTS_ANON,
+  MATCH_WEIGHTS_AUTH,
+  MIN_SAMPLE_FOR_DOMINANT,
+  MIN_SAMPLE_FOR_LABEL,
+  VIBE_SMOOTHING_ALPHA,
+} from './vibe.constants';
 
 interface CrowdPulseCache {
   energy: 'HIGH' | 'MEDIUM' | 'LOW';
@@ -10,6 +23,9 @@ interface CrowdPulseCache {
   crowdStyle: string;
   socialFriendliness: string;
   totalAttendees: number;
+  sampleSize: number; // attendees with a non-null vibeType
+  confidence: number; // 0..1, scales with sampleSize
+  isEstimate: boolean; // true when sampleSize is too low for confident labels
   computedAt: string;
 }
 
@@ -20,28 +36,39 @@ export class EventsVibeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storageService: StorageService,
+    private readonly graphService: GraphService,
   ) {}
 
   // ─── Public API ──────────────────────────────────────────────────────────────
 
-  async getVibeMatch(eventId: string, dto: VibeMatchDto) {
+  async getVibeMatch(eventId: string, dto: VibeMatchDto, userId?: string) {
     const event = await this.prisma.event.findUnique({
       where: { id: eventId },
       select: { id: true, categoryId: true, crowdPulse: true },
     });
     if (!event) throw new NotFoundException('Event not found');
 
+    // Graph proximity is only available for an authenticated caller.
+    const proximity = userId
+      ? await this.graphService.getProximityForScore(userId, eventId)
+      : null;
+    const hasProximity = (proximity?.knownAttendeeCount ?? 0) > 0;
+
     const hasInput = dto.vibeType || dto.socialStyle || dto.interests?.length;
-    if (!hasInput) {
+    // With neither questionnaire answers nor any known co-attendees there is
+    // nothing to score on — keep the "answer the questions" prompt.
+    if (!hasInput && !hasProximity) {
       return {
         score: null,
         reasons: [],
         similarAttendees: { count: 0, avatars: [] },
+        socialProximity: proximity ?? null,
         prompt: 'Answer the questions to see your vibe match',
       };
     }
 
     const crowdPulse = event.crowdPulse as unknown as CrowdPulseCache | null;
+    const crowdConfidence = crowdPulse?.confidence ?? 0;
 
     // Fetch interest IDs linked to this event's category
     const categoryInterestIds = event.categoryId
@@ -54,14 +81,16 @@ export class EventsVibeService {
       : [];
     const categoryInterestSet = new Set(categoryInterestIds);
 
-    // Score each dimension
-    const interestScore = this.computeInterestScore(dto.interests ?? [], categoryInterestSet);
-    const vibeScore = this.computeVibeScore(dto.vibeType ?? null, crowdPulse?.dominantVibeType ?? null);
-    const socialScore = this.computeSocialScore(dto.socialStyle ?? null);
+    // ── Normalised sub-scores in [0,1] ──
+    const interestFit = this.interestFit(dto.interests ?? [], categoryInterestSet);
+    const vibeFitRaw = this.vibeFit(dto.vibeType ?? null, crowdPulse?.dominantVibeType ?? null);
+    // Pull vibe fit toward neutral when we have little crowd data — don't claim
+    // strong alignment off a noisy dominant vibe.
+    const vibeFit = 0.5 + crowdConfidence * (vibeFitRaw - 0.5);
+    const socialFit = this.socialFit(dto.socialStyle ?? null);
+    const graphFit = this.graphFit(proximity?.knownAttendeeCount ?? 0);
 
-    const rawScore = interestScore + vibeScore + socialScore;
-    const clamped = Math.max(10, Math.min(100, rawScore));
-    const score = Math.round(clamped / 5) * 5;
+    const score = this.combineScore({ interestFit, vibeFit, socialFit, graphFit }, userId !== undefined);
 
     // Derive matched interests for reasons
     const likedMatched = (dto.interests ?? []).filter(
@@ -84,18 +113,20 @@ export class EventsVibeService {
     }
 
     const reasons = this.buildReasons(
+      { interestFit, vibeFit, socialFit, graphFit },
       dto,
       matchedInterestNames,
       dislikedMatched.length > 0,
       similarCount,
       crowdPulse,
+      proximity,
     );
     const similarAttendees = await this.getSimilarAttendeeAvatars(
       eventId,
       likedMatched.map((i) => i.interestId),
     );
 
-    return { score, reasons, similarAttendees };
+    return { score, reasons, similarAttendees, socialProximity: proximity ?? null };
   }
 
   async getCrowdPulse(eventId: string) {
@@ -117,6 +148,8 @@ export class EventsVibeService {
       energy: pulse.energy,
       crowdStyle: pulse.crowdStyle,
       socialFriendliness: pulse.socialFriendliness,
+      confidence: pulse.confidence ?? 0,
+      isEstimate: pulse.isEstimate ?? true,
       topAttendeeAvatars: avatars,
     };
   }
@@ -141,19 +174,6 @@ export class EventsVibeService {
 
     const total = profiles.length;
 
-    if (total === 0) {
-      const pulse: CrowdPulseCache = {
-        energy: 'MEDIUM',
-        dominantVibeType: null,
-        crowdStyle: 'Mixed Crowd',
-        socialFriendliness: 'Friendly',
-        totalAttendees: 0,
-        computedAt: new Date().toISOString(),
-      };
-      await this.prisma.event.update({ where: { id: eventId }, data: { crowdPulse: pulse as object } });
-      return pulse;
-    }
-
     // VibeType distribution
     const vibeCounts: Record<VibeType, number> = {
       LIFE_OF_PARTY: 0,
@@ -164,17 +184,24 @@ export class EventsVibeService {
     for (const p of profiles) {
       if (p.vibeType) vibeCounts[p.vibeType]++;
     }
+    const n = profiles.filter((p) => p.vibeType).length; // vibe-typed sample size
+    const confidence = n / (n + CROWD_CONFIDENCE_N0);
+    const isEstimate = n < MIN_SAMPLE_FOR_LABEL;
 
-    const withVibe = profiles.filter((p) => p.vibeType).length || 1;
-    const lifeOfPartyPct = vibeCounts.LIFE_OF_PARTY / withVibe;
-    const chillPct = vibeCounts.CHILL_OBSERVING / withVibe;
+    // Smoothed proportions — pull toward uniform when the sample is thin, so one
+    // or two attendees can't swing the whole label. At n=0 every type is 1/K.
+    const K = 4;
+    const smoothed = (count: number) => (count + VIBE_SMOOTHING_ALPHA) / (n + VIBE_SMOOTHING_ALPHA * K);
 
-    const energy: CrowdPulseCache['energy'] =
-      lifeOfPartyPct > 0.4 ? 'HIGH' : chillPct > 0.4 ? 'LOW' : 'MEDIUM';
+    // Energy: only confident once we clear the minimum sample.
+    let energy: CrowdPulseCache['energy'] = 'MEDIUM';
+    if (!isEstimate) {
+      const partyP = smoothed(vibeCounts.LIFE_OF_PARTY);
+      const chillP = smoothed(vibeCounts.CHILL_OBSERVING);
+      energy = partyP > ENERGY_THRESHOLD ? 'HIGH' : chillP > ENERGY_THRESHOLD ? 'LOW' : 'MEDIUM';
+    }
 
-    const dominantVibeType = (Object.entries(vibeCounts) as [VibeType, number][]).reduce((a, b) =>
-      b[1] > a[1] ? b : a,
-    )[0];
+    const dominantVibeType = this.resolveDominantVibe(vibeCounts, n, smoothed);
 
     // SocialStyle distribution
     const socialCounts: Record<SocialStyle, number> = {
@@ -189,16 +216,24 @@ export class EventsVibeService {
     const openToMeetingPct = socialCounts.OPEN_TO_MEETING / withSocial;
     const bringingGangPct = socialCounts.BRINGING_GANG / withSocial;
 
-    const socialFriendliness =
-      openToMeetingPct > 0.5 ? 'Very Friendly' : bringingGangPct > 0.4 ? 'Group-Friendly' : 'Friendly';
+    const socialFriendliness = isEstimate
+      ? 'Friendly'
+      : openToMeetingPct > 0.5
+        ? 'Very Friendly'
+        : bringingGangPct > 0.4
+          ? 'Group-Friendly'
+          : 'Friendly';
 
     // Crowd style
-    const partyLean = vibeCounts.LIFE_OF_PARTY + socialCounts.BRINGING_GANG;
-    const socialLean = vibeCounts.HERE_TO_CONNECT + socialCounts.OPEN_TO_MEETING;
-    const chillLean = vibeCounts.CHILL_OBSERVING + socialCounts.SOLO_EXPLORER;
-    const maxLean = Math.max(partyLean, socialLean, chillLean);
-    const crowdStyle =
-      maxLean === partyLean ? 'Party Energy' : maxLean === socialLean ? 'Trendy & Social' : 'Laid-back & Chill';
+    let crowdStyle = 'Mixed Crowd';
+    if (!isEstimate) {
+      const partyLean = vibeCounts.LIFE_OF_PARTY + socialCounts.BRINGING_GANG;
+      const socialLean = vibeCounts.HERE_TO_CONNECT + socialCounts.OPEN_TO_MEETING;
+      const chillLean = vibeCounts.CHILL_OBSERVING + socialCounts.SOLO_EXPLORER;
+      const maxLean = Math.max(partyLean, socialLean, chillLean);
+      crowdStyle =
+        maxLean === partyLean ? 'Party Energy' : maxLean === socialLean ? 'Trendy & Social' : 'Laid-back & Chill';
+    }
 
     const pulse: CrowdPulseCache = {
       energy,
@@ -206,6 +241,9 @@ export class EventsVibeService {
       crowdStyle,
       socialFriendliness,
       totalAttendees: total,
+      sampleSize: n,
+      confidence,
+      isEstimate,
       computedAt: new Date().toISOString(),
     };
 
@@ -213,48 +251,100 @@ export class EventsVibeService {
     return pulse;
   }
 
-  // ─── Score helpers ───────────────────────────────────────────────────────────
+  /**
+   * Argmax over smoothed vibe proportions, but null when the sample is too small
+   * or the top two are within DOMINANT_MARGIN — no false LIFE_OF_PARTY default.
+   */
+  private resolveDominantVibe(
+    vibeCounts: Record<VibeType, number>,
+    n: number,
+    smoothed: (count: number) => number,
+  ): VibeType | null {
+    if (n < MIN_SAMPLE_FOR_DOMINANT) return null;
 
-  private computeInterestScore(interests: InterestAffinityInputDto[], categorySet: Set<string>): number {
-    let pts = 0;
-    for (const i of interests) {
-      if (!categorySet.has(i.interestId)) continue;
-      if (i.affinity === 'LIKED') pts += 10;
-      else if (i.affinity === 'OPEN_TO') pts += 5;
-      else if (i.affinity === 'DISLIKED') pts -= 5;
-    }
-    return Math.max(0, Math.min(40, pts));
+    const ranked = (Object.entries(vibeCounts) as [VibeType, number][])
+      .map(([type, count]) => ({ type, p: smoothed(count) }))
+      .sort((a, b) => b.p - a.p);
+
+    if (ranked.length < 2 || ranked[0].p - ranked[1].p < DOMINANT_MARGIN) return null;
+    return ranked[0].type;
   }
 
-  private computeVibeScore(vibeType: VibeType | null, dominantCrowd: VibeType | null): number {
-    if (!vibeType) return 15;
-    if (!dominantCrowd) return 20;
-    if (vibeType === dominantCrowd) return 30;
-    if (vibeType === 'OPEN_TO_WHATEVER') return 25;
+  // ─── Score helpers ───────────────────────────────────────────────────────────
+
+  /**
+   * Interest fit in [0,1] — rewards the *quality* of matched interests, not the
+   * count, so adding more answers can't inflate the score. Averages per-interest
+   * contributions (LIKED +1, OPEN_TO +0.5, DISLIKED -1) over the interests the
+   * user rated that belong to this category, then maps [-1,1] → [0,1].
+   */
+  private interestFit(interests: InterestAffinityInputDto[], categorySet: Set<string>): number {
+    const matched = interests.filter((i) => categorySet.has(i.interestId));
+    if (matched.length === 0) return INTEREST_FIT_UNKNOWN;
+
+    const contribution = (a: InterestAffinity) => (a === 'LIKED' ? 1 : a === 'OPEN_TO' ? 0.5 : -1);
+    const avg = matched.reduce((sum, i) => sum + contribution(i.affinity), 0) / matched.length;
+    return (avg + 1) / 2;
+  }
+
+  /** Vibe fit in [0,1] — user vibe vs crowd dominant vibe (pre-confidence-weighting). */
+  private vibeFit(vibeType: VibeType | null, dominantCrowd: VibeType | null): number {
+    if (!vibeType || !dominantCrowd) return 0.5;
+    if (vibeType === dominantCrowd) return 1;
+    if (vibeType === 'OPEN_TO_WHATEVER') return 0.8;
     const compatible: Partial<Record<VibeType, VibeType[]>> = {
       LIFE_OF_PARTY: ['HERE_TO_CONNECT'],
       HERE_TO_CONNECT: ['LIFE_OF_PARTY', 'OPEN_TO_WHATEVER'],
       CHILL_OBSERVING: ['OPEN_TO_WHATEVER'],
     };
-    if (compatible[vibeType]?.includes(dominantCrowd)) return 20;
-    return 10;
+    if (compatible[vibeType]?.includes(dominantCrowd)) return 0.6;
+    return 0.3;
   }
 
-  private computeSocialScore(socialStyle: SocialStyle | null): number {
-    if (!socialStyle) return 15;
-    if (socialStyle === 'OPEN_TO_MEETING') return 30;
-    if (socialStyle === 'BRINGING_GANG') return 20;
-    return 15;
+  /** Social fit in [0,1] — the user's own openness to meeting people. */
+  private socialFit(socialStyle: SocialStyle | null): number {
+    if (socialStyle === 'OPEN_TO_MEETING') return 1;
+    if (socialStyle === 'BRINGING_GANG') return 0.66;
+    return 0.5; // SOLO_EXPLORER or unstated
+  }
+
+  /** Graph proximity in [0,1] — saturating in known co-attendees (diminishing returns). */
+  private graphFit(knownAttendees: number): number {
+    return 1 - Math.exp(-GRAPH_SATURATION_K * knownAttendees);
+  }
+
+  /**
+   * Weighted combination → 0–100, rounded to 5. Graph proximity carries the most
+   * weight when authenticated (behavioural truth); when anonymous the remaining
+   * three weights are renormalised. No floor — poor fits are allowed to score low.
+   */
+  private combineScore(
+    parts: { interestFit: number; vibeFit: number; socialFit: number; graphFit: number },
+    authenticated: boolean,
+  ): number {
+    const raw = authenticated
+      ? MATCH_WEIGHTS_AUTH.interest * parts.interestFit +
+        MATCH_WEIGHTS_AUTH.vibe * parts.vibeFit +
+        MATCH_WEIGHTS_AUTH.social * parts.socialFit +
+        MATCH_WEIGHTS_AUTH.graph * parts.graphFit
+      : MATCH_WEIGHTS_ANON.interest * parts.interestFit +
+        MATCH_WEIGHTS_ANON.vibe * parts.vibeFit +
+        MATCH_WEIGHTS_ANON.social * parts.socialFit;
+
+    const clamped = Math.max(0, Math.min(100, raw * 100));
+    return Math.round(clamped / 5) * 5;
   }
 
   // ─── Reasons ────────────────────────────────────────────────────────────────
 
   private buildReasons(
+    parts: { interestFit: number; vibeFit: number; socialFit: number; graphFit: number },
     dto: VibeMatchDto,
     matchedInterestNames: string[],
     hasDislikedMatch: boolean,
     similarCount: number,
     crowdPulse: CrowdPulseCache | null,
+    proximity: { knownAttendeeCount: number; strongestTies: { firstName: string }[] } | null,
   ) {
     // SHARED_INTERESTS
     let sharedDesc: string;
@@ -294,11 +384,27 @@ export class EventsVibeService {
       energyDesc = 'A diverse crowd with different energies';
     }
 
-    return [
-      { type: 'SHARED_INTERESTS', label: 'Shared Interests', description: sharedDesc },
-      { type: 'ROOM_FIT', label: 'Room fit', description: roomDesc },
-      { type: 'ENERGY_ALIGNMENT', label: 'Energy alignment', description: energyDesc },
+    const reasons = [
+      { type: 'SHARED_INTERESTS', label: 'Shared Interests', description: sharedDesc, weight: parts.interestFit },
+      { type: 'ROOM_FIT', label: 'Room fit', description: roomDesc, weight: parts.socialFit },
+      { type: 'ENERGY_ALIGNMENT', label: 'Energy alignment', description: energyDesc, weight: parts.vibeFit },
     ];
+
+    // SOCIAL_PROXIMITY — only when the caller actually has known co-attendees.
+    const known = proximity?.knownAttendeeCount ?? 0;
+    if (known > 0) {
+      const names = (proximity?.strongestTies ?? []).slice(0, 2).map((t) => t.firstName);
+      const desc =
+        names.length > 0
+          ? `${names.join(' and ')}${known > names.length ? ` +${known - names.length} more` : ''} you've crossed paths with ${known === 1 ? 'is' : 'are'} going`
+          : `${known} ${known === 1 ? 'person' : 'people'} you've crossed paths with ${known === 1 ? 'is' : 'are'} going`;
+      reasons.push({ type: 'SOCIAL_PROXIMITY', label: 'Your people', description: desc, weight: parts.graphFit });
+    }
+
+    // Lead with the strongest-contributing dimension; drop the internal weight.
+    return reasons
+      .sort((a, b) => b.weight - a.weight)
+      .map(({ weight, ...reason }) => reason);
   }
 
   // ─── Attendee helpers ────────────────────────────────────────────────────────

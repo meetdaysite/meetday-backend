@@ -110,6 +110,24 @@ export class GraphService {
     });
     if (!event || event.status !== 'PUBLISHED') throw new NotFoundException('Event not found');
 
+    return this.computeProximity(userId, eventId);
+  }
+
+  /**
+   * Non-throwing proximity lookup for the vibe-match score. Returns an empty
+   * result on any miss (no user, no edges) rather than raising — discovery
+   * surfaces must degrade gracefully.
+   */
+  async getProximityForScore(userId: string, eventId: string) {
+    try {
+      return await this.computeProximity(userId, eventId);
+    } catch (err) {
+      this.logger.error(`Proximity lookup failed for user ${userId} / event ${eventId}`, err);
+      return { knownAttendeeCount: 0, avatars: [], strongestTies: [] };
+    }
+  }
+
+  private async computeProximity(userId: string, eventId: string) {
     const attendeeIds = (await this.getEventParticipantIds(eventId)).filter((id) => id !== userId);
     if (attendeeIds.length === 0) {
       return { knownAttendeeCount: 0, avatars: [], strongestTies: [] };
