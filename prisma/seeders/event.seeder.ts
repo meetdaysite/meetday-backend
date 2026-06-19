@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { PrismaClient, MediaType } from '@prisma/client';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import * as fs from 'fs';
