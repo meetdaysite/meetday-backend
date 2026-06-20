@@ -1,7 +1,8 @@
-import { Controller, Get } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Controller, Get, UseGuards } from '@nestjs/common';
+import { ApiExcludeEndpoint, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CategoriesService } from './categories.service';
 import { Public } from '../../common/decorators/public.decorator';
+import { InternalApiKeyGuard } from '../../common/guards/internal-api-key.guard';
 
 @ApiTags('Categories')
 @Controller('categories')
@@ -30,6 +31,14 @@ export class CategoriesController {
     },
   })
   list() {
+    return this.categoriesService.listPublic();
+  }
+
+  @Get('internal')
+  @Public()
+  @UseGuards(InternalApiKeyGuard)
+  @ApiExcludeEndpoint()
+  listInternal() {
     return this.categoriesService.listPublic();
   }
 }

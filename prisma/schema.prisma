@@ -25,12 +25,12 @@ model Role {
 }
 
 model User {
-  id          String  @id @default(uuid())
-  firebaseUid String  @unique
-  email       String? // null for phone-only accounts — uniqueness enforced by partial index (see migration)
-  phone       String? // null for email-only accounts — uniqueness enforced by partial index (see migration)
-  firstName   String
-  lastName    String
+  id                  String    @id @default(uuid())
+  firebaseUid         String    @unique
+  email               String? // null for phone-only accounts — uniqueness enforced by partial index (see migration)
+  phone               String? // null for email-only accounts — uniqueness enforced by partial index (see migration)
+  firstName           String
+  lastName            String
   avatarUrl           String?
   isActive            Boolean   @default(true)
   mustCompleteProfile Boolean   @default(false)
@@ -40,8 +40,8 @@ model User {
   role   Role   @relation(fields: [roleId], references: [id])
 
   attendeeProfile AttendeeProfile?
-  hostProfile     HostProfile?  @relation("HostUser")
-  adminProfile AdminProfile?
+  hostProfile     HostProfile?     @relation("HostUser")
+  adminProfile    AdminProfile?
 
   // Back-relations for admin audit trails
   approvedHostProfiles    HostProfile[]              @relation("HostApprovedBy")
@@ -50,20 +50,27 @@ model User {
   payoutAccountChanges    HostPayoutAccountHistory[] @relation("PayoutAccountChangedBy")
 
   // Coupon back-relations
-  createdCoupons    Coupon[]            @relation("CouponCreatedBy")
-  couponRedemptions CouponRedemption[]  @relation("CouponRedemptions")
+  createdCoupons    Coupon[]           @relation("CouponCreatedBy")
+  couponRedemptions CouponRedemption[] @relation("CouponRedemptions")
 
-  reviewedEvents Event[]         @relation("EventReviewedBy")
+  reviewedEvents Event[] @relation("EventReviewedBy")
 
   notifications Notification[]
 
-  interestAffinities UserInterestAffinity[]
+  interestAffinities     UserInterestAffinity[]
   orders                 Order[]
   reviews                EventReview[]
   createdScannerSessions EventScannerSession[]
+  orderAttendances       OrderAttendee[]
+
+  connectionsAsA UserConnection[] @relation("ConnectionUserA")
+  connectionsAsB UserConnection[] @relation("ConnectionUserB")
 
   auditLogs      AuditLog[]      @relation("AuditLogActor")
   consentRecords ConsentRecord[]
+
+  createdCommunities   Community[]       @relation("CommunityCreatedBy")
+  communityMemberships CommunityMember[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -132,12 +139,12 @@ enum HostType {
 }
 
 enum PayoutAccountStatus {
-  PENDING_PENNY_DROP    // Fund account created in Razorpay, awaiting penny drop result
-  PENNY_DROP_FAILED     // Razorpay penny drop failed — account invalid or unreachable
-  PENDING_ADMIN_REVIEW  // Penny drop passed, awaiting admin sign-off
-  APPROVED              // Admin approved — host can receive payouts
-  REJECTED              // Admin rejected (mismatch, fraud, compliance failure)
-  DEACTIVATED           // Soft-deleted — account closed or replaced
+  PENDING_PENNY_DROP // Fund account created in Razorpay, awaiting penny drop result
+  PENNY_DROP_FAILED // Razorpay penny drop failed — account invalid or unreachable
+  PENDING_ADMIN_REVIEW // Penny drop passed, awaiting admin sign-off
+  APPROVED // Admin approved — host can receive payouts
+  REJECTED // Admin rejected (mismatch, fraud, compliance failure)
+  DEACTIVATED // Soft-deleted — account closed or replaced
 }
 
 enum CouponTarget {
@@ -147,8 +154,8 @@ enum CouponTarget {
 }
 
 enum DiscountType {
-  PERCENTAGE  // reduce fee rate by X% of its value (e.g. 50% off 15% → 7.5%)
-  FLAT        // reduce fee rate by X percentage points (e.g. 10 off 15% → 5%)
+  PERCENTAGE // reduce fee rate by X% of its value (e.g. 50% off 15% → 7.5%)
+  FLAT // reduce fee rate by X percentage points (e.g. 10 off 15% → 5%)
 }
 
 // ─── Attendee Profile ─────────────────────────────────────────────────────────
@@ -196,6 +203,7 @@ model Interest {
 
   userAffinities   UserInterestAffinity[]
   categoryMappings InterestCategory[]
+  communities      CommunityInterest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -208,7 +216,7 @@ model UserInterestAffinity {
   interestId String
   affinity   InterestAffinity
 
-  user     User     @relation(fields: [userId],     references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   interest Interest @relation(fields: [interestId], references: [id], onDelete: Cascade)
 
   @@id([userId, interestId])
@@ -226,6 +234,7 @@ model Category {
   hostExperienceCategories HostExperienceCategory[]
   events                   Event[]
   highlights               CategoryHighlight[]
+  communities              Community[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -251,8 +260,8 @@ model InterestCategory {
   interestId String
   categoryId String
 
-  interest Interest  @relation(fields: [interestId], references: [id], onDelete: Cascade)
-  category Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  interest Interest @relation(fields: [interestId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
   @@id([interestId, categoryId])
   @@index([categoryId])
@@ -268,25 +277,25 @@ model HostProfile {
 
   // Identity & Type
   hostType    HostType?
-  displayName String?   // Public-facing name shown to attendees
-  legalName   String?   // Full legal name or registered company name
+  displayName String? // Public-facing name shown to attendees
+  legalName   String? // Full legal name or registered company name
   gender      Gender?
 
   // Legal / Compliance (encrypted or masked)
-  panEncrypted  String?  // AES-256-GCM encrypted PAN — required for TDS on payouts
-  gstin         String?  // GST number — collected when applicable (not required at onboarding)
+  panEncrypted String? // AES-256-GCM encrypted PAN — required for TDS on payouts
+  gstin        String? // GST number — collected when applicable (not required at onboarding)
 
   // Credibility & Bio
   hostBio                     String?
   tagline                     String?
   languages                   String[]
-  socialLinks                 Json?     // { instagram, linkedin, youtube, website }
+  socialLinks                 Json? // { instagram, linkedin, youtube, website }
   yearsOfExperience           Int?
   totalEventsPreviouslyHosted Int?
-  portfolioLinks              String[]  // URLs to past events, press coverage, etc.
+  portfolioLinks              String[] // URLs to past events, press coverage, etc.
 
   // Reach
-  operatingCities String[]  // Cities the host is willing to operate in
+  operatingCities String[] // Cities the host is willing to operate in
 
   // Address (structured, separate table)
   address HostAddress?
@@ -299,7 +308,7 @@ model HostProfile {
   kycVerifiedAt            DateTime?
   kycFailureReason         String?
   panVerificationStatus    PanVerificationStatus @default(NOT_SUBMITTED)
-  panVerificationReference String?               // referenceId from KYC provider initiation
+  panVerificationReference String? // referenceId from KYC provider initiation
   bankVerificationStatus   PanVerificationStatus @default(NOT_SUBMITTED)
 
   // Admin Approval
@@ -353,7 +362,7 @@ model HostAddress {
   city         String
   state        String
   pincode      String
-  country      String @default("India")
+  country      String  @default("India")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -373,10 +382,10 @@ model HostPayoutAccount {
   razorpayFundAccountId String?
 
   // Display-safe bank details (raw account number NEVER stored — PCI-DSS)
-  maskedAccountNumber String?  // Last 4 digits only, e.g. "XXXX1234"
-  bankName            String?  // e.g. "HDFC Bank"
-  accountHolderName   String?  // Name as registered on bank account
-  accountType         String?  // "SAVINGS" | "CURRENT"
+  maskedAccountNumber String? // Last 4 digits only, e.g. "XXXX1234"
+  bankName            String? // e.g. "HDFC Bank"
+  accountHolderName   String? // Name as registered on bank account
+  accountType         String? // "SAVINGS" | "CURRENT"
 
   // Verification lifecycle
   status PayoutAccountStatus @default(PENDING_PENNY_DROP)
@@ -437,7 +446,7 @@ model HostPayoutAccountHistory {
   newAccountHolderName        String?
 
   // Change context (RBI audit requirement)
-  changeReason String   // e.g. "ADMIN_APPROVED", "PENNY_DROP_FAILED", "BANK_ACCOUNT_UPDATED"
+  changeReason String // e.g. "ADMIN_APPROVED", "PENNY_DROP_FAILED", "BANK_ACCOUNT_UPDATED"
   ipAddress    String?
   userAgent    String?
 
@@ -514,7 +523,7 @@ model SubscriptionPlanHistory {
   newMonthlyPrice      Float?
   newFeeRate           Float?
 
-  changeReason       String   // mandatory, internal only
+  changeReason       String // mandatory, internal only
   effectiveDate      DateTime
   notificationSentAt DateTime?
 
@@ -549,8 +558,8 @@ model Coupon {
   eventId String?
   event   Event?  @relation("EventCoupons", fields: [eventId], references: [id])
 
-  redemptions    CouponRedemption[]
-  orderUsages    Order[]
+  redemptions CouponRedemption[]
+  orderUsages Order[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -590,12 +599,12 @@ model Notification {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  type     String   // e.g. "host_approved", "kyc_failed", "subscription_activated"
+  type     String // e.g. "host_approved", "kyc_failed", "subscription_activated"
   title    String
   body     String
   isRead   Boolean   @default(false)
   readAt   DateTime?
-  metadata Json?    // optional context: { plan, reason, billingCycle, … }
+  metadata Json? // optional context: { plan, reason, billingCycle, … }
 
   createdAt DateTime @default(now())
 
@@ -633,7 +642,7 @@ model Event {
   whoShouldAttend Json @default("[]")
 
   // Settings
-  visibility          Visibility  @default(PUBLIC)
+  visibility          Visibility @default(PUBLIC)
   ageRestriction      String?
   specialInstructions String?
 
@@ -658,6 +667,9 @@ model Event {
   // Submission tracking
   submittedAt DateTime?
 
+  // Social graph — set once post-event edge computation has run for this event
+  graphProcessedAt DateTime?
+
   // Meta
   status    EventStatus @default(DRAFT)
   createdAt DateTime    @default(now())
@@ -673,6 +685,7 @@ model Event {
   coupons         Coupon[]              @relation("EventCoupons")
   reviews         EventReview[]
   scannerSessions EventScannerSession[]
+  communities     CommunityEvent[]
 
   @@index([hostProfileId])
   @@index([categoryId])
@@ -689,7 +702,7 @@ model EventTicket {
   name          String
   price         Decimal
   totalCapacity Int
-  soldCount     Int     @default(0) // held (PENDING) + sold (CONFIRMED); authoritative availability
+  soldCount     Int       @default(0) // held (PENDING) + sold (CONFIRMED); authoritative availability
   maxPerPerson  Int?
   description   String?
   saleStartDate DateTime?
@@ -805,10 +818,10 @@ model Order {
   status OrderStatus @default(PENDING_PAYMENT)
 
   // Financials — snapshotted at creation, never recomputed from live data
-  subtotal       Decimal
-  platformFee    Decimal
-  taxAmount      Decimal
-  totalAmount    Decimal
+  subtotal    Decimal
+  platformFee Decimal
+  taxAmount   Decimal
+  totalAmount Decimal
 
   // Promo
   couponId       String?
@@ -822,9 +835,9 @@ model Order {
   cancelledAt        DateTime?
   cancellationReason String?
 
-  user   User    @relation(fields: [userId], references: [id])
-  event  Event   @relation(fields: [eventId], references: [id])
-  coupon Coupon? @relation(fields: [couponId], references: [id])
+  user   User         @relation(fields: [userId], references: [id])
+  event  Event        @relation(fields: [eventId], references: [id])
+  coupon Coupon?      @relation(fields: [couponId], references: [id])
   items  OrderItem[]
   review EventReview?
 
@@ -846,8 +859,8 @@ model OrderItem {
   quantity  Int
   unitPrice Decimal // snapshot — price at time of purchase
 
-  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  ticket    EventTicket @relation(fields: [ticketId], references: [id])
+  order     Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  ticket    EventTicket     @relation(fields: [ticketId], references: [id])
   attendees OrderAttendee[]
 
   @@index([orderId])
@@ -859,26 +872,32 @@ model OrderAttendee {
   id          String @id @default(uuid())
   orderItemId String
 
-  fullName    String
-  email       String
-  isLead      Boolean  @default(false) // true = the buyer themselves
-  ticketCode  String   @unique @default(uuid()) // value encoded in QR code
+  fullName           String
+  email              String
+  isLead             Boolean   @default(false) // true = the buyer themselves
+  ticketCode         String    @unique @default(uuid()) // value encoded in QR code
   checkedInAt        DateTime?
   scannedBySessionId String?
+
+  // Resolved platform identity — lead is always the buyer; non-leads matched by email
+  // at booking time or retroactively on signup. Null = attendee has no account yet.
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   orderItem        OrderItem            @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
   scannedBySession EventScannerSession? @relation(fields: [scannedBySessionId], references: [id])
 
   @@index([orderItemId])
   @@index([ticketCode])
+  @@index([userId])
   @@map("order_attendees")
 }
 
 enum OrderStatus {
-  PENDING_PAYMENT  // order created, awaiting payment (expires after 15 min)
-  CONFIRMED        // payment verified
-  CANCELLED        // cancelled by user or payment timeout
-  REFUNDED         // refund processed
+  PENDING_PAYMENT // order created, awaiting payment (expires after 15 min)
+  CONFIRMED // payment verified
+  CANCELLED // cancelled by user or payment timeout
+  REFUNDED // refund processed
 }
 
 // ─── Reviews ──────────────────────────────────────────────────────────────────
@@ -889,17 +908,17 @@ model EventReview {
   userId  String
   orderId String @unique // one review per order; also enforces one per user+event via @@unique below
 
-  rating     Int      // 1–5
-  hostRating Int?     // 1–5, optional separate rating for the host
-  hostBody   String?  // optional written review for the host, max 800 chars
+  rating     Int // 1–5
+  hostRating Int? // 1–5, optional separate rating for the host
+  hostBody   String? // optional written review for the host, max 800 chars
   highlights String[] // e.g. ["GREAT_MUSIC", "GOOD_CROWD"]
-  body       String?  // optional written review, max 800 chars
+  body       String? // optional written review, max 800 chars
   isVisible  Boolean  @default(true) // admin can hide
 
   photos ReviewPhoto[]
 
   event Event @relation(fields: [eventId], references: [id])
-  user  User  @relation(fields: [userId],  references: [id])
+  user  User  @relation(fields: [userId], references: [id])
   order Order @relation(fields: [orderId], references: [id])
 
   createdAt DateTime @default(now())
@@ -915,7 +934,7 @@ model ReviewPhoto {
   id       String @id @default(uuid())
   reviewId String
 
-  key            String              // S3 key
+  key            String // S3 key
   approvalStatus PhotoApprovalStatus @default(PENDING)
   approvedAt     DateTime?
   rejectedAt     DateTime?
@@ -937,15 +956,15 @@ enum PhotoApprovalStatus {
 // ─── Check-In ─────────────────────────────────────────────────────────────────
 
 model EventScannerSession {
-  id             String    @id @default(uuid())
-  eventId        String
-  staffName      String
-  staffEmail     String
-  staffPhone     String?
-  label          String?   // optional positional label e.g. "Gate A", "VIP Entrance"
-  token          String    @unique
-  expiresAt      DateTime
-  isActive       Boolean   @default(true)
+  id              String   @id @default(uuid())
+  eventId         String
+  staffName       String
+  staffEmail      String
+  staffPhone      String?
+  label           String? // optional positional label e.g. "Gate A", "VIP Entrance"
+  token           String   @unique
+  expiresAt       DateTime
+  isActive        Boolean  @default(true)
   createdByUserId String
 
   event     Event           @relation(fields: [eventId], references: [id], onDelete: Cascade)
@@ -959,6 +978,36 @@ model EventScannerSession {
   @@map("event_scanner_sessions")
 }
 
+// ─── Social Graph ─────────────────────────────────────────────────────────────
+
+// Behavioural edge between two users, derived from real-world co-attendance.
+// Invariant: userAId < userBId (lexicographic) so each pair has exactly one row.
+// Counters are recomputed from full order/check-in history (idempotent), and
+// weight is a deterministic function of the counters (see graph.constants.ts).
+model UserConnection {
+  userAId String
+  userBId String
+
+  weight                Float @default(0)
+  coAttendCount         Int   @default(0) // distinct ended events both had confirmed orders for
+  verifiedCoAttendCount Int   @default(0) // subset of coAttendCount where both checked in
+  groupBookingCount     Int   @default(0) // events where both were on the same order
+  sharedHostCount       Int   @default(0) // distinct hosts across shared events
+  sharedCategoryCount   Int   @default(0) // distinct categories across shared events
+
+  firstCoAttendedAt DateTime?
+  lastCoAttendedAt  DateTime?
+  computedAt        DateTime  @default(now())
+
+  userA User @relation("ConnectionUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB User @relation("ConnectionUserB", fields: [userBId], references: [id], onDelete: Cascade)
+
+  @@id([userAId, userBId])
+  @@index([userAId, weight(sort: Desc)])
+  @@index([userBId, weight(sort: Desc)])
+  @@map("user_connections")
+}
+
 // ─── Audit & Consent ──────────────────────────────────────────────────────────
 
 model AuditLog {
@@ -966,12 +1015,12 @@ model AuditLog {
   createdAt DateTime @default(now())
 
   actorId   String?
-  actorRole String?  // ATTENDEE | HOST | ADMIN | SYSTEM
+  actorRole String? // ATTENDEE | HOST | ADMIN | SYSTEM
   ipAddress String?
   userAgent String?
 
   action     AuditAction
-  entityType String      // USER | HOST | EVENT | ORDER | PAYOUT_ACCOUNT | SUBSCRIPTION | SCANNER_SESSION
+  entityType String // USER | HOST | EVENT | ORDER | PAYOUT_ACCOUNT | SUBSCRIPTION | SCANNER_SESSION
   entityId   String
 
   metadata Json?
@@ -997,7 +1046,7 @@ model ConsentRecord {
 
   consentedAt DateTime
   withdrawnAt DateTime?
-  isActive    Boolean   @default(true) 
+  isActive    Boolean   @default(true)
 
   user User @relation(fields: [userId], references: [id])
 
@@ -1058,6 +1107,14 @@ enum AuditAction {
   // DPDP data subject rights (future)
   DATA_EXPORT_REQUESTED
   DATA_DELETION_REQUESTED
+
+  // Communities
+  COMMUNITY_CREATED
+  COMMUNITY_UPDATED
+  COMMUNITY_PUBLISHED
+  COMMUNITY_ARCHIVED
+  COMMUNITY_MEMBER_ADDED
+  COMMUNITY_MEMBER_REMOVED
 }
 
 enum ConsentType {
@@ -1065,4 +1122,213 @@ enum ConsentType {
   PRIVACY_POLICY
   HOST_KYC_DATA_SHARING
   HOST_BANK_DATA_SHARING
+}
+
+// ─── Communities ──────────────────────────────────────────────────────────────
+
+model Community {
+  id          String  @id @default(uuid())
+  slug        String  @unique
+  name        String
+  description String? @db.Text
+
+  type             CommunityType
+  status           CommunityStatus  @default(DRAFT)
+  access           CommunityAccess  @default(PUBLIC)
+  memberVisibility MemberVisibility @default(ALL_MEMBERS)
+
+  // Categorisation & reach
+  categoryId      String?
+  category        Category? @relation(fields: [categoryId], references: [id])
+  primaryCity     String?
+  communityCities String[]  @default([])
+
+  // Step 1 free-form descriptive tags (distinct from the Interest taxonomy used
+  // for matching, which lives on the CommunityInterest join).
+  interestTags String[] @default([])
+
+  // Media (S3 keys, served via presigned download URLs)
+  coverImageKey String?
+  iconKey       String?
+
+  // Experience mapping
+  autoAddMatchingEvents Boolean @default(false)
+
+  // Denormalized metrics
+  memberCount     Int @default(0)
+  experienceCount Int @default(0)
+
+  // Ownership & lifecycle
+  createdBy   String
+  creator     User      @relation("CommunityCreatedBy", fields: [createdBy], references: [id])
+  publishedAt DateTime?
+  deletedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  settings  CommunitySettings?
+  interests CommunityInterest[]
+  members   CommunityMember[]
+  events    CommunityEvent[]
+
+  @@index([status])
+  @@index([categoryId])
+  @@index([primaryCity])
+  @@map("communities")
+}
+
+model CommunitySettings {
+  id          String    @id @default(uuid())
+  communityId String    @unique
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  // Features
+  chatEnabled            Boolean @default(true)
+  feedEnabled            Boolean @default(true)
+  announcementsEnabled   Boolean @default(true)
+  memberDirectoryEnabled Boolean @default(true)
+  experiencesTabEnabled  Boolean @default(true)
+
+  // Posting & chat permissions
+  feedPosting PostingPermission @default(ALL_MEMBERS)
+  chat        ChatPermission    @default(ALL_MEMBERS)
+
+  // Auto moderation
+  spamDetection             Boolean @default(true)
+  toxicContentDetection     Boolean @default(true)
+  linkFiltering             Boolean @default(true)
+  duplicateContentDetection Boolean @default(true)
+  reportThreshold           Int     @default(5)
+
+  // Safety
+  dmPolicy     DirectMessagePolicy @default(MUTUAL_ATTENDEES_ONLY)
+  photoSharing PhotoSharingPolicy  @default(REQUIRE_CONSENT_REMINDER)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("community_settings")
+}
+
+model CommunityInterest {
+  communityId String
+  interestId  String
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  interest  Interest  @relation(fields: [interestId], references: [id], onDelete: Cascade)
+
+  @@id([communityId, interestId])
+  @@index([interestId])
+  @@map("community_interests")
+}
+
+model CommunityMember {
+  id          String                @id @default(uuid())
+  communityId String
+  userId      String
+  role        CommunityRole         @default(MEMBER)
+  status      CommunityMemberStatus @default(ACTIVE)
+
+  invitedBy String?
+  joinedAt  DateTime?
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([communityId, userId])
+  @@index([communityId, role])
+  @@index([userId])
+  @@map("community_members")
+}
+
+model CommunityEvent {
+  id          String               @id @default(uuid())
+  communityId String
+  eventId     String
+  source      CommunityEventSource
+  addedBy     String?
+  addedAt     DateTime             @default(now())
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  event     Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([communityId, eventId])
+  @@index([eventId])
+  @@map("community_events")
+}
+
+// ─── Community Enums ──────────────────────────────────────────────────────────
+
+enum CommunityType {
+  MEETDAY_MANAGED_PUBLIC
+  HOST_LED
+  PRIVATE_INVITE_ONLY
+}
+
+enum CommunityStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum CommunityAccess {
+  PUBLIC
+  APPROVAL_REQUIRED
+  INVITE_ONLY
+}
+
+enum MemberVisibility {
+  ALL_MEMBERS
+  AFTER_ATTENDING
+  HIDDEN
+}
+
+enum PostingPermission {
+  ALL_MEMBERS
+  ATTENDED_MEMBERS_ONLY
+  ADMINS_ONLY
+}
+
+enum ChatPermission {
+  ALL_MEMBERS
+  ATTENDED_MEMBERS_ONLY
+  ADMIN_APPROVAL_REQUIRED
+}
+
+enum DirectMessagePolicy {
+  EVERYONE
+  MUTUAL_ATTENDEES_ONLY
+  DISABLED
+}
+
+enum PhotoSharingPolicy {
+  REQUIRE_CONSENT_REMINDER
+  OPEN
+  DISABLED
+}
+
+enum CommunityRole {
+  OWNER
+  MANAGER
+  HOST
+  MODERATOR
+  MEMBER
+}
+
+enum CommunityMemberStatus {
+  ACTIVE
+  PENDING
+  INVITED
+  BANNED
+  LEFT
+}
+
+enum CommunityEventSource {
+  MANUAL
+  AUTO
 }

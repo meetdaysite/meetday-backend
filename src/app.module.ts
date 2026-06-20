@@ -10,6 +10,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { HostsModule } from './modules/hosts/hosts.module';
 import { EventsModule } from './modules/events/events.module';
+import { CommunitiesModule } from './modules/communities/communities.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { AdminModule } from './modules/admin/admin.module';
@@ -22,6 +23,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { AuditLogModule } from './modules/audit-log/audit-log.module';
 import { ConsentModule } from './modules/consent/consent.module';
 import { InterestsModule } from './modules/interests/interests.module';
+import { GraphModule } from './modules/graph/graph.module';
 import { FirebaseAuthGuard } from './common/guards/firebase-auth.guard';
 import { HealthModule } from './common/health/health.module';
 import { MailModule } from './common/mail/mail.module';
@@ -70,6 +72,8 @@ import { StorageModule } from './common/storage/storage.module';
     AuditLogModule,
     ConsentModule,
     InterestsModule,
+    GraphModule,
+    CommunitiesModule,
   ],
   providers: [
     Logger,

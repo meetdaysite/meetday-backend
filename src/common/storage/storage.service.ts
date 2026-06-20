@@ -121,6 +121,27 @@ export class StorageService {
         key = `users/${userId}/review-photos/${randomUUID()}.${ext}`;
         break;
       }
+
+      case UploadContext.COMMUNITY_COVER:
+      case UploadContext.COMMUNITY_ICON: {
+        // Admin-only contexts (enforced on the community endpoints). The folder
+        // distinguishes cover vs icon based on the upload context.
+        const folder = dto.context === UploadContext.COMMUNITY_COVER ? 'cover' : 'icon';
+
+        if (dto.resourceId) {
+          // Uploading to an existing community — verify it exists
+          const community = await this.prisma.community.findUnique({
+            where: { id: dto.resourceId },
+            select: { id: true },
+          });
+          if (!community) throw new NotFoundException('Community not found');
+          key = `communities/${dto.resourceId}/${folder}/${randomUUID()}.${ext}`;
+        } else {
+          // Pre-creation upload — scope to the admin user until the community exists
+          key = `admins/${userId}/community-media/${folder}/${randomUUID()}.${ext}`;
+        }
+        break;
+      }
     }
 
     const uploadUrl = await this.getPresignedUploadUrl(key, dto.contentType);

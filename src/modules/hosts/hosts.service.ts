@@ -26,6 +26,10 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { ConsentService } from '../consent/consent.service';
+import {
+  COMMUNITY_READY_MIN_ATTENDANCES,
+  COMMUNITY_READY_MIN_CORE,
+} from '../graph/graph.constants';
 
 @Injectable()
 export class HostsService {
@@ -1077,6 +1081,32 @@ export class HostsService {
       select: { id: true, type: true, title: true, body: true, isRead: true, createdAt: true },
     });
 
+    // ── 6. Audience insights (all-time, behavioural) ──
+    const attendanceByUserQuery = this.prisma.order.groupBy({
+      by: ['userId'],
+      where: { status: 'CONFIRMED', event: { hostProfileId } },
+      _count: { _all: true },
+    });
+
+    // Lead bookers ranked by how many extra guests they brought to this host's events
+    const topConnectorsQuery = this.prisma.$queryRaw<
+      { userId: string; firstName: string; lastName: string; guestsBrought: number }[]
+    >`
+      SELECT o."userId"      AS "userId",
+             u."firstName"   AS "firstName",
+             u."lastName"    AS "lastName",
+             COUNT(oa.id)::int AS "guestsBrought"
+      FROM orders o
+      JOIN events e          ON e.id = o."eventId" AND e."hostProfileId" = ${hostProfileId}
+      JOIN order_items oi    ON oi."orderId" = o.id
+      JOIN order_attendees oa ON oa."orderItemId" = oi.id AND oa."isLead" = false
+      JOIN users u           ON u.id = o."userId"
+      WHERE o.status = 'CONFIRMED'
+      GROUP BY o."userId", u."firstName", u."lastName"
+      ORDER BY COUNT(oa.id) DESC
+      LIMIT 5
+    `;
+
     // Run everything in parallel
     const [
       rawEventCounts,
@@ -1090,6 +1120,8 @@ export class HostsService {
       totalEventsPrev,
       recentEventsRaw,
       recentNotifications,
+      attendanceByUser,
+      topConnectorsRaw,
     ] = await Promise.all([
       eventCountsQuery,
       registrationsCurrentQuery,
@@ -1102,6 +1134,8 @@ export class HostsService {
       totalEventsPrevQuery,
       recentEventsQuery,
       recentNotificationsQuery,
+      attendanceByUserQuery,
+      topConnectorsQuery,
     ]);
 
     // ── Build eventCounts ──
@@ -1188,6 +1222,30 @@ export class HostsService {
       }),
     );
 
-    return { eventCounts, overview, recentEvents, recentNotifications };
+    // ── Build audienceInsights ──
+    const uniqueAttendees = attendanceByUser.length;
+    const repeatAttendees = attendanceByUser.filter((row) => row._count._all >= 2).length;
+    const coreMemberCount = attendanceByUser.filter(
+      (row) => row._count._all >= COMMUNITY_READY_MIN_ATTENDANCES,
+    ).length;
+
+    const audienceInsights = {
+      uniqueAttendees,
+      repeatAttendees,
+      repeatRate: uniqueAttendees > 0 ? Math.round((repeatAttendees / uniqueAttendees) * 1000) / 10 : 0,
+      topConnectors: topConnectorsRaw.map((row) => ({
+        userId: row.userId,
+        name: `${row.firstName} ${row.lastName}`,
+        guestsBrought: row.guestsBrought,
+      })),
+      communityReady: {
+        ready: coreMemberCount >= COMMUNITY_READY_MIN_CORE,
+        coreMemberCount,
+        coreMembersNeeded: COMMUNITY_READY_MIN_CORE,
+        attendancesPerCoreMember: COMMUNITY_READY_MIN_ATTENDANCES,
+      },
+    };
+
+    return { eventCounts, overview, recentEvents, recentNotifications, audienceInsights };
   }
 }

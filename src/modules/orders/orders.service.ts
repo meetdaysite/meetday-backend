@@ -213,6 +213,20 @@ export class OrdersService {
     const buyerName = `${buyer.firstName} ${buyer.lastName}`;
     const buyerEmail = buyer.email ?? buyer.phone ?? '';
 
+    // Resolve group attendees to platform accounts by email (social graph identity)
+    const groupEmails = [
+      ...new Set(
+        dto.items.flatMap((item) => (item.groupAttendees ?? []).map((a) => a.email).filter(Boolean)),
+      ),
+    ];
+    const matchedUsers = groupEmails.length
+      ? await this.prisma.user.findMany({
+          where: { email: { in: groupEmails } },
+          select: { id: true, email: true },
+        })
+      : [];
+    const userIdByEmail = new Map(matchedUsers.map((u) => [u.email!, u.id]));
+
     const bookingId = await generateUniqueBookingId(async (id) => {
       const existing = await this.prisma.order.findUnique({ where: { bookingId: id }, select: { id: true } });
       return !existing;
@@ -272,11 +286,12 @@ export class OrdersService {
                 unitPrice: Number(ticket.price),
                 attendees: {
                   create: [
-                    { fullName: buyerName, email: buyerEmail, isLead: true },
+                    { fullName: buyerName, email: buyerEmail, isLead: true, userId },
                     ...(item.groupAttendees ?? []).map((a) => ({
                       fullName: a.fullName,
                       email: a.email,
                       isLead: false,
+                      userId: userIdByEmail.get(a.email) ?? null,
                     })),
                   ],
                 },
