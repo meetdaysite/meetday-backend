@@ -10,6 +10,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { HostsModule } from './modules/hosts/hosts.module';
 import { EventsModule } from './modules/events/events.module';
+import { CommunitiesModule } from './modules/communities/communities.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { AdminModule } from './modules/admin/admin.module';
@@ -72,6 +73,7 @@ import { StorageModule } from './common/storage/storage.module';
     ConsentModule,
     InterestsModule,
     GraphModule,
+    CommunitiesModule,
   ],
   providers: [
     Logger,
