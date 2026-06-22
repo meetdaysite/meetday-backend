@@ -9,7 +9,7 @@ export class ListCommunitiesQueryDto {
   @IsEnum(CommunityStatus)
   status?: CommunityStatus;
 
-  @ApiPropertyOptional({ example: 'Kolkata' })
+  @ApiPropertyOptional({ example: 'Bangalore' })
   @IsOptional()
   @IsString()
   city?: string;

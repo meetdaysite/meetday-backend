@@ -13,7 +13,7 @@ import { AuditLogService } from '../audit-log/audit-log.service';
 
 function makePrisma() {
   const prisma: any = {
-    community: { create: jest.fn(), update: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn(), count: jest.fn() },
+    community: { create: jest.fn(), update: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn() },
     communitySettings: { upsert: jest.fn() },
     communityInterest: { deleteMany: jest.fn(), createMany: jest.fn(), findMany: jest.fn() },
     communityMember: { upsert: jest.fn(), count: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn(), delete: jest.fn() },
@@ -145,6 +145,60 @@ describe('CommunitiesService', () => {
       expect(prisma.community.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ status: CommunityStatus.PUBLISHED }) }),
       );
+    });
+  });
+
+  describe('recommendForUser', () => {
+    it('returns empty when the user has no LIKED/OPEN_TO interests', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'u1', attendeeProfile: null, interestAffinities: [] });
+      const res = await service.recommendForUser('fuid', {} as any);
+      expect(res).toEqual({ data: [], total: 0, page: 1, limit: 20 });
+      expect(prisma.community.findMany).not.toHaveBeenCalled();
+    });
+
+    it('ranks candidates by interest overlap, then city match', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        attendeeProfile: { city: 'Kolkata' },
+        interestAffinities: [{ interestId: 'i1' }, { interestId: 'i2' }],
+      });
+      prisma.community.findMany.mockResolvedValue([
+        // 1 overlap, city match
+        { id: 'cA', primaryCity: 'Kolkata', communityCities: [], memberCount: 5, coverImageKey: null, iconKey: null, interests: [{ interestId: 'i1' }] },
+        // 2 overlaps, no city match -> should rank first (overlap wins)
+        { id: 'cB', primaryCity: 'Mumbai', communityCities: [], memberCount: 1, coverImageKey: null, iconKey: null, interests: [{ interestId: 'i1' }, { interestId: 'i2' }] },
+      ]);
+
+      const res = await service.recommendForUser('fuid', {} as any);
+
+      expect(res.total).toBe(2);
+      expect(res.data.map((c: any) => c.id)).toEqual(['cB', 'cA']);
+      expect(res.data[0]).toMatchObject({ id: 'cB', matchScore: 2, cityMatch: false });
+      expect(res.data[1]).toMatchObject({ id: 'cA', matchScore: 1, cityMatch: true });
+      // interests array is stripped from the response
+      expect((res.data[0] as any).interests).toBeUndefined();
+    });
+
+    it('applies city/categoryId/search filters but never the status param', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        attendeeProfile: { city: 'Kolkata' },
+        interestAffinities: [{ interestId: 'i1' }],
+      });
+      prisma.community.findMany.mockResolvedValue([]);
+
+      await service.recommendForUser('fuid', {
+        status: 'DRAFT',
+        city: 'Mumbai',
+        categoryId: 'cat-1',
+        search: 'music',
+      } as any);
+
+      const where = prisma.community.findMany.mock.calls[0][0].where;
+      expect(where.status).toBe('PUBLISHED'); // status param ignored
+      expect(where.categoryId).toBe('cat-1');
+      expect(where.OR).toEqual([{ primaryCity: 'Mumbai' }, { communityCities: { has: 'Mumbai' } }]);
+      expect(where.name).toEqual({ contains: 'music', mode: 'insensitive' });
     });
   });
 

@@ -7,6 +7,7 @@ import { seedSubscriptionPlans } from './seeders/subscription-plan.seeder';
 import { seedInterests } from './seeders/interest.seeder';
 import { seedInterestCategories } from './seeders/interest-category.seeder';
 import { seedEvents } from './seeders/event.seeder';
+import { seedCommunities } from './seeders/community.seeder';
 
 const prisma = new PrismaClient();
 
@@ -19,6 +20,7 @@ async function main() {
   await seedSuperAdmin(prisma);
   await seedSubscriptionPlans(prisma);
   await seedEvents(prisma);
+  await seedCommunities(prisma);
 }
 
 main()

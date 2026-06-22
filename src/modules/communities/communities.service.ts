@@ -13,6 +13,7 @@ import {
   CommunityRole,
   CommunityStatus,
   EventStatus,
+  InterestAffinity,
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -478,6 +479,107 @@ export class CommunitiesService {
     ]);
 
     const data = await Promise.all(rows.map((r) => this.withSignedMedia(r)));
+    return { data, total, page, limit };
+  }
+
+  /**
+   * Recommend published communities to the authenticated user, ranked by how many
+   * of the community's interests overlap the user's LIKED/OPEN_TO interests, then
+   * by a city match (user's profile city), then by member count. Communities the
+   * user already belongs to (ACTIVE/PENDING) and INVITE_ONLY ones are excluded.
+   */
+  async recommendForUser(firebaseUid: string, query: ListCommunitiesQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const user = await this.prisma.user.findUnique({
+      where: { firebaseUid },
+      select: {
+        id: true,
+        attendeeProfile: { select: { city: true } },
+        interestAffinities: {
+          where: { affinity: { in: [InterestAffinity.LIKED, InterestAffinity.OPEN_TO] } },
+          select: { interestId: true },
+        },
+      },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const interestIds = user.interestAffinities.map((a) => a.interestId);
+    if (!interestIds.length) {
+      // No interest signal — nothing to recommend on. The client can fall back to browse.
+      return { data: [], total: 0, page, limit };
+    }
+
+    const userCity = user.attendeeProfile?.city ?? null;
+    const userInterests = new Set(interestIds);
+
+    // status is always forced to PUBLISHED here (the DTO's status filter is admin-only);
+    // city / categoryId / search narrow the candidate set when provided.
+    const where: Prisma.CommunityWhereInput = {
+      status: CommunityStatus.PUBLISHED,
+      deletedAt: null,
+      access: { not: CommunityAccess.INVITE_ONLY },
+      interests: { some: { interestId: { in: interestIds } } },
+      members: {
+        none: {
+          userId: user.id,
+          status: { in: [CommunityMemberStatus.ACTIVE, CommunityMemberStatus.PENDING] },
+        },
+      },
+    };
+    if (query.categoryId) where.categoryId = query.categoryId;
+    if (query.city) {
+      where.OR = [{ primaryCity: query.city }, { communityCities: { has: query.city } }];
+    }
+    if (query.search) where.name = { contains: query.search, mode: 'insensitive' };
+
+    const candidates = await this.prisma.community.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        description: true,
+        type: true,
+        access: true,
+        primaryCity: true,
+        communityCities: true,
+        coverImageKey: true,
+        iconKey: true,
+        memberCount: true,
+        experienceCount: true,
+        category: { select: { id: true, name: true } },
+        interests: { select: { interestId: true } },
+      },
+    });
+
+    const ranked = candidates
+      .map((c) => {
+        const { interests, ...rest } = c;
+        const overlap = interests.reduce((n, i) => (userInterests.has(i.interestId) ? n + 1 : n), 0);
+        const cityMatch =
+          !!userCity && (rest.primaryCity === userCity || rest.communityCities.includes(userCity));
+        return { rest, overlap, cityMatch };
+      })
+      .sort(
+        (a, b) =>
+          b.overlap - a.overlap ||
+          Number(b.cityMatch) - Number(a.cityMatch) ||
+          b.rest.memberCount - a.rest.memberCount,
+      );
+
+    const total = ranked.length;
+    const pageSlice = ranked.slice((page - 1) * limit, (page - 1) * limit + limit);
+
+    const data = await Promise.all(
+      pageSlice.map(async ({ rest, overlap, cityMatch }) => ({
+        ...(await this.withSignedMedia(rest)),
+        matchScore: overlap,
+        cityMatch,
+      })),
+    );
+
     return { data, total, page, limit };
   }
 
