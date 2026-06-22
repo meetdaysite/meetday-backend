@@ -20,6 +20,19 @@ export class CommunitiesController {
     return this.communitiesService.listPublic(query);
   }
 
+  @Get('recommended')
+  @ApiOperation({
+    summary: 'Communities recommended for the authenticated user',
+    description:
+      'Ranked by shared-interest overlap with a city-match tiebreak. Optional city / categoryId / search params narrow the candidate set; the status param is ignored (always PUBLISHED).',
+  })
+  @ApiOkResponse({
+    description: 'Paginated communities ranked by shared-interest overlap (with a city-match tiebreak).',
+  })
+  recommended(@Query() query: ListCommunitiesQueryDto, @GetUser('uid') firebaseUid: string) {
+    return this.communitiesService.recommendForUser(firebaseUid, query);
+  }
+
   @Get(':slug')
   @UseGuards(OptionalAuthGuard)
   @ApiOperation({ summary: 'Get a published community by slug' })

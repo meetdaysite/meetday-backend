@@ -1,8 +1,9 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { CreateAttendeeProfileDto } from './dto/create-attendee-profile.dto';
 import { UpdateAttendeeProfileDto } from './dto/update-attendee-profile.dto';
+import { SetInterestsDto } from './dto/set-interests.dto';
 
 @Injectable()
 export class AttendeeService {
@@ -68,6 +69,56 @@ export class AttendeeService {
     });
 
     return this.toResponse(profile, user.avatarUrl);
+  }
+
+  async getInterests(firebaseUid: string) {
+    const user = await this.findUser(firebaseUid);
+
+    const rows = await this.prisma.userInterestAffinity.findMany({
+      where: { userId: user.id },
+      select: {
+        affinity: true,
+        interest: { select: { id: true, name: true, slug: true, image: true } },
+      },
+      orderBy: { interest: { name: 'asc' } },
+    });
+
+    const interests = await Promise.all(
+      rows.map(async (r) => ({
+        interestId: r.interest.id,
+        name: r.interest.name,
+        slug: r.interest.slug,
+        image: r.interest.image ? await this.storageService.getPresignedDownloadUrl(r.interest.image) : null,
+        affinity: r.affinity,
+      })),
+    );
+
+    return { interests, total: interests.length };
+  }
+
+  async setInterests(firebaseUid: string, dto: SetInterestsDto) {
+    const user = await this.findUser(firebaseUid);
+
+    // De-duplicate by interestId (last write wins) and validate the ids exist.
+    const byId = new Map(dto.interests.map((i) => [i.interestId, i.affinity]));
+    const interestIds = [...byId.keys()];
+
+    if (interestIds.length) {
+      const found = await this.prisma.interest.count({ where: { id: { in: interestIds } } });
+      if (found !== interestIds.length) {
+        throw new BadRequestException('One or more interestIds are invalid');
+      }
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.userInterestAffinity.deleteMany({ where: { userId: user.id } }),
+      this.prisma.userInterestAffinity.createMany({
+        data: interestIds.map((interestId) => ({ userId: user.id, interestId, affinity: byId.get(interestId)! })),
+        skipDuplicates: true,
+      }),
+    ]);
+
+    return this.getInterests(firebaseUid);
   }
 
   private async toResponse(
