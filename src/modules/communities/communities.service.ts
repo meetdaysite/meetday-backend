@@ -381,6 +381,25 @@ export class CommunitiesService {
       data: { status: CommunityStatus.PUBLISHED, publishedAt: new Date() },
     });
 
+    // Create the default General channel if it doesn't exist yet
+    await this.prisma.communityChannel.upsert({
+      where: { communityId_slug: { communityId: id, slug: 'general' } },
+      create: {
+        communityId: id,
+        createdBy: adminId,
+        name: 'General',
+        slug: 'general',
+        description: 'General discussion for everyone in the community.',
+        isDefault: true,
+        position: 0,
+        welcomeTitle: `Welcome to ${community.name}!`,
+        welcomeBody:
+          'Introduce yourself, ask questions, and meet people attending upcoming experiences.',
+        quickReplies: ['New Here', 'Going This Weekend', 'Looking For Suggestions'],
+      },
+      update: {},
+    });
+
     this.auditLogService.log({
       actorId: adminId,
       actorRole: 'ADMIN',

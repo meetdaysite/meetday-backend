@@ -1,0 +1,23 @@
+import { BullModule } from '@nestjs/bull';
+import { Module } from '@nestjs/common';
+import { StorageModule } from '../../common/storage/storage.module';
+import { CommunityRoleGuard } from '../../common/guards/community-role.guard';
+import { CommunityAnnouncementsAdminController } from './community-announcements-admin.controller';
+import { CommunityAnnouncementsController } from './community-announcements.controller';
+import { CommunityAnnouncementsProcessor } from './community-announcements.processor';
+import { CommunityAnnouncementsService } from './community-announcements.service';
+
+@Module({
+  imports: [
+    BullModule.registerQueue({ name: 'community-announcements' }),
+    StorageModule,
+  ],
+  controllers: [CommunityAnnouncementsController, CommunityAnnouncementsAdminController],
+  providers: [
+    CommunityAnnouncementsService,
+    CommunityAnnouncementsProcessor,
+    CommunityRoleGuard,
+  ],
+  exports: [CommunityAnnouncementsService],
+})
+export class CommunityAnnouncementsModule {}

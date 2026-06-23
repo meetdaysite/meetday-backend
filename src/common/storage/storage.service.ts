@@ -142,6 +142,20 @@ export class StorageService {
         }
         break;
       }
+
+      case UploadContext.COMMUNITY_ANNOUNCEMENT: {
+        // Admin-only context (enforced on the announcement endpoints).
+        if (!dto.resourceId) {
+          throw new BadRequestException('resourceId (community UUID) is required for COMMUNITY_ANNOUNCEMENT');
+        }
+        const community = await this.prisma.community.findUnique({
+          where: { id: dto.resourceId },
+          select: { id: true },
+        });
+        if (!community) throw new NotFoundException('Community not found');
+        key = `communities/${dto.resourceId}/announcements/${randomUUID()}.${ext}`;
+        break;
+      }
     }
 
     const uploadUrl = await this.getPresignedUploadUrl(key, dto.contentType);
