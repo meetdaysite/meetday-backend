@@ -20,9 +20,9 @@ import { CommunityChatGateway } from './community-chat.gateway';
 import { CommunityChannelService } from './community-channel.service';
 import { CommunityDmService } from './community-dm.service';
 import { CommunityPresenceService } from './community-presence.service';
-import { MinCommunityRole } from './decorators/min-community-role.decorator';
+import { MinCommunityRole } from '../../common/decorators/min-community-role.decorator';
 import { MessageCursorQueryDto } from './dto/message-cursor-query.dto';
-import { CommunityRoleGuard } from './guards/community-role.guard';
+import { CommunityRoleGuard } from '../../common/guards/community-role.guard';
 
 @ApiTags('Community Chat')
 @ApiBearerAuth('firebase-token')

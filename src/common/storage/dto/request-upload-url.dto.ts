@@ -10,6 +10,7 @@ export enum UploadContext {
   REVIEW_PHOTO = 'REVIEW_PHOTO',
   COMMUNITY_COVER = 'COMMUNITY_COVER',
   COMMUNITY_ICON = 'COMMUNITY_ICON',
+  COMMUNITY_ANNOUNCEMENT = 'COMMUNITY_ANNOUNCEMENT',
 }
 
 const ALLOWED_CONTENT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'video/mp4'] as const;

@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { CommunityMemberStatus, CommunityRole } from '@prisma/client';
-import { PrismaService } from '../../../prisma/prisma.service';
+import { PrismaService } from '../../prisma/prisma.service';
 import { MIN_COMMUNITY_ROLE_KEY } from '../decorators/min-community-role.decorator';
 
 const ROLE_HIERARCHY: CommunityRole[] = [

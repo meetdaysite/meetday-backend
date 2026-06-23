@@ -83,6 +83,11 @@ model User {
   sentDmMessages         CommunityDmMessage[]        @relation("DmMessageSender")
   dmReadStates           CommunityDmReadState[]      @relation("DmReadStateUser")
 
+  // Community announcement back-relations
+  authoredAnnouncements CommunityAnnouncement[] @relation("AnnouncementAuthor")
+  announcementLikes     AnnouncementLike[]      @relation("AnnouncementLikeUser")
+  announcementBookmarks AnnouncementBookmark[]  @relation("AnnouncementBookmarkUser")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1133,6 +1138,13 @@ enum AuditAction {
   CHAT_MESSAGE_DELETED_BY_MOD
   CHAT_MESSAGE_PINNED
   CHAT_MESSAGE_UNPINNED
+
+  // Community Announcements
+  ANNOUNCEMENT_CREATED
+  ANNOUNCEMENT_UPDATED
+  ANNOUNCEMENT_DELETED
+  ANNOUNCEMENT_PINNED
+  ANNOUNCEMENT_UNPINNED
 }
 
 enum ConsentType {
@@ -1193,6 +1205,7 @@ model Community {
   events          CommunityEvent[]
   channels        CommunityChannel[]
   dmConversations CommunityDmConversation[]
+  announcements   CommunityAnnouncement[]
 
   @@index([status])
   @@index([categoryId])
@@ -1257,6 +1270,9 @@ model CommunityMember {
 
   profileVisibility    MemberProfileVisibility @default(EVENT_ATTENDEES_ONLY)
   guidelinesAcceptedAt DateTime?
+
+  // Unread badge baseline for the Announcements tab; null = never opened
+  lastReadAnnouncementsAt DateTime?
 
   community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1443,6 +1459,71 @@ model CommunityDmReadState {
   @@map("community_dm_read_states")
 }
 
+// ─── Community Announcements ──────────────────────────────────────────────────
+
+model CommunityAnnouncement {
+  id          String    @id @default(uuid())
+  communityId String
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  authorId   String
+  author     User   @relation("AnnouncementAuthor", fields: [authorId], references: [id])
+  authorRole String // snapshot at creation: "ADMIN" | "HOST" | "MANAGER" — drives the UI badge
+
+  category AnnouncementCategory @default(COMMUNITY_UPDATE)
+  title    String
+  body     String               @db.Text
+  imageKey String? // S3 key, served via presigned download URL
+
+  isPinned Boolean   @default(false)
+  pinnedAt DateTime?
+
+  likeCount     Int @default(0) // denormalized
+  bookmarkCount Int @default(0) // denormalized
+
+  publishedAt DateTime  @default(now())
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  likes     AnnouncementLike[]
+  bookmarks AnnouncementBookmark[]
+
+  @@index([communityId, isPinned, publishedAt(sort: Desc)])
+  @@index([communityId, publishedAt(sort: Desc)])
+  @@map("community_announcements")
+}
+
+model AnnouncementLike {
+  id             String @id @default(uuid())
+  announcementId String
+  userId         String
+
+  announcement CommunityAnnouncement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  user         User                  @relation("AnnouncementLikeUser", fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([announcementId, userId])
+  @@index([userId])
+  @@map("announcement_likes")
+}
+
+model AnnouncementBookmark {
+  id             String @id @default(uuid())
+  announcementId String
+  userId         String
+
+  announcement CommunityAnnouncement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  user         User                  @relation("AnnouncementBookmarkUser", fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([announcementId, userId])
+  @@index([userId])
+  @@map("announcement_bookmarks")
+}
+
 // ─── Community Enums ──────────────────────────────────────────────────────────
 
 enum CommunityType {
@@ -1518,4 +1599,12 @@ enum MemberProfileVisibility {
   EVENT_ATTENDEES_ONLY
   COMMUNITY_MEMBERS
   PRIVATE
+}
+
+enum AnnouncementCategory {
+  EVENT_DROP
+  EVENT_REMINDER
+  COMMUNITY_UPDATE
+  COMMUNITY_REMINDER
+  GENERAL
 }

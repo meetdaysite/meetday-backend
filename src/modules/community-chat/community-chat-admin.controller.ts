@@ -15,11 +15,11 @@ import { CommunityRole } from '@prisma/client';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { CommunityChannelService } from './community-channel.service';
-import { MinCommunityRole } from './decorators/min-community-role.decorator';
+import { MinCommunityRole } from '../../common/decorators/min-community-role.decorator';
 import { CreateChannelDto } from './dto/create-channel.dto';
 import { ReorderChannelsDto } from './dto/reorder-channels.dto';
 import { UpdateChannelDto } from './dto/update-channel.dto';
-import { CommunityRoleGuard } from './guards/community-role.guard';
+import { CommunityRoleGuard } from '../../common/guards/community-role.guard';
 
 @ApiTags('Community Chat (Admin)')
 @ApiBearerAuth('firebase-token')

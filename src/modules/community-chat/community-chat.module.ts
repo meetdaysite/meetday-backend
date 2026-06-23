@@ -6,7 +6,7 @@ import { CommunityChatService } from './community-chat.service';
 import { CommunityChannelService } from './community-channel.service';
 import { CommunityDmService } from './community-dm.service';
 import { CommunityPresenceService } from './community-presence.service';
-import { CommunityRoleGuard } from './guards/community-role.guard';
+import { CommunityRoleGuard } from '../../common/guards/community-role.guard';
 
 @Module({
   controllers: [CommunityChatController, CommunityChatAdminController],
