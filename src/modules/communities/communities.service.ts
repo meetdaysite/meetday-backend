@@ -12,6 +12,7 @@ import {
   CommunityMemberStatus,
   CommunityRole,
   CommunityStatus,
+  ConsentType,
   EventStatus,
   InterestAffinity,
   MemberVisibility,
@@ -20,6 +21,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { ConsentService } from '../consent/consent.service';
 import { CreateCommunityDto } from './dto/create-community.dto';
 import { UpdateCommunityDto } from './dto/update-community.dto';
 import { UpdateCommunitySettingsDto } from './dto/update-community-settings.dto';
@@ -29,6 +31,7 @@ import { AssignMemberDto } from './dto/assign-member.dto';
 import { AddCommunityEventDto } from './dto/add-community-event.dto';
 import { ListCommunitiesQueryDto } from './dto/list-communities-query.dto';
 import { RecommendCommunitiesQueryDto } from './dto/recommend-communities-query.dto';
+import { JoinCommunityDto } from './dto/join-community.dto';
 
 const COMMUNITY_DETAIL_INCLUDE = {
   settings: true,
@@ -52,6 +55,7 @@ export class CommunitiesService {
     private readonly prisma: PrismaService,
     private readonly storageService: StorageService,
     private readonly auditLogService: AuditLogService,
+    private readonly consentService: ConsentService,
   ) {}
 
   // ─── Create / Update ────────────────────────────────────────────────────────
@@ -609,7 +613,11 @@ export class CommunitiesService {
     return this.withSignedMedia(community);
   }
 
-  async join(id: string, firebaseUid: string) {
+  async join(id: string, firebaseUid: string, dto: JoinCommunityDto, ip?: string, userAgent?: string) {
+    if (!dto.guidelinesAccepted) {
+      throw new BadRequestException('You must accept the community guidelines to join');
+    }
+
     const user = await this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } });
     if (!user) throw new NotFoundException('User not found');
     const userId = user.id;
@@ -636,6 +644,7 @@ export class CommunitiesService {
         ? CommunityMemberStatus.PENDING
         : CommunityMemberStatus.ACTIVE;
 
+    const now = new Date();
     const member = await this.prisma.communityMember.upsert({
       where: { communityId_userId: { communityId: id, userId } },
       create: {
@@ -643,14 +652,58 @@ export class CommunitiesService {
         userId,
         role: CommunityRole.MEMBER,
         status,
-        joinedAt: status === CommunityMemberStatus.ACTIVE ? new Date() : null,
+        joinedAt: status === CommunityMemberStatus.ACTIVE ? now : null,
+        profileVisibility: dto.profileVisibility,
+        guidelinesAcceptedAt: now,
       },
-      update: { status, joinedAt: status === CommunityMemberStatus.ACTIVE ? new Date() : null },
+      update: {
+        status,
+        joinedAt: status === CommunityMemberStatus.ACTIVE ? now : null,
+        profileVisibility: dto.profileVisibility,
+        guidelinesAcceptedAt: now,
+      },
     });
 
     if (status === CommunityMemberStatus.ACTIVE) await this.recalculateMemberCount(id);
 
-    return { status: member.status };
+    await this.consentService.grantConsent({
+      userId,
+      consentType: ConsentType.COMMUNITY_GUIDELINES,
+      ipAddress: ip,
+      userAgent,
+    });
+
+    // Fetch after memberCount recalculation so the count is current.
+    const communityDetail = await this.prisma.community.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        memberCount: true,
+        experienceCount: true,
+        primaryCity: true,
+        iconKey: true,
+      },
+    });
+
+    const iconUrl = communityDetail?.iconKey
+      ? await this.storageService.getPresignedDownloadUrl(communityDetail.iconKey)
+      : null;
+
+    return {
+      status: member.status,
+      profileVisibility: member.profileVisibility,
+      community: {
+        id: communityDetail!.id,
+        name: communityDetail!.name,
+        slug: communityDetail!.slug,
+        memberCount: communityDetail!.memberCount,
+        experienceCount: communityDetail!.experienceCount,
+        primaryCity: communityDetail!.primaryCity,
+        iconUrl,
+      },
+    };
   }
 
   async leave(id: string, firebaseUid: string) {

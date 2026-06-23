@@ -1,4 +1,5 @@
-import { Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Request } from 'express';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public } from '../../common/decorators/public.decorator';
 import { OptionalAuthGuard } from '../../common/guards/optional-auth.guard';
@@ -7,6 +8,7 @@ import { CommunitiesService } from './communities.service';
 import { ListCommunitiesQueryDto } from './dto/list-communities-query.dto';
 import { ListMembersQueryDto } from './dto/list-members-query.dto';
 import { RecommendCommunitiesQueryDto } from './dto/recommend-communities-query.dto';
+import { JoinCommunityDto } from './dto/join-community.dto';
 
 @ApiTags('Communities')
 @ApiBearerAuth('firebase-token')
@@ -51,9 +53,41 @@ export class CommunitiesController {
 
   @Post(':id/join')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Join a community (or request access)' })
-  join(@Param('id', ParseUUIDPipe) id: string, @GetUser('uid') firebaseUid: string) {
-    return this.communitiesService.join(id, firebaseUid);
+  @ApiOperation({
+    summary: 'Join a community (or request access)',
+    description: [
+      'The caller must supply a `profileVisibility` choice and set `guidelinesAccepted: true`. Sending `false` returns 400 immediately.',
+      '**Response `status` field:**',
+      '- `ACTIVE` — community access is PUBLIC; membership is granted immediately.',
+      '- `PENDING` — community requires approval; a join request is created and must be approved by an admin.',
+      'A `ConsentRecord` is written server-side for the guidelines acceptance (DPDP audit trail).',
+    ].join('\n\n'),
+  })
+  @ApiOkResponse({
+    description: 'Join result with community summary for the welcome modal. `status` is ACTIVE or PENDING depending on the community\'s access policy.',
+    schema: {
+      example: {
+        status: 'ACTIVE',
+        profileVisibility: 'EVENT_ATTENDEES_ONLY',
+        community: {
+          id: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+          name: 'Meetday Music Nights',
+          slug: 'meetday-music-nights',
+          memberCount: 1600,
+          experienceCount: 12,
+          primaryCity: 'Kolkata',
+          iconUrl: 'https://cdn.example.com/seed/communities/music/icon.png',
+        },
+      },
+    },
+  })
+  join(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('uid') firebaseUid: string,
+    @Body() dto: JoinCommunityDto,
+    @Req() req: Request,
+  ) {
+    return this.communitiesService.join(id, firebaseUid, dto, req.ip, req.headers['user-agent'] as string);
   }
 
   @Delete(':id/leave')
