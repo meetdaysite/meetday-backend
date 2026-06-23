@@ -443,7 +443,7 @@ export class CommunitiesService {
 
   // ─── Public / member-facing ────────────────────────────────────────────────
 
-  async listPublic(query: ListCommunitiesQueryDto) {
+  async listPublic(query: ListCommunitiesQueryDto, firebaseUid?: string | null) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
 
@@ -484,7 +484,15 @@ export class CommunitiesService {
       this.prisma.community.count({ where }),
     ]);
 
-    const data = await Promise.all(rows.map((r) => this.withSignedMedia(r)));
+    let memberSet = new Set<string>();
+    if (firebaseUid) {
+      const user = await this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } });
+      if (user) memberSet = await this.getMembershipSet(user.id, rows.map((r) => r.id));
+    }
+
+    const data = await Promise.all(
+      rows.map(async (r) => ({ ...(await this.withSignedMedia(r)), isMember: memberSet.has(r.id) })),
+    );
     return { data, total, page, limit };
   }
 
@@ -595,8 +603,9 @@ export class CommunitiesService {
 
     const data = await Promise.all(
       pageSlice.map(async ({ rest, overlap, cityMatch }) => {
-        const base = { ...(await this.withSignedMedia(rest)), matchScore: overlap };
+        const base = { ...(await this.withSignedMedia(rest)), matchScore: overlap, isMember: false };
         // cityMatch is only meaningful (and only available) when the caller is authenticated.
+        // isMember is always false here — already-joined communities are excluded from candidates.
         return firebaseUid ? { ...base, cityMatch } : base;
       }),
     );
@@ -604,13 +613,28 @@ export class CommunitiesService {
     return { data, total, page, limit };
   }
 
-  async findBySlug(slug: string) {
+  async findBySlug(slug: string, firebaseUid?: string | null) {
     const community = await this.prisma.community.findFirst({
       where: { slug, status: CommunityStatus.PUBLISHED, deletedAt: null },
       include: COMMUNITY_DETAIL_INCLUDE,
     });
     if (!community) throw new NotFoundException('Community not found');
-    return this.withSignedMedia(community);
+
+    let isMember = false;
+    if (firebaseUid) {
+      const user = await this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } });
+      if (user) {
+        const membership = await this.prisma.communityMember.findUnique({
+          where: { communityId_userId: { communityId: community.id, userId: user.id } },
+          select: { status: true },
+        });
+        isMember =
+          membership?.status === CommunityMemberStatus.ACTIVE ||
+          membership?.status === CommunityMemberStatus.PENDING;
+      }
+    }
+
+    return { ...(await this.withSignedMedia(community)), isMember };
   }
 
   async join(id: string, firebaseUid: string, dto: JoinCommunityDto, ip?: string, userAgent?: string) {
@@ -812,6 +836,19 @@ export class CommunitiesService {
       entityType: ENTITY_TYPE,
       entityId: id,
     });
+  }
+
+  private async getMembershipSet(userId: string, communityIds: string[]): Promise<Set<string>> {
+    if (!communityIds.length) return new Set();
+    const rows = await this.prisma.communityMember.findMany({
+      where: {
+        userId,
+        communityId: { in: communityIds },
+        status: { in: [CommunityMemberStatus.ACTIVE, CommunityMemberStatus.PENDING] },
+      },
+      select: { communityId: true },
+    });
+    return new Set(rows.map((r) => r.communityId));
   }
 
   /** Replace stored S3 keys with presigned download URLs on cover/icon. */

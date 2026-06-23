@@ -18,10 +18,11 @@ export class CommunitiesController {
 
   @Get()
   @Public()
+  @UseGuards(OptionalAuthGuard)
   @ApiOperation({ summary: 'Browse published communities' })
-  @ApiOkResponse({ description: 'Paginated list of discoverable communities.' })
-  browse(@Query() query: ListCommunitiesQueryDto) {
-    return this.communitiesService.listPublic(query);
+  @ApiOkResponse({ description: 'Paginated list of discoverable communities. Each item includes `isMember: boolean` (true when the authenticated caller belongs to that community; always false for unauthenticated requests).' })
+  browse(@Query() query: ListCommunitiesQueryDto, @GetUser('uid') firebaseUid: string | null) {
+    return this.communitiesService.listPublic(query, firebaseUid);
   }
 
   @Get('recommended')
@@ -47,8 +48,9 @@ export class CommunitiesController {
   @Public()
   @UseGuards(OptionalAuthGuard)
   @ApiOperation({ summary: 'Get a published community by slug' })
-  findBySlug(@Param('slug') slug: string) {
-    return this.communitiesService.findBySlug(slug);
+  @ApiOkResponse({ description: 'Community detail. Includes `isMember: boolean` (true when the authenticated caller is an ACTIVE or PENDING member; always false for unauthenticated requests).' })
+  findBySlug(@Param('slug') slug: string, @GetUser('uid') firebaseUid: string | null) {
+    return this.communitiesService.findBySlug(slug, firebaseUid);
   }
 
   @Post(':id/join')
