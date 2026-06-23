@@ -72,6 +72,17 @@ model User {
   createdCommunities   Community[]       @relation("CommunityCreatedBy")
   communityMemberships CommunityMember[]
 
+  // Community chat back-relations
+  createdChannels        CommunityChannel[]          @relation("ChannelCreatedBy")
+  channelMessages        ChannelMessage[]            @relation("ChannelMessageSender")
+  pinnedMessages         ChannelMessage[]            @relation("ChannelMessagePinnedBy")
+  messageReactions       MessageReaction[]           @relation("MessageReactionUser")
+  channelMemberStates    ChannelMemberState[]        @relation("ChannelMemberStateUser")
+  dmConversationsAsP1    CommunityDmConversation[]   @relation("DmParticipant1")
+  dmConversationsAsP2    CommunityDmConversation[]   @relation("DmParticipant2")
+  sentDmMessages         CommunityDmMessage[]        @relation("DmMessageSender")
+  dmReadStates           CommunityDmReadState[]      @relation("DmReadStateUser")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1115,6 +1126,13 @@ enum AuditAction {
   COMMUNITY_ARCHIVED
   COMMUNITY_MEMBER_ADDED
   COMMUNITY_MEMBER_REMOVED
+
+  // Community Chat
+  CHAT_CHANNEL_CREATED
+  CHAT_CHANNEL_DELETED
+  CHAT_MESSAGE_DELETED_BY_MOD
+  CHAT_MESSAGE_PINNED
+  CHAT_MESSAGE_UNPINNED
 }
 
 enum ConsentType {
@@ -1169,10 +1187,12 @@ model Community {
   updatedAt DateTime @updatedAt
 
   // Relations
-  settings  CommunitySettings?
-  interests CommunityInterest[]
-  members   CommunityMember[]
-  events    CommunityEvent[]
+  settings        CommunitySettings?
+  interests       CommunityInterest[]
+  members         CommunityMember[]
+  events          CommunityEvent[]
+  channels        CommunityChannel[]
+  dmConversations CommunityDmConversation[]
 
   @@index([status])
   @@index([categoryId])
@@ -1264,6 +1284,163 @@ model CommunityEvent {
   @@unique([communityId, eventId])
   @@index([eventId])
   @@map("community_events")
+}
+
+// ─── Community Chat ───────────────────────────────────────────────────────────
+
+model CommunityChannel {
+  id          String    @id @default(uuid())
+  communityId String
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  name         String
+  slug         String
+  description  String?
+  isDefault    Boolean  @default(false)
+  position     Int      @default(0)
+  createdBy    String
+  creator      User     @relation("ChannelCreatedBy", fields: [createdBy], references: [id])
+
+  welcomeTitle String?
+  welcomeBody  String?
+  quickReplies String[] @default([])
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  messages     ChannelMessage[]
+  memberStates ChannelMemberState[]
+
+  @@unique([communityId, slug])
+  @@index([communityId, position])
+  @@map("community_channels")
+}
+
+model ChannelMessage {
+  id          String           @id @default(uuid())
+  channelId   String
+  communityId String
+  senderId    String
+
+  channel  CommunityChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  sender   User             @relation("ChannelMessageSender", fields: [senderId], references: [id])
+
+  content      String    @db.Text
+  isPinned     Boolean   @default(false)
+  pinnedAt     DateTime?
+  pinnedBy     String?
+  pinnedByUser User?     @relation("ChannelMessagePinnedBy", fields: [pinnedBy], references: [id])
+
+  parentMessageId String?
+  parentMessage   ChannelMessage?  @relation("MessageReplies", fields: [parentMessageId], references: [id])
+  replies         ChannelMessage[] @relation("MessageReplies")
+  replyCount      Int              @default(0)
+
+  reactions MessageReaction[]
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([channelId, createdAt(sort: Desc)])
+  @@index([communityId, createdAt(sort: Desc)])
+  @@index([parentMessageId])
+  @@map("channel_messages")
+}
+
+model MessageReaction {
+  id        String         @id @default(uuid())
+  messageId String
+  userId    String
+  emoji     String
+
+  message ChannelMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User           @relation("MessageReactionUser", fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
+  @@map("message_reactions")
+}
+
+model ChannelMemberState {
+  id        String           @id @default(uuid())
+  channelId String
+  userId    String
+
+  channel CommunityChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user    User             @relation("ChannelMemberStateUser", fields: [userId], references: [id])
+
+  lastReadAt        DateTime?
+  bannerDismissedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([channelId, userId])
+  @@index([userId])
+  @@map("channel_member_states")
+}
+
+model CommunityDmConversation {
+  id             String @id @default(uuid())
+  communityId    String
+  participant1Id String
+  participant2Id String
+
+  community    Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  participant1 User      @relation("DmParticipant1", fields: [participant1Id], references: [id])
+  participant2 User      @relation("DmParticipant2", fields: [participant2Id], references: [id])
+
+  lastMessageAt      DateTime?
+  lastMessagePreview String?
+
+  messages   CommunityDmMessage[]
+  readStates CommunityDmReadState[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([communityId, participant1Id, participant2Id])
+  @@index([communityId, participant1Id])
+  @@index([communityId, participant2Id])
+  @@map("community_dm_conversations")
+}
+
+model CommunityDmMessage {
+  id             String                  @id @default(uuid())
+  conversationId String
+  senderId       String
+
+  conversation CommunityDmConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User                    @relation("DmMessageSender", fields: [senderId], references: [id])
+
+  content   String    @db.Text
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([conversationId, createdAt(sort: Desc)])
+  @@map("community_dm_messages")
+}
+
+model CommunityDmReadState {
+  id             String                  @id @default(uuid())
+  conversationId String
+  userId         String
+
+  conversation CommunityDmConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User                    @relation("DmReadStateUser", fields: [userId], references: [id])
+
+  lastReadAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@map("community_dm_read_states")
 }
 
 // ─── Community Enums ──────────────────────────────────────────────────────────

@@ -20,6 +20,7 @@ import { OrdersModule } from './modules/orders/orders.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
 import { CheckInModule } from './modules/check-in/check-in.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { CommunityChatModule } from './modules/community-chat/community-chat.module';
 import { AuditLogModule } from './modules/audit-log/audit-log.module';
 import { ConsentModule } from './modules/consent/consent.module';
 import { InterestsModule } from './modules/interests/interests.module';
@@ -74,6 +75,7 @@ import { StorageModule } from './common/storage/storage.module';
     InterestsModule,
     GraphModule,
     CommunitiesModule,
+    CommunityChatModule,
   ],
   providers: [
     Logger,
