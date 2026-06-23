@@ -14,6 +14,7 @@ import {
   CommunityStatus,
   EventStatus,
   InterestAffinity,
+  MemberVisibility,
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -27,6 +28,7 @@ import { SetCommunityCitiesDto } from './dto/set-community-cities.dto';
 import { AssignMemberDto } from './dto/assign-member.dto';
 import { AddCommunityEventDto } from './dto/add-community-event.dto';
 import { ListCommunitiesQueryDto } from './dto/list-communities-query.dto';
+import { RecommendCommunitiesQueryDto } from './dto/recommend-communities-query.dto';
 
 const COMMUNITY_DETAIL_INCLUDE = {
   settings: true,
@@ -483,51 +485,65 @@ export class CommunitiesService {
   }
 
   /**
-   * Recommend published communities to the authenticated user, ranked by how many
-   * of the community's interests overlap the user's LIKED/OPEN_TO interests, then
-   * by a city match (user's profile city), then by member count. Communities the
-   * user already belongs to (ACTIVE/PENDING) and INVITE_ONLY ones are excluded.
+   * Recommend published communities ranked by interest overlap → city match → member count.
+   *
+   * Unauthenticated: accepts `interestIds` query params for stateless matching. No `cityMatch`
+   * is returned (no profile city available). Already-joined communities are not excluded.
+   *
+   * Authenticated: reads stored LIKED/OPEN_TO affinities, excludes communities the caller
+   * already belongs to, and appends `cityMatch` to each result.
    */
-  async recommendForUser(firebaseUid: string, query: ListCommunitiesQueryDto) {
+  async recommendForUser(firebaseUid: string | null, query: RecommendCommunitiesQueryDto) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
 
-    const user = await this.prisma.user.findUnique({
-      where: { firebaseUid },
-      select: {
-        id: true,
-        attendeeProfile: { select: { city: true } },
-        interestAffinities: {
-          where: { affinity: { in: [InterestAffinity.LIKED, InterestAffinity.OPEN_TO] } },
-          select: { interestId: true },
-        },
-      },
-    });
-    if (!user) throw new NotFoundException('User not found');
+    let interestIds: string[] = [];
+    let userCity: string | null = null;
+    let userId: string | null = null;
 
-    const interestIds = user.interestAffinities.map((a) => a.interestId);
-    if (!interestIds.length) {
-      // No interest signal — nothing to recommend on. The client can fall back to browse.
-      return { data: [], total: 0, page, limit };
+    if (firebaseUid) {
+      const user = await this.prisma.user.findUnique({
+        where: { firebaseUid },
+        select: {
+          id: true,
+          attendeeProfile: { select: { city: true } },
+          interestAffinities: {
+            where: { affinity: { in: [InterestAffinity.LIKED, InterestAffinity.OPEN_TO] } },
+            select: { interestId: true },
+          },
+        },
+      });
+      if (!user) throw new NotFoundException('User not found');
+      userId = user.id;
+      userCity = user.attendeeProfile?.city ?? null;
+      interestIds = user.interestAffinities.map((a) => a.interestId);
+    } else {
+      interestIds = query.interestIds ?? [];
     }
 
-    const userCity = user.attendeeProfile?.city ?? null;
     const userInterests = new Set(interestIds);
 
-    // status is always forced to PUBLISHED here (the DTO's status filter is admin-only);
-    // city / categoryId / search narrow the candidate set when provided.
     const where: Prisma.CommunityWhereInput = {
       status: CommunityStatus.PUBLISHED,
       deletedAt: null,
       access: { not: CommunityAccess.INVITE_ONLY },
-      interests: { some: { interestId: { in: interestIds } } },
-      members: {
+    };
+
+    // Only filter to interest-matched communities when we have a signal to match on.
+    if (interestIds.length) {
+      where.interests = { some: { interestId: { in: interestIds } } };
+    }
+
+    // Exclude communities the authenticated user already belongs to.
+    if (userId) {
+      where.members = {
         none: {
-          userId: user.id,
+          userId,
           status: { in: [CommunityMemberStatus.ACTIVE, CommunityMemberStatus.PENDING] },
         },
-      },
-    };
+      };
+    }
+
     if (query.categoryId) where.categoryId = query.categoryId;
     if (query.city) {
       where.OR = [{ primaryCity: query.city }, { communityCities: { has: query.city } }];
@@ -545,6 +561,7 @@ export class CommunitiesService {
         access: true,
         primaryCity: true,
         communityCities: true,
+        interestTags: true,
         coverImageKey: true,
         iconKey: true,
         memberCount: true,
@@ -556,10 +573,10 @@ export class CommunitiesService {
 
     const ranked = candidates
       .map((c) => {
-        const { interests, ...rest } = c;
+        const { interests, communityCities, ...rest } = c;
         const overlap = interests.reduce((n, i) => (userInterests.has(i.interestId) ? n + 1 : n), 0);
         const cityMatch =
-          !!userCity && (rest.primaryCity === userCity || rest.communityCities.includes(userCity));
+          !!userCity && (rest.primaryCity === userCity || communityCities.includes(userCity));
         return { rest, overlap, cityMatch };
       })
       .sort(
@@ -573,11 +590,11 @@ export class CommunitiesService {
     const pageSlice = ranked.slice((page - 1) * limit, (page - 1) * limit + limit);
 
     const data = await Promise.all(
-      pageSlice.map(async ({ rest, overlap, cityMatch }) => ({
-        ...(await this.withSignedMedia(rest)),
-        matchScore: overlap,
-        cityMatch,
-      })),
+      pageSlice.map(async ({ rest, overlap, cityMatch }) => {
+        const base = { ...(await this.withSignedMedia(rest)), matchScore: overlap };
+        // cityMatch is only meaningful (and only available) when the caller is authenticated.
+        return firebaseUid ? { ...base, cityMatch } : base;
+      }),
     );
 
     return { data, total, page, limit };
@@ -634,6 +651,82 @@ export class CommunitiesService {
     if (status === CommunityMemberStatus.ACTIVE) await this.recalculateMemberCount(id);
 
     return { status: member.status };
+  }
+
+  async leave(id: string, firebaseUid: string) {
+    const user = await this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const community = await this.prisma.community.findFirst({
+      where: { id, status: CommunityStatus.PUBLISHED, deletedAt: null },
+      select: { id: true },
+    });
+    if (!community) throw new NotFoundException('Community not found');
+
+    const member = await this.prisma.communityMember.findUnique({
+      where: { communityId_userId: { communityId: id, userId: user.id } },
+    });
+    if (!member || member.status === CommunityMemberStatus.LEFT) {
+      throw new NotFoundException('You are not a member of this community');
+    }
+    if (member.role === CommunityRole.OWNER) {
+      throw new BadRequestException('The community owner cannot leave; transfer ownership first');
+    }
+
+    const wasActive = member.status === CommunityMemberStatus.ACTIVE;
+
+    await this.prisma.communityMember.update({
+      where: { communityId_userId: { communityId: id, userId: user.id } },
+      data: { status: CommunityMemberStatus.LEFT },
+    });
+
+    if (wasActive) await this.recalculateMemberCount(id);
+
+    return { success: true };
+  }
+
+  async listMembers(id: string, page: number, limit: number) {
+    const community = await this.prisma.community.findFirst({
+      where: { id, status: CommunityStatus.PUBLISHED, deletedAt: null },
+      select: { id: true, memberVisibility: true },
+    });
+    if (!community) throw new NotFoundException('Community not found');
+
+    if (community.memberVisibility === MemberVisibility.HIDDEN) {
+      return { data: [], total: 0, page, limit };
+    }
+
+    const where = { communityId: id, status: CommunityMemberStatus.ACTIVE };
+
+    const [rows, total] = await Promise.all([
+      this.prisma.communityMember.findMany({
+        where,
+        select: {
+          role: true,
+          joinedAt: true,
+          user: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
+        },
+        orderBy: { joinedAt: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.communityMember.count({ where }),
+    ]);
+
+    const data = await Promise.all(
+      rows.map(async (m) => ({
+        userId: m.user.id,
+        firstName: m.user.firstName,
+        lastName: m.user.lastName,
+        avatarUrl: m.user.avatarUrl
+          ? await this.storageService.getPresignedDownloadUrl(m.user.avatarUrl)
+          : null,
+        role: m.role,
+        joinedAt: m.joinedAt,
+      })),
+    );
+
+    return { data, total, page, limit };
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────────────────
