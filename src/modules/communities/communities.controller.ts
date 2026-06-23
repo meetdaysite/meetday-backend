@@ -9,6 +9,7 @@ import { ListCommunitiesQueryDto } from './dto/list-communities-query.dto';
 import { ListMembersQueryDto } from './dto/list-members-query.dto';
 import { RecommendCommunitiesQueryDto } from './dto/recommend-communities-query.dto';
 import { JoinCommunityDto } from './dto/join-community.dto';
+import { CommunityEventsQueryDto } from './dto/community-events-query.dto';
 
 @ApiTags('Communities')
 @ApiBearerAuth('firebase-token')
@@ -18,10 +19,11 @@ export class CommunitiesController {
 
   @Get()
   @Public()
+  @UseGuards(OptionalAuthGuard)
   @ApiOperation({ summary: 'Browse published communities' })
-  @ApiOkResponse({ description: 'Paginated list of discoverable communities.' })
-  browse(@Query() query: ListCommunitiesQueryDto) {
-    return this.communitiesService.listPublic(query);
+  @ApiOkResponse({ description: 'Paginated list of discoverable communities. Each item includes `isMember: boolean` (true when the authenticated caller belongs to that community; always false for unauthenticated requests).' })
+  browse(@Query() query: ListCommunitiesQueryDto, @GetUser('uid') firebaseUid: string | null) {
+    return this.communitiesService.listPublic(query, firebaseUid);
   }
 
   @Get('recommended')
@@ -43,12 +45,45 @@ export class CommunitiesController {
     return this.communitiesService.recommendForUser(firebaseUid, query);
   }
 
+  @Get(':slug/events')
+  @Public()
+  @ApiOperation({
+    summary: 'Events linked to a published community',
+    description: 'Returns events ordered by eventDate ascending. Pass `upcoming=true` to restrict to PUBLISHED events with eventDate >= now.',
+  })
+  @ApiOkResponse({ description: 'Paginated event list with cover image, attendee count, min price, and host.' })
+  getCommunityEvents(@Param('slug') slug: string, @Query() query: CommunityEventsQueryDto) {
+    return this.communitiesService.getEvents(slug, query);
+  }
+
+  @Get(':slug/hosts')
+  @Public()
+  @ApiOperation({ summary: 'HOST-role members of a published community, ordered by event count' })
+  @ApiOkResponse({ description: 'Array of hosts with brandName, avatarUrl, and eventCount (events in this community).' })
+  getCommunityHosts(@Param('slug') slug: string) {
+    return this.communitiesService.getHosts(slug);
+  }
+
+  @Get(':slug/stats')
+  @Public()
+  @ApiOperation({ summary: 'Aggregate stats for a published community' })
+  @ApiOkResponse({
+    description: 'memberCount, experienceCount, pendingCount, newMembersThisWeek, hostCount.',
+    schema: {
+      example: { memberCount: 1600, experienceCount: 12, pendingCount: 4, newMembersThisWeek: 23, hostCount: 3 },
+    },
+  })
+  getCommunityStats(@Param('slug') slug: string) {
+    return this.communitiesService.getStats(slug);
+  }
+
   @Get(':slug')
   @Public()
   @UseGuards(OptionalAuthGuard)
   @ApiOperation({ summary: 'Get a published community by slug' })
-  findBySlug(@Param('slug') slug: string) {
-    return this.communitiesService.findBySlug(slug);
+  @ApiOkResponse({ description: 'Community detail. Includes `isMember: boolean` (true when the authenticated caller is an ACTIVE or PENDING member; always false for unauthenticated requests).' })
+  findBySlug(@Param('slug') slug: string, @GetUser('uid') firebaseUid: string | null) {
+    return this.communitiesService.findBySlug(slug, firebaseUid);
   }
 
   @Post(':id/join')

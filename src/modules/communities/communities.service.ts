@@ -443,7 +443,7 @@ export class CommunitiesService {
 
   // ─── Public / member-facing ────────────────────────────────────────────────
 
-  async listPublic(query: ListCommunitiesQueryDto) {
+  async listPublic(query: ListCommunitiesQueryDto, firebaseUid?: string | null) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
 
@@ -484,7 +484,15 @@ export class CommunitiesService {
       this.prisma.community.count({ where }),
     ]);
 
-    const data = await Promise.all(rows.map((r) => this.withSignedMedia(r)));
+    let memberSet = new Set<string>();
+    if (firebaseUid) {
+      const user = await this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } });
+      if (user) memberSet = await this.getMembershipSet(user.id, rows.map((r) => r.id));
+    }
+
+    const data = await Promise.all(
+      rows.map(async (r) => ({ ...(await this.withSignedMedia(r)), isMember: memberSet.has(r.id) })),
+    );
     return { data, total, page, limit };
   }
 
@@ -595,8 +603,9 @@ export class CommunitiesService {
 
     const data = await Promise.all(
       pageSlice.map(async ({ rest, overlap, cityMatch }) => {
-        const base = { ...(await this.withSignedMedia(rest)), matchScore: overlap };
+        const base = { ...(await this.withSignedMedia(rest)), matchScore: overlap, isMember: false };
         // cityMatch is only meaningful (and only available) when the caller is authenticated.
+        // isMember is always false here — already-joined communities are excluded from candidates.
         return firebaseUid ? { ...base, cityMatch } : base;
       }),
     );
@@ -604,13 +613,208 @@ export class CommunitiesService {
     return { data, total, page, limit };
   }
 
-  async findBySlug(slug: string) {
+  async findBySlug(slug: string, firebaseUid?: string | null) {
     const community = await this.prisma.community.findFirst({
       where: { slug, status: CommunityStatus.PUBLISHED, deletedAt: null },
       include: COMMUNITY_DETAIL_INCLUDE,
     });
     if (!community) throw new NotFoundException('Community not found');
-    return this.withSignedMedia(community);
+
+    let isMember = false;
+    if (firebaseUid) {
+      const user = await this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } });
+      if (user) {
+        const membership = await this.prisma.communityMember.findUnique({
+          where: { communityId_userId: { communityId: community.id, userId: user.id } },
+          select: { status: true },
+        });
+        isMember =
+          membership?.status === CommunityMemberStatus.ACTIVE ||
+          membership?.status === CommunityMemberStatus.PENDING;
+      }
+    }
+
+    return { ...(await this.withSignedMedia(community)), isMember };
+  }
+
+  async getEvents(slug: string, query: { upcoming?: boolean; page?: number; limit?: number }) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const community = await this.prisma.community.findFirst({
+      where: { slug, status: CommunityStatus.PUBLISHED, deletedAt: null },
+      select: { id: true },
+    });
+    if (!community) throw new NotFoundException('Community not found');
+
+    const now = new Date();
+    const links = await this.prisma.communityEvent.findMany({
+      where: {
+        communityId: community.id,
+        ...(query.upcoming
+          ? { event: { status: EventStatus.PUBLISHED, eventDate: { gte: now } } }
+          : {}),
+      },
+      select: {
+        source: true,
+        event: {
+          select: {
+            id: true,
+            title: true,
+            eventDate: true,
+            startTime: true,
+            endTime: true,
+            city: true,
+            venueName: true,
+            fullAddress: true,
+            isFree: true,
+            status: true,
+            eventType: true,
+            tags: true,
+            media: { where: { type: 'COVER' }, select: { url: true }, take: 1 },
+            tickets: { select: { price: true, soldCount: true, totalCapacity: true } },
+            hostProfile: {
+              select: {
+                id: true,
+                displayName: true,
+                user: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    links.sort((a, b) => (a.event.eventDate?.getTime() ?? 0) - (b.event.eventDate?.getTime() ?? 0));
+
+    const total = links.length;
+    const pageLinks = links.slice((page - 1) * limit, (page - 1) * limit + limit);
+
+    const data = await Promise.all(
+      pageLinks.map(async ({ source, event }) => {
+        const cover = event.media[0] ?? null;
+        const coverImageUrl = cover
+          ? await this.storageService.getPresignedDownloadUrl(cover.url)
+          : null;
+
+        const hostAvatarUrl =
+          event.hostProfile?.user?.avatarUrl
+            ? await this.storageService.getPresignedDownloadUrl(event.hostProfile.user.avatarUrl)
+            : null;
+
+        const attendeeCount = event.tickets.reduce((n, t) => n + t.soldCount, 0);
+        const paidTickets = event.tickets.filter((t) => Number(t.price) > 0);
+        const minPrice =
+          !event.isFree && paidTickets.length
+            ? Math.min(...paidTickets.map((t) => Number(t.price)))
+            : null;
+
+        return {
+          id: event.id,
+          title: event.title,
+          eventDate: event.eventDate,
+          startTime: event.startTime,
+          endTime: event.endTime,
+          city: event.city,
+          venueName: event.venueName,
+          fullAddress: event.fullAddress,
+          isFree: event.isFree,
+          minPrice,
+          attendeeCount,
+          status: event.status,
+          eventType: event.eventType,
+          tags: event.tags,
+          coverImageUrl,
+          source,
+          host: event.hostProfile
+            ? {
+                id: event.hostProfile.id,
+                displayName: event.hostProfile.displayName,
+                userId: event.hostProfile.user?.id ?? null,
+                firstName: event.hostProfile.user?.firstName ?? null,
+                lastName: event.hostProfile.user?.lastName ?? null,
+                avatarUrl: hostAvatarUrl,
+              }
+            : null,
+        };
+      }),
+    );
+
+    return { data, total, page, limit };
+  }
+
+  async getHosts(slug: string) {
+    const community = await this.prisma.community.findFirst({
+      where: { slug, status: CommunityStatus.PUBLISHED, deletedAt: null },
+      select: { id: true },
+    });
+    if (!community) throw new NotFoundException('Community not found');
+
+    const hostMembers = await this.prisma.communityMember.findMany({
+      where: { communityId: community.id, role: CommunityRole.HOST, status: CommunityMemberStatus.ACTIVE },
+      select: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            avatarUrl: true,
+            hostProfile: { select: { id: true, displayName: true } },
+          },
+        },
+      },
+    });
+
+    const withCounts = await Promise.all(
+      hostMembers.map(async ({ user }) => {
+        const eventCount = await this.prisma.communityEvent.count({
+          where: { communityId: community.id, event: { hostProfile: { userId: user.id } } },
+        });
+        const avatarUrl = user.avatarUrl
+          ? await this.storageService.getPresignedDownloadUrl(user.avatarUrl)
+          : null;
+        return {
+          userId: user.id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          avatarUrl,
+          displayName: user.hostProfile?.displayName ?? null,
+          eventCount,
+        };
+      }),
+    );
+
+    return withCounts.sort((a, b) => b.eventCount - a.eventCount);
+  }
+
+  async getStats(slug: string) {
+    const community = await this.prisma.community.findFirst({
+      where: { slug, status: CommunityStatus.PUBLISHED, deletedAt: null },
+      select: { id: true, memberCount: true, experienceCount: true },
+    });
+    if (!community) throw new NotFoundException('Community not found');
+
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const [pendingCount, newMembersThisWeek, hostCount] = await Promise.all([
+      this.prisma.communityMember.count({
+        where: { communityId: community.id, status: CommunityMemberStatus.PENDING },
+      }),
+      this.prisma.communityMember.count({
+        where: { communityId: community.id, status: CommunityMemberStatus.ACTIVE, joinedAt: { gte: sevenDaysAgo } },
+      }),
+      this.prisma.communityMember.count({
+        where: { communityId: community.id, role: CommunityRole.HOST, status: CommunityMemberStatus.ACTIVE },
+      }),
+    ]);
+
+    return {
+      memberCount: community.memberCount,
+      experienceCount: community.experienceCount,
+      pendingCount,
+      newMembersThisWeek,
+      hostCount,
+    };
   }
 
   async join(id: string, firebaseUid: string, dto: JoinCommunityDto, ip?: string, userAgent?: string) {
@@ -812,6 +1016,19 @@ export class CommunitiesService {
       entityType: ENTITY_TYPE,
       entityId: id,
     });
+  }
+
+  private async getMembershipSet(userId: string, communityIds: string[]): Promise<Set<string>> {
+    if (!communityIds.length) return new Set();
+    const rows = await this.prisma.communityMember.findMany({
+      where: {
+        userId,
+        communityId: { in: communityIds },
+        status: { in: [CommunityMemberStatus.ACTIVE, CommunityMemberStatus.PENDING] },
+      },
+      select: { communityId: true },
+    });
+    return new Set(rows.map((r) => r.communityId));
   }
 
   /** Replace stored S3 keys with presigned download URLs on cover/icon. */
