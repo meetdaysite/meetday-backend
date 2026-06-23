@@ -1122,6 +1122,7 @@ enum ConsentType {
   PRIVACY_POLICY
   HOST_KYC_DATA_SHARING
   HOST_BANK_DATA_SHARING
+  COMMUNITY_GUIDELINES
 }
 
 // ─── Communities ──────────────────────────────────────────────────────────────
@@ -1234,6 +1235,9 @@ model CommunityMember {
   invitedBy String?
   joinedAt  DateTime?
 
+  profileVisibility    MemberProfileVisibility @default(EVENT_ATTENDEES_ONLY)
+  guidelinesAcceptedAt DateTime?
+
   community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -1331,4 +1335,10 @@ enum CommunityMemberStatus {
 enum CommunityEventSource {
   MANUAL
   AUTO
+}
+
+enum MemberProfileVisibility {
+  EVENT_ATTENDEES_ONLY
+  COMMUNITY_MEMBERS
+  PRIVATE
 }
