@@ -637,6 +637,186 @@ export class CommunitiesService {
     return { ...(await this.withSignedMedia(community)), isMember };
   }
 
+  async getEvents(slug: string, query: { upcoming?: boolean; page?: number; limit?: number }) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const community = await this.prisma.community.findFirst({
+      where: { slug, status: CommunityStatus.PUBLISHED, deletedAt: null },
+      select: { id: true },
+    });
+    if (!community) throw new NotFoundException('Community not found');
+
+    const now = new Date();
+    const links = await this.prisma.communityEvent.findMany({
+      where: {
+        communityId: community.id,
+        ...(query.upcoming
+          ? { event: { status: EventStatus.PUBLISHED, eventDate: { gte: now } } }
+          : {}),
+      },
+      select: {
+        source: true,
+        event: {
+          select: {
+            id: true,
+            title: true,
+            eventDate: true,
+            startTime: true,
+            endTime: true,
+            city: true,
+            venueName: true,
+            fullAddress: true,
+            isFree: true,
+            status: true,
+            eventType: true,
+            tags: true,
+            media: { where: { type: 'COVER' }, select: { url: true }, take: 1 },
+            tickets: { select: { price: true, soldCount: true, totalCapacity: true } },
+            hostProfile: {
+              select: {
+                id: true,
+                displayName: true,
+                user: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    links.sort((a, b) => (a.event.eventDate?.getTime() ?? 0) - (b.event.eventDate?.getTime() ?? 0));
+
+    const total = links.length;
+    const pageLinks = links.slice((page - 1) * limit, (page - 1) * limit + limit);
+
+    const data = await Promise.all(
+      pageLinks.map(async ({ source, event }) => {
+        const cover = event.media[0] ?? null;
+        const coverImageUrl = cover
+          ? await this.storageService.getPresignedDownloadUrl(cover.url)
+          : null;
+
+        const hostAvatarUrl =
+          event.hostProfile?.user?.avatarUrl
+            ? await this.storageService.getPresignedDownloadUrl(event.hostProfile.user.avatarUrl)
+            : null;
+
+        const attendeeCount = event.tickets.reduce((n, t) => n + t.soldCount, 0);
+        const paidTickets = event.tickets.filter((t) => Number(t.price) > 0);
+        const minPrice =
+          !event.isFree && paidTickets.length
+            ? Math.min(...paidTickets.map((t) => Number(t.price)))
+            : null;
+
+        return {
+          id: event.id,
+          title: event.title,
+          eventDate: event.eventDate,
+          startTime: event.startTime,
+          endTime: event.endTime,
+          city: event.city,
+          venueName: event.venueName,
+          fullAddress: event.fullAddress,
+          isFree: event.isFree,
+          minPrice,
+          attendeeCount,
+          status: event.status,
+          eventType: event.eventType,
+          tags: event.tags,
+          coverImageUrl,
+          source,
+          host: event.hostProfile
+            ? {
+                id: event.hostProfile.id,
+                displayName: event.hostProfile.displayName,
+                userId: event.hostProfile.user?.id ?? null,
+                firstName: event.hostProfile.user?.firstName ?? null,
+                lastName: event.hostProfile.user?.lastName ?? null,
+                avatarUrl: hostAvatarUrl,
+              }
+            : null,
+        };
+      }),
+    );
+
+    return { data, total, page, limit };
+  }
+
+  async getHosts(slug: string) {
+    const community = await this.prisma.community.findFirst({
+      where: { slug, status: CommunityStatus.PUBLISHED, deletedAt: null },
+      select: { id: true },
+    });
+    if (!community) throw new NotFoundException('Community not found');
+
+    const hostMembers = await this.prisma.communityMember.findMany({
+      where: { communityId: community.id, role: CommunityRole.HOST, status: CommunityMemberStatus.ACTIVE },
+      select: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            avatarUrl: true,
+            hostProfile: { select: { id: true, displayName: true } },
+          },
+        },
+      },
+    });
+
+    const withCounts = await Promise.all(
+      hostMembers.map(async ({ user }) => {
+        const eventCount = await this.prisma.communityEvent.count({
+          where: { communityId: community.id, event: { hostProfile: { userId: user.id } } },
+        });
+        const avatarUrl = user.avatarUrl
+          ? await this.storageService.getPresignedDownloadUrl(user.avatarUrl)
+          : null;
+        return {
+          userId: user.id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          avatarUrl,
+          displayName: user.hostProfile?.displayName ?? null,
+          eventCount,
+        };
+      }),
+    );
+
+    return withCounts.sort((a, b) => b.eventCount - a.eventCount);
+  }
+
+  async getStats(slug: string) {
+    const community = await this.prisma.community.findFirst({
+      where: { slug, status: CommunityStatus.PUBLISHED, deletedAt: null },
+      select: { id: true, memberCount: true, experienceCount: true },
+    });
+    if (!community) throw new NotFoundException('Community not found');
+
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const [pendingCount, newMembersThisWeek, hostCount] = await Promise.all([
+      this.prisma.communityMember.count({
+        where: { communityId: community.id, status: CommunityMemberStatus.PENDING },
+      }),
+      this.prisma.communityMember.count({
+        where: { communityId: community.id, status: CommunityMemberStatus.ACTIVE, joinedAt: { gte: sevenDaysAgo } },
+      }),
+      this.prisma.communityMember.count({
+        where: { communityId: community.id, role: CommunityRole.HOST, status: CommunityMemberStatus.ACTIVE },
+      }),
+    ]);
+
+    return {
+      memberCount: community.memberCount,
+      experienceCount: community.experienceCount,
+      pendingCount,
+      newMembersThisWeek,
+      hostCount,
+    };
+  }
+
   async join(id: string, firebaseUid: string, dto: JoinCommunityDto, ip?: string, userAgent?: string) {
     if (!dto.guidelinesAccepted) {
       throw new BadRequestException('You must accept the community guidelines to join');
