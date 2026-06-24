@@ -18,6 +18,6 @@ import { CommunityRoleGuard } from '../../common/guards/community-role.guard';
     CommunityPresenceService,
     CommunityRoleGuard,
   ],
-  exports: [CommunityChatService, CommunityChannelService],
+  exports: [CommunityChatService, CommunityChannelService, CommunityPresenceService],
 })
 export class CommunityChatModule {}

@@ -5,6 +5,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { MailModule } from '../../common/mail/mail.module';
 import { StorageModule } from '../../common/storage/storage.module';
 import { EventsModule } from '../events/events.module';
+import { CommunitiesModule } from '../communities/communities.module';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { TicketPdfService } from './ticket-pdf.service';
@@ -18,6 +19,7 @@ import { OrderMailProcessor } from './processors/order-mail.processor';
     MailModule,
     StorageModule,
     EventsModule,
+    CommunitiesModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService, TicketPdfService, OrderMailProcessor],

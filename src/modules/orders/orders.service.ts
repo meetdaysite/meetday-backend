@@ -16,6 +16,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { EventsVibeService } from '../events/events-vibe.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { CommunityMembersService } from '../communities/community-members.service';
 
 async function generateUniqueBookingId(
   check: (id: string) => Promise<boolean>,
@@ -44,6 +45,7 @@ export class OrdersService {
     @InjectQueue('mail') private readonly mailQueue: Queue,
     private readonly auditLogService: AuditLogService,
     private readonly eventsVibeService: EventsVibeService,
+    private readonly communityMembersService: CommunityMembersService,
   ) {}
 
   async createOrder(userId: string, dto: CreateOrderDto) {
@@ -382,6 +384,11 @@ export class OrdersService {
 
     void this.eventsVibeService.recomputeCrowdPulse(order.eventId);
 
+    // Refresh the buyer's community-directory attendance counters.
+    void this.communityMembersService
+      .recomputeForEvent(order.eventId, userId)
+      .catch((err) => this.logger.error('Failed to recompute community member event count', err));
+
     return { message: 'Order confirmed' };
   }
 
@@ -534,6 +541,11 @@ export class OrdersService {
     void this.notificationsService
       .create(userId, 'order_cancelled', 'Booking Cancelled', 'Your order has been cancelled.')
       .catch((err) => this.logger.error('Failed to send order_cancelled notification', err));
+
+    // Refresh the buyer's community-directory attendance counters.
+    void this.communityMembersService
+      .recomputeForEvent(order.eventId, userId)
+      .catch((err) => this.logger.error('Failed to recompute community member event count', err));
 
     return { message: 'Order cancelled successfully', refundAmount };
   }
