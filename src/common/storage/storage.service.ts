@@ -20,6 +20,7 @@ const CONTENT_TYPE_EXT: Record<string, string> = {
   'image/png': 'png',
   'image/webp': 'webp',
   'video/mp4': 'mp4',
+  'application/octet-stream': 'bin',
 };
 
 @Injectable()
@@ -154,6 +155,26 @@ export class StorageService {
         });
         if (!community) throw new NotFoundException('Community not found');
         key = `communities/${dto.resourceId}/announcements/${randomUUID()}.${ext}`;
+        break;
+      }
+
+      case UploadContext.COMMUNITY_DM_MEDIA: {
+        // Encrypted DM blob. resourceId is the conversation id; only a participant
+        // of an ACCEPTED conversation may upload. The blob is opaque ciphertext.
+        if (!dto.resourceId) {
+          throw new BadRequestException('resourceId (conversation UUID) is required for COMMUNITY_DM_MEDIA');
+        }
+        const convo = await this.prisma.communityDmConversation.findUnique({
+          where: { id: dto.resourceId },
+          select: { status: true, participant1Id: true, participant2Id: true },
+        });
+        if (!convo || (convo.participant1Id !== userId && convo.participant2Id !== userId)) {
+          throw new NotFoundException('Conversation not found');
+        }
+        if (convo.status !== 'ACCEPTED') {
+          throw new ForbiddenException('This conversation is not active');
+        }
+        key = `community-dms/${dto.resourceId}/${randomUUID()}.${ext}`;
         break;
       }
     }

@@ -11,9 +11,16 @@ export enum UploadContext {
   COMMUNITY_COVER = 'COMMUNITY_COVER',
   COMMUNITY_ICON = 'COMMUNITY_ICON',
   COMMUNITY_ANNOUNCEMENT = 'COMMUNITY_ANNOUNCEMENT',
+  COMMUNITY_DM_MEDIA = 'COMMUNITY_DM_MEDIA',
 }
 
-const ALLOWED_CONTENT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'video/mp4'] as const;
+const ALLOWED_CONTENT_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'video/mp4',
+  'application/octet-stream', // E2EE-encrypted blobs (e.g. DM images)
+] as const;
 
 export class RequestUploadUrlDto {
   @ApiProperty({ enum: UploadContext, description: 'The upload context determines the key path and authorization rules.' })

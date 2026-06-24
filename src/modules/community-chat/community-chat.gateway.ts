@@ -20,6 +20,7 @@ import {
   CommunityMemberStatus,
   CommunityRole,
   ChatPermission,
+  DmMessageType,
 } from '@prisma/client';
 
 interface ConnectedUser {
@@ -386,33 +387,44 @@ export class CommunityChatGateway
     @ConnectedSocket() client: Socket,
     @MessageBody()
     payload: {
-      communityId: string;
-      content: string;
-      conversationId?: string;
-      targetUserId?: string;
+      conversationId: string;
+      ciphertext: string;
+      nonce: string;
+      keyEpoch: number;
+      messageType?: 'TEXT' | 'IMAGE';
+      mediaKey?: string;
+      mediaSizeBytes?: number;
     },
   ) {
     const entry = this.connectedUsers.get(client.id);
     if (!entry) return;
 
-    let conversationId = payload.conversationId;
-
-    if (!conversationId) {
-      if (!payload.targetUserId) {
-        client.emit('error', { event: 'send-dm', message: 'conversationId or targetUserId required' });
-        return;
-      }
-      await this.dmService.checkDmPolicy(payload.communityId, entry.userId, payload.targetUserId);
-      const convo = await this.dmService.findOrCreateConversation(
-        payload.communityId,
-        entry.userId,
-        payload.targetUserId,
-      );
-      conversationId = convo.id;
+    if (!payload.conversationId || !payload.ciphertext || !payload.nonce) {
+      client.emit('error', {
+        event: 'send-dm',
+        message: 'conversationId, ciphertext and nonce are required (E2EE)',
+      });
+      return;
     }
 
-    const message = await this.dmService.createMessage(conversationId, entry.userId, payload.content);
+    // createMessage enforces the conversation is ACCEPTED and the sender is a participant.
+    // The server only relays opaque ciphertext — it never sees plaintext.
+    let message;
+    try {
+      message = await this.dmService.createMessage(payload.conversationId, entry.userId, {
+        ciphertext: payload.ciphertext,
+        nonce: payload.nonce,
+        keyEpoch: payload.keyEpoch,
+        messageType: payload.messageType as DmMessageType | undefined,
+        mediaKey: payload.mediaKey,
+        mediaSizeBytes: payload.mediaSizeBytes,
+      });
+    } catch (err) {
+      client.emit('error', { event: 'send-dm', message: (err as Error).message });
+      return;
+    }
 
+    const conversationId = payload.conversationId;
     this.server.to(`dm:${conversationId}`).emit('new-dm', { conversationId, message });
 
     // Also notify the other participant via their user room if not in the DM room
@@ -423,9 +435,7 @@ export class CommunityChatGateway
     if (convo) {
       const otherId =
         convo.participant1Id === entry.userId ? convo.participant2Id : convo.participant1Id;
-      this.server
-        .to(`user:${otherId}`)
-        .emit('new-dm', { conversationId, message });
+      this.server.to(`user:${otherId}`).emit('new-dm', { conversationId, message });
     }
   }
 
@@ -504,5 +514,9 @@ export class CommunityChatGateway
 
   emitToChannel(channelId: string, event: string, data: unknown): void {
     this.server.to(`channel:${channelId}`).emit(event, data);
+  }
+
+  emitToUser(userId: string, event: string, data: unknown): void {
+    this.server.to(`user:${userId}`).emit(event, data);
   }
 }

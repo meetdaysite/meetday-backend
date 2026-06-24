@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Delete,
   Get,
@@ -22,6 +23,8 @@ import { CommunityDmService } from './community-dm.service';
 import { CommunityPresenceService } from './community-presence.service';
 import { MinCommunityRole } from '../../common/decorators/min-community-role.decorator';
 import { MessageCursorQueryDto } from './dto/message-cursor-query.dto';
+import { CreateIntroDto } from './dto/create-intro.dto';
+import { UploadConversationKeysDto } from './dto/encrypted-message.dto';
 import { CommunityRoleGuard } from '../../common/guards/community-role.guard';
 
 @ApiTags('Community Chat')
@@ -146,11 +149,118 @@ export class CommunityChatController {
     return this.presenceService.getPresence(communityId);
   }
 
+  // ─── DM Intro Requests ──────────────────────────────────────────────────────
+
+  @Post('dms/intros')
+  @HttpCode(HttpStatus.CREATED)
+  @MinCommunityRole(CommunityRole.MEMBER)
+  @ApiOperation({ summary: 'Send an introduction request to a member (first contact)' })
+  async sendIntro(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @GetUser() user: { uid: string; dbUserId?: string },
+    @Body() dto: CreateIntroDto,
+  ) {
+    const result = await this.dmService.createIntro(
+      communityId,
+      user.dbUserId!,
+      dto.targetUserId,
+      dto.message,
+      dto.keys,
+    );
+    this.gateway.emitToUser(result.recipientId, 'intro-received', {
+      conversationId: result.conversationId,
+      fromUser: result.initiator,
+    });
+    return { conversationId: result.conversationId, message: result.message };
+  }
+
+  @Get('dms/intros')
+  @MinCommunityRole(CommunityRole.MEMBER)
+  @ApiOperation({ summary: 'Received pending intro requests (with shared interests)' })
+  listReceivedIntros(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @GetUser() user: { uid: string; dbUserId?: string },
+  ) {
+    return this.dmService.listReceivedIntros(communityId, user.dbUserId!);
+  }
+
+  @Get('dms/intros/sent')
+  @MinCommunityRole(CommunityRole.MEMBER)
+  @ApiOperation({ summary: 'My pending sent intro requests' })
+  listSentIntros(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @GetUser() user: { uid: string; dbUserId?: string },
+  ) {
+    return this.dmService.listSentIntros(communityId, user.dbUserId!);
+  }
+
+  @Post('dms/intros/:conversationId/accept')
+  @HttpCode(HttpStatus.OK)
+  @MinCommunityRole(CommunityRole.MEMBER)
+  @ApiOperation({ summary: 'Accept an intro request — opens the DM thread' })
+  async acceptIntro(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @GetUser() user: { uid: string; dbUserId?: string },
+  ) {
+    const result = await this.dmService.acceptIntro(conversationId, user.dbUserId!);
+    this.gateway.emitToUser(result.initiatorId, 'intro-accepted', {
+      conversationId: result.conversationId,
+      byUser: result.accepter,
+    });
+    return { conversationId: result.conversationId };
+  }
+
+  @Post('dms/intros/:conversationId/reject')
+  @HttpCode(HttpStatus.OK)
+  @MinCommunityRole(CommunityRole.MEMBER)
+  @ApiOperation({ summary: 'Reject an intro request (silent — initiator is not notified)' })
+  rejectIntro(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @GetUser() user: { uid: string; dbUserId?: string },
+  ) {
+    return this.dmService.rejectIntro(conversationId, user.dbUserId!);
+  }
+
+  // ─── E2EE Conversation Keys ─────────────────────────────────────────────────
+
+  @Get('members/:userId/keys')
+  @MinCommunityRole(CommunityRole.MEMBER)
+  @ApiOperation({ summary: "A member's active device public keys (bundle to wrap the conversation key to)" })
+  getMemberKeys(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
+    return this.dmService.getMemberDeviceKeys(communityId, userId);
+  }
+
+  @Post('dms/:conversationId/keys')
+  @HttpCode(HttpStatus.OK)
+  @MinCommunityRole(CommunityRole.MEMBER)
+  @ApiOperation({ summary: 'Upload conversation-key wraps for participant devices (+ master wraps)' })
+  uploadConversationKeys(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @GetUser() user: { uid: string; dbUserId?: string },
+    @Body() dto: UploadConversationKeysDto,
+  ) {
+    return this.dmService.uploadConversationKeys(conversationId, user.dbUserId!, dto);
+  }
+
+  @Get('dms/:conversationId/keys')
+  @MinCommunityRole(CommunityRole.MEMBER)
+  @ApiOperation({ summary: 'Fetch the conversation-key wrap addressed to my device (+ my master wraps)' })
+  getConversationKeys(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @GetUser() user: { uid: string; dbUserId?: string },
+    @Query('deviceId') deviceId: string,
+  ) {
+    return this.dmService.getConversationKeysForDevice(conversationId, user.dbUserId!, deviceId);
+  }
+
   // ─── Direct Messages ───────────────────────────────────────────────────────
 
   @Get('dms')
   @MinCommunityRole(CommunityRole.MEMBER)
-  @ApiOperation({ summary: 'List DM conversations with unread counts' })
+  @ApiOperation({ summary: 'List DM conversations with unread counts (accepted only)' })
   listDms(
     @Param('communityId', ParseUUIDPipe) communityId: string,
     @GetUser() user: { uid: string; dbUserId?: string },
