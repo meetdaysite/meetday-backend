@@ -9,6 +9,7 @@ import { CommunityMemberStatus, DirectMessagePolicy, DmConversationStatus, DmMes
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { E2eeService } from '../e2ee/e2ee.service';
+import { StorageService } from '../../common/storage/storage.service';
 
 const USER_SELECT = {
   select: { id: true, firstName: true, lastName: true, avatarUrl: true },
@@ -54,7 +55,18 @@ export class CommunityDmService {
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
     private readonly e2ee: E2eeService,
+    private readonly storage: StorageService,
   ) {}
+
+  /** Attach a presigned GET url for an IMAGE message's encrypted blob (safe — ciphertext). */
+  private async withMediaUrl<T extends { mediaKey: string | null }>(
+    message: T,
+  ): Promise<T & { mediaUrl: string | null }> {
+    const mediaUrl = message.mediaKey
+      ? await this.storage.getPresignedDownloadUrl(message.mediaKey)
+      : null;
+    return { ...message, mediaUrl };
+  }
 
   // ─── Policy ─────────────────────────────────────────────────────────────────
 
@@ -234,7 +246,7 @@ export class CommunityDmService {
           conversationId: c.id,
           from,
           // Encrypted intro message — client decrypts after fetching its key wrap.
-          message: c.messages[0] ?? null,
+          message: c.messages[0] ? await this.withMediaUrl(c.messages[0]) : null,
           sentAt: c.messages[0]?.createdAt ?? c.createdAt,
           sharedInterests: await this.sharedInterests(userId, from.id),
         };
@@ -253,15 +265,17 @@ export class CommunityDmService {
       },
     });
 
-    return convos.map((c) => {
-      const to = c.participant1.id === c.initiatorId ? c.participant2 : c.participant1;
-      return {
-        conversationId: c.id,
-        to,
-        message: c.messages[0] ?? null,
-        sentAt: c.messages[0]?.createdAt ?? c.createdAt,
-      };
-    });
+    return Promise.all(
+      convos.map(async (c) => {
+        const to = c.participant1.id === c.initiatorId ? c.participant2 : c.participant1;
+        return {
+          conversationId: c.id,
+          to,
+          message: c.messages[0] ? await this.withMediaUrl(c.messages[0]) : null,
+          sentAt: c.messages[0]?.createdAt ?? c.createdAt,
+        };
+      }),
+    );
   }
 
   async getDmStatusFor(communityId: string, viewerId: string, targetUserId: string): Promise<DmStatusForViewer> {
@@ -365,7 +379,7 @@ export class CommunityDmService {
     const data = hasMore ? messages.slice(0, limit) : messages;
     const nextCursor = hasMore ? data[data.length - 1].createdAt.toISOString() : null;
 
-    return { messages: data, nextCursor };
+    return { messages: await Promise.all(data.map((m) => this.withMediaUrl(m))), nextCursor };
   }
 
   async getTotalUnreadDmCount(communityId: string, userId: string): Promise<number> {
@@ -418,7 +432,7 @@ export class CommunityDmService {
       }),
     ]);
 
-    return message;
+    return this.withMediaUrl(message);
   }
 
   // ─── Conversation key wraps (E2EE) ──────────────────────────────────────────
