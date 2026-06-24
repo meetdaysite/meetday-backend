@@ -1274,6 +1274,12 @@ model CommunityMember {
   // Unread badge baseline for the Announcements tab; null = never opened
   lastReadAnnouncementsAt DateTime?
 
+  // Denormalized activity signals powering the member directory (filters/sorts/badges)
+  messageCount        Int       @default(0) // non-deleted channel messages sent in this community
+  eventsAttendedCount Int       @default(0) // distinct community events with a CONFIRMED order
+  activityScore       Float     @default(0) // messageCount*1 + eventsAttendedCount*5 (recomputed on change)
+  lastActivityAt      DateTime?             // last message / join; powers "Recently Active"
+
   community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -1283,6 +1289,9 @@ model CommunityMember {
   @@unique([communityId, userId])
   @@index([communityId, role])
   @@index([userId])
+  @@index([communityId, activityScore(sort: Desc)])
+  @@index([communityId, lastActivityAt(sort: Desc)])
+  @@index([communityId, status, joinedAt])
   @@map("community_members")
 }
 

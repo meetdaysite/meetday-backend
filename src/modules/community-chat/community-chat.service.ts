@@ -79,6 +79,17 @@ export class CommunityChatService {
         });
       }
 
+      // Bump the sender's directory activity counters (messageCount drives
+      // Most-Active / Top-Contributor; lastActivityAt drives Recently-Active).
+      await tx.communityMember.updateMany({
+        where: { communityId, userId: senderId },
+        data: {
+          messageCount: { increment: 1 },
+          activityScore: { increment: 1 }, // MSG_WEIGHT
+          lastActivityAt: new Date(),
+        },
+      });
+
       return msg;
     });
 
@@ -198,6 +209,12 @@ export class CommunityChatService {
     await this.prisma.channelMessage.update({
       where: { id: messageId },
       data: { deletedAt: new Date() },
+    });
+
+    // Keep the sender's directory activity counters in sync.
+    await this.prisma.communityMember.updateMany({
+      where: { communityId: msg.communityId, userId: msg.senderId, messageCount: { gt: 0 } },
+      data: { messageCount: { decrement: 1 }, activityScore: { decrement: 1 } },
     });
 
     if (!isSender) {

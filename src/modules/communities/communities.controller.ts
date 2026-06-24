@@ -6,7 +6,6 @@ import { OptionalAuthGuard } from '../../common/guards/optional-auth.guard';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { CommunitiesService } from './communities.service';
 import { ListCommunitiesQueryDto } from './dto/list-communities-query.dto';
-import { ListMembersQueryDto } from './dto/list-members-query.dto';
 import { RecommendCommunitiesQueryDto } from './dto/recommend-communities-query.dto';
 import { JoinCommunityDto } from './dto/join-community.dto';
 import { CommunityEventsQueryDto } from './dto/community-events-query.dto';
@@ -131,17 +130,5 @@ export class CommunitiesController {
   @ApiOkResponse({ description: '{ success: true }' })
   leave(@Param('id', ParseUUIDPipe) id: string, @GetUser('uid') firebaseUid: string) {
     return this.communitiesService.leave(id, firebaseUid);
-  }
-
-  @Get(':id/members')
-  @Public()
-  @ApiOperation({
-    summary: 'List active members of a published community',
-    description:
-      'Returns an empty list when the community settings have memberVisibility set to HIDDEN.',
-  })
-  @ApiOkResponse({ description: 'Paginated member list.' })
-  listMembers(@Param('id', ParseUUIDPipe) id: string, @Query() query: ListMembersQueryDto) {
-    return this.communitiesService.listMembers(id, query.page ?? 1, query.limit ?? 20);
   }
 }
