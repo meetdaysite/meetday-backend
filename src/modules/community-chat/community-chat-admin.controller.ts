@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   HttpCode,
   HttpStatus,
   Param,
@@ -27,6 +28,16 @@ import { CommunityRoleGuard } from '../../common/guards/community-role.guard';
 @Controller('communities/:communityId/channels')
 export class CommunityChatAdminController {
   constructor(private readonly channelService: CommunityChannelService) {}
+
+  @Get()
+  @MinCommunityRole(CommunityRole.MANAGER)
+  @ApiOperation({ summary: 'List all channels in the community (management view)' })
+  list(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @GetUser() user: { uid: string; dbUserId?: string },
+  ) {
+    return this.channelService.list(communityId, user.dbUserId);
+  }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
