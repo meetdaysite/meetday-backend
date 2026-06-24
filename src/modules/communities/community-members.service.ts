@@ -10,6 +10,7 @@ import {
 import { StorageService } from '../../common/storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CommunityPresenceService } from '../community-chat/community-presence.service';
+import { CommunityDmService } from '../community-chat/community-dm.service';
 import { ListMembersQueryDto, MemberFilter, MemberSort } from './dto/list-members-query.dto';
 
 // Activity-score weights (tunable) and badge thresholds.
@@ -53,6 +54,7 @@ export class CommunityMembersService {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly presence: CommunityPresenceService,
+    private readonly dmService: CommunityDmService,
   ) {}
 
   // ─── List ───────────────────────────────────────────────────────────────────
@@ -131,6 +133,10 @@ export class CommunityMembersService {
 
     const level = this.visibilityLevel(member.profileVisibility, isSelf, sharedEventIds.length > 0);
 
+    const dmStatus = isSelf
+      ? 'none'
+      : await this.dmService.getDmStatusFor(communityId, viewerId, targetUserId);
+
     const base = {
       userId: member.user.id,
       firstName: member.user.firstName,
@@ -140,6 +146,7 @@ export class CommunityMembersService {
       badge: this.computeBadge(member),
       isOnline,
       joinedAt: member.joinedAt,
+      dmStatus, // none | intro_sent | intro_received | connected — drives the CTA
     };
 
     if (level === 'basic') {

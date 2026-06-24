@@ -1419,6 +1419,12 @@ model CommunityDmConversation {
   participant1 User      @relation("DmParticipant1", fields: [participant1Id], references: [id])
   participant2 User      @relation("DmParticipant2", fields: [participant2Id], references: [id])
 
+  // Intro-request lifecycle: first contact is a PENDING intro; messaging is
+  // only allowed once ACCEPTED. REJECTED can be reset to PENDING on re-intro.
+  status      DmConversationStatus @default(PENDING)
+  initiatorId String // who sent the intro
+  respondedAt DateTime? // when accepted/rejected
+
   lastMessageAt      DateTime?
   lastMessagePreview String?
 
@@ -1431,7 +1437,14 @@ model CommunityDmConversation {
   @@unique([communityId, participant1Id, participant2Id])
   @@index([communityId, participant1Id])
   @@index([communityId, participant2Id])
+  @@index([communityId, status])
   @@map("community_dm_conversations")
+}
+
+enum DmConversationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
 }
 
 model CommunityDmMessage {

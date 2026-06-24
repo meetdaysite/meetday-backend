@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { CommunityChatAdminController } from './community-chat-admin.controller';
 import { CommunityChatController } from './community-chat.controller';
 import { CommunityChatGateway } from './community-chat.gateway';
@@ -9,6 +10,7 @@ import { CommunityPresenceService } from './community-presence.service';
 import { CommunityRoleGuard } from '../../common/guards/community-role.guard';
 
 @Module({
+  imports: [NotificationsModule],
   controllers: [CommunityChatController, CommunityChatAdminController],
   providers: [
     CommunityChatGateway,
@@ -18,6 +20,6 @@ import { CommunityRoleGuard } from '../../common/guards/community-role.guard';
     CommunityPresenceService,
     CommunityRoleGuard,
   ],
-  exports: [CommunityChatService, CommunityChannelService, CommunityPresenceService],
+  exports: [CommunityChatService, CommunityChannelService, CommunityPresenceService, CommunityDmService],
 })
 export class CommunityChatModule {}
