@@ -177,6 +177,22 @@ export class StorageService {
         key = `community-dms/${dto.resourceId}/${randomUUID()}.${ext}`;
         break;
       }
+
+      case UploadContext.COMMUNITY_FEED_MEDIA: {
+        // Feed post media. resourceId is the community id; only an ACTIVE member may upload.
+        if (!dto.resourceId) {
+          throw new BadRequestException('resourceId (community UUID) is required for COMMUNITY_FEED_MEDIA');
+        }
+        const member = await this.prisma.communityMember.findUnique({
+          where: { communityId_userId: { communityId: dto.resourceId, userId } },
+          select: { status: true },
+        });
+        if (!member || member.status !== 'ACTIVE') {
+          throw new ForbiddenException('You are not an active member of this community');
+        }
+        key = `communities/${dto.resourceId}/feed/${randomUUID()}.${ext}`;
+        break;
+      }
     }
 
     const uploadUrl = await this.getPresignedUploadUrl(key, dto.contentType);
