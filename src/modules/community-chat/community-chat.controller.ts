@@ -24,6 +24,7 @@ import { CommunityPresenceService } from './community-presence.service';
 import { MinCommunityRole } from '../../common/decorators/min-community-role.decorator';
 import { MessageCursorQueryDto } from './dto/message-cursor-query.dto';
 import { CreateIntroDto } from './dto/create-intro.dto';
+import { UploadConversationKeysDto } from './dto/encrypted-message.dto';
 import { CommunityRoleGuard } from '../../common/guards/community-role.guard';
 
 @ApiTags('Community Chat')
@@ -159,7 +160,13 @@ export class CommunityChatController {
     @GetUser() user: { uid: string; dbUserId?: string },
     @Body() dto: CreateIntroDto,
   ) {
-    const result = await this.dmService.createIntro(communityId, user.dbUserId!, dto.targetUserId, dto.message);
+    const result = await this.dmService.createIntro(
+      communityId,
+      user.dbUserId!,
+      dto.targetUserId,
+      dto.message,
+      dto.keys,
+    );
     this.gateway.emitToUser(result.recipientId, 'intro-received', {
       conversationId: result.conversationId,
       fromUser: result.initiator,
@@ -212,6 +219,41 @@ export class CommunityChatController {
     @GetUser() user: { uid: string; dbUserId?: string },
   ) {
     return this.dmService.rejectIntro(conversationId, user.dbUserId!);
+  }
+
+  // ─── E2EE Conversation Keys ─────────────────────────────────────────────────
+
+  @Get('members/:userId/keys')
+  @MinCommunityRole(CommunityRole.MEMBER)
+  @ApiOperation({ summary: "A member's active device public keys (bundle to wrap the conversation key to)" })
+  getMemberKeys(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
+    return this.dmService.getMemberDeviceKeys(communityId, userId);
+  }
+
+  @Post('dms/:conversationId/keys')
+  @HttpCode(HttpStatus.OK)
+  @MinCommunityRole(CommunityRole.MEMBER)
+  @ApiOperation({ summary: 'Upload conversation-key wraps for participant devices (+ master wraps)' })
+  uploadConversationKeys(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @GetUser() user: { uid: string; dbUserId?: string },
+    @Body() dto: UploadConversationKeysDto,
+  ) {
+    return this.dmService.uploadConversationKeys(conversationId, user.dbUserId!, dto);
+  }
+
+  @Get('dms/:conversationId/keys')
+  @MinCommunityRole(CommunityRole.MEMBER)
+  @ApiOperation({ summary: 'Fetch the conversation-key wrap addressed to my device (+ my master wraps)' })
+  getConversationKeys(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @GetUser() user: { uid: string; dbUserId?: string },
+    @Query('deviceId') deviceId: string,
+  ) {
+    return this.dmService.getConversationKeysForDevice(conversationId, user.dbUserId!, deviceId);
   }
 
   // ─── Direct Messages ───────────────────────────────────────────────────────

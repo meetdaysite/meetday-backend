@@ -20,6 +20,7 @@ import {
   CommunityMemberStatus,
   CommunityRole,
   ChatPermission,
+  DmMessageType,
 } from '@prisma/client';
 
 interface ConnectedUser {
@@ -384,23 +385,40 @@ export class CommunityChatGateway
   @SubscribeMessage('send-dm')
   async handleSendDm(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { conversationId: string; content: string },
+    @MessageBody()
+    payload: {
+      conversationId: string;
+      ciphertext: string;
+      nonce: string;
+      keyEpoch: number;
+      messageType?: 'TEXT' | 'IMAGE';
+      mediaKey?: string;
+      mediaSizeBytes?: number;
+    },
   ) {
     const entry = this.connectedUsers.get(client.id);
     if (!entry) return;
 
-    if (!payload.conversationId) {
+    if (!payload.conversationId || !payload.ciphertext || !payload.nonce) {
       client.emit('error', {
         event: 'send-dm',
-        message: 'conversationId required — start with an intro request first',
+        message: 'conversationId, ciphertext and nonce are required (E2EE)',
       });
       return;
     }
 
     // createMessage enforces the conversation is ACCEPTED and the sender is a participant.
+    // The server only relays opaque ciphertext — it never sees plaintext.
     let message;
     try {
-      message = await this.dmService.createMessage(payload.conversationId, entry.userId, payload.content);
+      message = await this.dmService.createMessage(payload.conversationId, entry.userId, {
+        ciphertext: payload.ciphertext,
+        nonce: payload.nonce,
+        keyEpoch: payload.keyEpoch,
+        messageType: payload.messageType as DmMessageType | undefined,
+        mediaKey: payload.mediaKey,
+        mediaSizeBytes: payload.mediaSizeBytes,
+      });
     } catch (err) {
       client.emit('error', { event: 'send-dm', message: (err as Error).message });
       return;

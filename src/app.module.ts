@@ -22,6 +22,7 @@ import { CheckInModule } from './modules/check-in/check-in.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { CommunityChatModule } from './modules/community-chat/community-chat.module';
 import { CommunityAnnouncementsModule } from './modules/community-announcements/community-announcements.module';
+import { E2eeModule } from './modules/e2ee/e2ee.module';
 import { AuditLogModule } from './modules/audit-log/audit-log.module';
 import { ConsentModule } from './modules/consent/consent.module';
 import { InterestsModule } from './modules/interests/interests.module';
@@ -78,6 +79,7 @@ import { StorageModule } from './common/storage/storage.module';
     CommunitiesModule,
     CommunityChatModule,
     CommunityAnnouncementsModule,
+    E2eeModule,
   ],
   providers: [
     Logger,
