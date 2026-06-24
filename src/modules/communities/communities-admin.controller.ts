@@ -25,6 +25,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { CommunitiesService } from './communities.service';
+import { CommunityOverviewService } from './community-overview.service';
 import { CreateCommunityDto } from './dto/create-community.dto';
 import { UpdateCommunityDto } from './dto/update-community.dto';
 import { UpdateCommunitySettingsDto } from './dto/update-community-settings.dto';
@@ -41,13 +42,28 @@ import { ListCommunitiesQueryDto } from './dto/list-communities-query.dto';
 @ApiForbiddenResponse({ description: 'Authenticated user does not have a required admin role' })
 @Controller('admin/communities')
 export class CommunitiesAdminController {
-  constructor(private readonly communitiesService: CommunitiesService) {}
+  constructor(
+    private readonly communitiesService: CommunitiesService,
+    private readonly overviewService: CommunityOverviewService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List communities (admin)' })
   @ApiOkResponse({ description: 'Paginated list of communities.' })
   list(@Query() query: ListCommunitiesQueryDto) {
     return this.communitiesService.listForAdmin(query);
+  }
+
+  @Get(':id/overview')
+  @ApiOperation({ summary: 'Admin community Overview dashboard (stats, experiences, managers, activity, engagement)' })
+  getOverview(@Param('id', ParseUUIDPipe) id: string) {
+    return this.overviewService.getOverview(id);
+  }
+
+  @Get(':id/managers')
+  @ApiOperation({ summary: 'Managers & moderators of a community (OWNER/MANAGER/MODERATOR/HOST)' })
+  getManagers(@Param('id', ParseUUIDPipe) id: string) {
+    return this.overviewService.getManagers(id);
   }
 
   @Post()

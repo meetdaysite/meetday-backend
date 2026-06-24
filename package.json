@@ -24,7 +24,8 @@
     "script:upload-interest-images": "ts-node -r tsconfig-paths/register scripts/upload-interest-images.ts",
     "script:cleanup-categories": "ts-node -r tsconfig-paths/register prisma/scripts/cleanup-categories.ts",
     "script:graph-backfill": "ts-node -r tsconfig-paths/register prisma/scripts/graph-backfill.ts",
-    "script:member-activity-backfill": "ts-node -r tsconfig-paths/register prisma/scripts/member-activity-backfill.ts"
+    "script:member-activity-backfill": "ts-node -r tsconfig-paths/register prisma/scripts/member-activity-backfill.ts",
+    "script:community-feed-seed": "ts-node -r tsconfig-paths/register prisma/seeders/community-feed.seeder.ts"
   },
   "prisma": {
     "seed": "ts-node -r tsconfig-paths/register prisma/seed.ts"

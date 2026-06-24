@@ -92,6 +92,15 @@ model User {
   devices   UserDevice[]
   keyBackup UserKeyBackup?
 
+  // Community feed back-relations
+  feedPosts        CommunityPost[]         @relation("FeedPostAuthor")
+  feedComments     CommunityPostComment[]  @relation("FeedCommentAuthor")
+  feedReactions    CommunityPostReaction[] @relation("FeedReactionUser")
+  feedShares       CommunityPostShare[]    @relation("FeedShareUser")
+  feedViews        CommunityPostView[]     @relation("FeedViewUser")
+  feedBookmarks    CommunityPostBookmark[] @relation("FeedBookmarkUser")
+  feedPollVotes    CommunityPostPollVote[] @relation("FeedPollVoteUser")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -737,6 +746,7 @@ model Event {
   reviews         EventReview[]
   scannerSessions EventScannerSession[]
   communities     CommunityEvent[]
+  feedPosts       CommunityPost[]       @relation("EventFeedPosts")
 
   @@index([hostProfileId])
   @@index([categoryId])
@@ -1180,6 +1190,11 @@ enum AuditAction {
   ANNOUNCEMENT_DELETED
   ANNOUNCEMENT_PINNED
   ANNOUNCEMENT_UNPINNED
+
+  // Community Feed
+  FEED_POST_DELETED_BY_MOD
+  FEED_POST_PINNED
+  FEED_POST_UNPINNED
 }
 
 enum ConsentType {
@@ -1241,6 +1256,7 @@ model Community {
   channels        CommunityChannel[]
   dmConversations CommunityDmConversation[]
   announcements   CommunityAnnouncement[]
+  posts           CommunityPost[]
 
   @@index([status])
   @@index([categoryId])
@@ -1627,6 +1643,170 @@ model AnnouncementBookmark {
   @@unique([announcementId, userId])
   @@index([userId])
   @@map("announcement_bookmarks")
+}
+
+// ─── Community Feed ───────────────────────────────────────────────────────────
+
+model CommunityPost {
+  id          String    @id @default(uuid())
+  communityId String
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  authorId    String
+  author      User      @relation("FeedPostAuthor", fields: [authorId], references: [id])
+
+  postType FeedPostType     @default(TEXT) // TEXT | PHOTO | POLL
+  category FeedPostCategory @default(GENERAL)
+  topic    String? // freeform tag (often an event name) → powers Trending Topics
+  eventId  String? // optional linked event (e.g. "Attended Night Rituals")
+  event    Event?  @relation("EventFeedPosts", fields: [eventId], references: [id])
+
+  content   String   @db.Text // may be empty when media-only; the question for POLL
+  mediaKeys String[] @default([]) // S3 keys (presigned on read)
+
+  isPinned Boolean   @default(false)
+  pinnedAt DateTime?
+
+  commentCount  Int @default(0)
+  reactionCount Int @default(0)
+  shareCount    Int @default(0)
+  viewCount     Int @default(0) // distinct viewers (reach)
+  bookmarkCount Int @default(0)
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  comments    CommunityPostComment[]
+  reactions   CommunityPostReaction[]
+  shares      CommunityPostShare[]
+  views       CommunityPostView[]
+  bookmarks   CommunityPostBookmark[]
+  pollOptions CommunityPostPollOption[]
+  pollVotes   CommunityPostPollVote[]
+
+  @@index([communityId, isPinned, createdAt(sort: Desc)])
+  @@index([communityId, createdAt(sort: Desc)])
+  @@index([communityId, topic, createdAt(sort: Desc)])
+  @@map("community_posts")
+}
+
+enum FeedPostType {
+  TEXT
+  PHOTO
+  POLL
+}
+
+enum FeedPostCategory {
+  GENERAL
+  MEMORIES
+  RECOMMENDATION
+  QUESTION
+  POLL
+}
+
+model CommunityPostPollOption {
+  id     String        @id @default(uuid())
+  postId String
+  post   CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  text      String
+  position  Int    @default(0)
+  voteCount Int    @default(0)
+
+  votes CommunityPostPollVote[]
+
+  @@index([postId])
+  @@map("community_post_poll_options")
+}
+
+model CommunityPostPollVote {
+  id       String                  @id @default(uuid())
+  postId   String
+  optionId String
+  userId   String
+  post     CommunityPost           @relation(fields: [postId], references: [id], onDelete: Cascade)
+  option   CommunityPostPollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  user     User                    @relation("FeedPollVoteUser", fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([postId, userId]) // single-choice
+  @@index([optionId])
+  @@map("community_post_poll_votes")
+}
+
+model CommunityPostBookmark {
+  id     String        @id @default(uuid())
+  postId String
+  userId String
+  post   CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user   User          @relation("FeedBookmarkUser", fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([postId, userId])
+  @@index([userId])
+  @@map("community_post_bookmarks")
+}
+
+model CommunityPostComment {
+  id       String        @id @default(uuid())
+  postId   String
+  post     CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  authorId String
+  author   User          @relation("FeedCommentAuthor", fields: [authorId], references: [id])
+
+  content   String    @db.Text
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([postId, createdAt])
+  @@map("community_post_comments")
+}
+
+model CommunityPostReaction {
+  id     String        @id @default(uuid())
+  postId String
+  userId String
+  emoji  String
+  post   CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user   User          @relation("FeedReactionUser", fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([postId, userId, emoji])
+  @@index([postId])
+  @@map("community_post_reactions")
+}
+
+model CommunityPostShare {
+  id     String        @id @default(uuid())
+  postId String
+  userId String
+  post   CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user   User          @relation("FeedShareUser", fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([postId, userId]) // idempotent reshare
+  @@index([postId])
+  @@map("community_post_shares")
+}
+
+model CommunityPostView {
+  id          String        @id @default(uuid())
+  postId      String
+  communityId String // denormalized for community-wide reach windows
+  userId      String
+  post        CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user        User          @relation("FeedViewUser", fields: [userId], references: [id])
+
+  viewedAt DateTime @default(now()) // first view
+
+  @@unique([postId, userId]) // reach = distinct viewers
+  @@index([communityId, viewedAt])
+  @@map("community_post_views")
 }
 
 // ─── Community Enums ──────────────────────────────────────────────────────────
