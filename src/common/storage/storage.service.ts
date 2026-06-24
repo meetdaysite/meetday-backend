@@ -20,8 +20,30 @@ const CONTENT_TYPE_EXT: Record<string, string> = {
   'image/png': 'png',
   'image/webp': 'webp',
   'video/mp4': 'mp4',
+  'application/pdf': 'pdf',
   'application/octet-stream': 'bin',
 };
+
+const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+
+// Which content types each context accepts — narrows the DTO's global allow-list
+// so e.g. opaque blobs are only valid for DM media and PDFs only for host docs.
+const CONTEXT_CONTENT_TYPES: Record<UploadContext, readonly string[]> = {
+  [UploadContext.EVENT_MEDIA]: [...IMAGE_TYPES, 'video/mp4'],
+  [UploadContext.USER_AVATAR]: IMAGE_TYPES,
+  [UploadContext.HOST_DOCUMENT]: [...IMAGE_TYPES, 'application/pdf'],
+  [UploadContext.INTEREST_IMAGE]: IMAGE_TYPES,
+  [UploadContext.REVIEW_PHOTO]: IMAGE_TYPES,
+  [UploadContext.COMMUNITY_COVER]: IMAGE_TYPES,
+  [UploadContext.COMMUNITY_ICON]: IMAGE_TYPES,
+  [UploadContext.COMMUNITY_ANNOUNCEMENT]: IMAGE_TYPES,
+  [UploadContext.COMMUNITY_DM_MEDIA]: ['application/octet-stream'],
+  [UploadContext.COMMUNITY_FEED_MEDIA]: [...IMAGE_TYPES, 'video/mp4'],
+};
+
+// Platform-admin roles required by the admin-only contexts.
+const SUPER_ADMIN_ONLY = ['SUPER_ADMIN'];
+const COMMUNITY_ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN'];
 
 @Injectable()
 export class StorageService {
@@ -68,10 +90,18 @@ export class StorageService {
   async requestUploadUrl(firebaseUid: string, dto: RequestUploadUrlDto) {
     const user = await this.prisma.user.findUnique({
       where: { firebaseUid },
-      select: { id: true },
+      select: { id: true, role: { select: { name: true } } },
     });
     if (!user) throw new NotFoundException('User not found');
     const userId = user.id;
+    const roleName = user.role?.name;
+
+    // Narrow the globally-allowed content types to what this context accepts.
+    if (!CONTEXT_CONTENT_TYPES[dto.context].includes(dto.contentType)) {
+      throw new BadRequestException(
+        `contentType "${dto.contentType}" is not allowed for ${dto.context}`,
+      );
+    }
 
     const ext = CONTENT_TYPE_EXT[dto.contentType];
     let key: string;
@@ -111,6 +141,9 @@ export class StorageService {
       }
 
       case UploadContext.INTEREST_IMAGE: {
+        if (!SUPER_ADMIN_ONLY.includes(roleName ?? '')) {
+          throw new ForbiddenException('Only a super admin can upload interest images');
+        }
         if (!dto.resourceId) throw new BadRequestException('resourceId (interest UUID) is required for INTEREST_IMAGE');
         const interest = await this.prisma.interest.findUnique({ where: { id: dto.resourceId } });
         if (!interest) throw new NotFoundException('Interest not found');
@@ -125,8 +158,11 @@ export class StorageService {
 
       case UploadContext.COMMUNITY_COVER:
       case UploadContext.COMMUNITY_ICON: {
-        // Admin-only contexts (enforced on the community endpoints). The folder
-        // distinguishes cover vs icon based on the upload context.
+        // Admin-only: only platform admins manage community media.
+        if (!COMMUNITY_ADMIN_ROLES.includes(roleName ?? '')) {
+          throw new ForbiddenException('Only platform admins can upload community media');
+        }
+        // The folder distinguishes cover vs icon based on the upload context.
         const folder = dto.context === UploadContext.COMMUNITY_COVER ? 'cover' : 'icon';
 
         if (dto.resourceId) {
@@ -145,7 +181,10 @@ export class StorageService {
       }
 
       case UploadContext.COMMUNITY_ANNOUNCEMENT: {
-        // Admin-only context (enforced on the announcement endpoints).
+        // Admin-only: announcements are authored by platform admins.
+        if (!COMMUNITY_ADMIN_ROLES.includes(roleName ?? '')) {
+          throw new ForbiddenException('Only platform admins can upload announcement media');
+        }
         if (!dto.resourceId) {
           throw new BadRequestException('resourceId (community UUID) is required for COMMUNITY_ANNOUNCEMENT');
         }
@@ -193,6 +232,9 @@ export class StorageService {
         key = `communities/${dto.resourceId}/feed/${randomUUID()}.${ext}`;
         break;
       }
+
+      default:
+        throw new BadRequestException('Unsupported upload context');
     }
 
     const uploadUrl = await this.getPresignedUploadUrl(key, dto.contentType);

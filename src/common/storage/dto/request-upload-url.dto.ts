@@ -20,7 +20,8 @@ const ALLOWED_CONTENT_TYPES = [
   'image/png',
   'image/webp',
   'video/mp4',
-  'application/octet-stream', // E2EE-encrypted blobs (e.g. DM images)
+  'application/pdf', // host documents
+  'application/octet-stream', // E2EE-encrypted blobs (e.g. DM media)
 ] as const;
 
 export class RequestUploadUrlDto {
