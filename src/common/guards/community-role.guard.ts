@@ -25,10 +25,10 @@ export class CommunityRoleGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const minRole = this.reflector.get<CommunityRole>(
-      MIN_COMMUNITY_ROLE_KEY,
+    const minRole = this.reflector.getAllAndOverride<CommunityRole>(MIN_COMMUNITY_ROLE_KEY, [
       context.getHandler(),
-    );
+      context.getClass(),
+    ]);
     if (!minRole) return true;
 
     const request = context.switchToHttp().getRequest<{

@@ -14,9 +14,17 @@ import { UpdateAnnouncementDto } from './dto/update-announcement.dto';
 
 const ENTITY_TYPE = 'CommunityAnnouncement';
 
+// Meetday-managed (ADMIN) announcements are presented under the brand identity
+// rather than the individual admin's personal name/avatar.
+const BRAND_AUTHOR_NAME = 'Meetday Team';
+
 const AUTHOR_SELECT = {
   select: { id: true, firstName: true, lastName: true, avatarUrl: true },
 } as const;
+
+type AnnouncementWithAuthor = CommunityAnnouncement & {
+  author: { id: string; firstName: string; lastName: string; avatarUrl: string | null };
+};
 
 @Injectable()
 export class CommunityAnnouncementsService {
@@ -64,7 +72,7 @@ export class CommunityAnnouncementsService {
       { removeOnComplete: true, attempts: 3, backoff: { type: 'exponential', delay: 5000 } },
     );
 
-    return this.withSignedMedia({ ...announcement, likedByMe: false, bookmarkedByMe: false });
+    return this.present({ ...announcement, likedByMe: false, bookmarkedByMe: false });
   }
 
   async update(communityId: string, id: string, dto: UpdateAnnouncementDto, actorId: string) {
@@ -90,7 +98,7 @@ export class CommunityAnnouncementsService {
       metadata: { communityId },
     });
 
-    return this.withSignedMedia(updated);
+    return this.present(updated);
   }
 
   async softDelete(communityId: string, id: string, actorId: string) {
@@ -131,7 +139,7 @@ export class CommunityAnnouncementsService {
       metadata: { communityId },
     });
 
-    return this.withSignedMedia(updated);
+    return this.present(updated);
   }
 
   async unpin(communityId: string, id: string, actorId: string) {
@@ -152,7 +160,7 @@ export class CommunityAnnouncementsService {
       metadata: { communityId },
     });
 
-    return this.withSignedMedia(updated);
+    return this.present(updated);
   }
 
   // ─── Member reads ─────────────────────────────────────────────────────────
@@ -319,7 +327,7 @@ export class CommunityAnnouncementsService {
     return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
   }
 
-  private async enrichForUser<T extends CommunityAnnouncement>(items: T[], userId: string) {
+  private async enrichForUser<T extends AnnouncementWithAuthor>(items: T[], userId: string) {
     if (items.length === 0) return [];
 
     const ids = items.map((a) => a.id);
@@ -339,7 +347,7 @@ export class CommunityAnnouncementsService {
 
     return Promise.all(
       items.map((a) =>
-        this.withSignedMedia({
+        this.present({
           ...a,
           likedByMe: likedSet.has(a.id),
           bookmarkedByMe: bookmarkedSet.has(a.id),
@@ -348,12 +356,29 @@ export class CommunityAnnouncementsService {
     );
   }
 
-  private async withSignedMedia<T extends { imageKey?: string | null }>(
-    obj: T,
-  ): Promise<T & { imageUrl: string | null }> {
-    const imageUrl = obj.imageKey
-      ? await this.storage.getPresignedDownloadUrl(obj.imageKey)
-      : null;
-    return { ...obj, imageUrl };
+  /**
+   * Shapes an announcement for API responses: signs the cover image, and builds
+   * a display `author` block. ADMIN-authored (Meetday-managed) announcements are
+   * presented under the "Meetday Team" brand; HOST/MANAGER use the member's own
+   * name + (signed) avatar. `authorRole` stays on the row for the badge.
+   */
+  private async present<T extends AnnouncementWithAuthor>(obj: T) {
+    const isBrand = obj.authorRole === 'ADMIN';
+
+    const [imageUrl, authorAvatarUrl] = await Promise.all([
+      obj.imageKey ? this.storage.getPresignedDownloadUrl(obj.imageKey) : Promise.resolve(null),
+      !isBrand && obj.author.avatarUrl
+        ? this.storage.getPresignedDownloadUrl(obj.author.avatarUrl)
+        : Promise.resolve(null),
+    ]);
+
+    const author = {
+      id: obj.author.id,
+      name: isBrand ? BRAND_AUTHOR_NAME : `${obj.author.firstName} ${obj.author.lastName}`.trim(),
+      avatarUrl: authorAvatarUrl, // null for brand → frontend renders the Meetday logo
+      isBrand,
+    };
+
+    return { ...obj, imageUrl, author };
   }
 }
