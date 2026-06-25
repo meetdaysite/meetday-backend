@@ -23,5 +23,6 @@ import { OrderMailProcessor } from './processors/order-mail.processor';
   ],
   controllers: [OrdersController],
   providers: [OrdersService, TicketPdfService, OrderMailProcessor],
+  exports: [OrdersService],
 })
 export class OrdersModule {}
