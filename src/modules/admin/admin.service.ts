@@ -1042,6 +1042,15 @@ export class AdminService {
       .replace(/-+/g, '-');
   }
 
+  private async signInterest<T extends { image: string | null }>(interest: T): Promise<T> {
+    return {
+      ...interest,
+      image: interest.image
+        ? await this.storageService.getPresignedDownloadUrl(interest.image)
+        : null,
+    };
+  }
+
   async createInterest(dto: CreateInterestDto) {
     const slug = this.toSlug(dto.name);
     const existing = await this.prisma.interest.findFirst({
@@ -1053,11 +1062,11 @@ export class AdminService {
       data: { name: dto.name, slug, description: dto.description, image: dto.image },
     });
     void this.interestsService.invalidateCache();
-    return interest;
+    return this.signInterest(interest);
   }
 
   async getInterests() {
-    return this.prisma.interest.findMany({
+    const interests = await this.prisma.interest.findMany({
       orderBy: { name: 'asc' },
       include: {
         categoryMappings: {
@@ -1065,6 +1074,7 @@ export class AdminService {
         },
       },
     });
+    return Promise.all(interests.map((i) => this.signInterest(i)));
   }
 
   async getInterestById(id: string) {
@@ -1077,7 +1087,7 @@ export class AdminService {
       },
     });
     if (!interest) throw new NotFoundException('Interest not found');
-    return interest;
+    return this.signInterest(interest);
   }
 
   async setInterestCategories(id: string, categoryIds: string[]) {
@@ -1118,6 +1128,6 @@ export class AdminService {
       },
     });
     void this.interestsService.invalidateCache();
-    return updated;
+    return this.signInterest(updated);
   }
 }

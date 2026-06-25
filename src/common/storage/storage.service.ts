@@ -71,6 +71,9 @@ export class StorageService {
   }
 
   async getPresignedDownloadUrl(key: string): Promise<string> {
+    // OAuth providers (Google, Apple) store a full URL directly — return as-is
+    if (key.startsWith('http://') || key.startsWith('https://')) return key;
+
     const cacheKey = `presign:${key}`;
     const cached = await this.redis.get<string>(cacheKey);
     if (cached) return cached;

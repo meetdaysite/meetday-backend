@@ -31,6 +31,7 @@ import { AssignMemberDto } from './dto/assign-member.dto';
 import { AddCommunityEventDto } from './dto/add-community-event.dto';
 import { ListCommunitiesQueryDto } from './dto/list-communities-query.dto';
 import { ListSavedCommunitiesQueryDto } from './dto/list-saved-communities-query.dto';
+import { ListJoinedCommunitiesQueryDto } from './dto/list-joined-communities-query.dto';
 import { RecommendCommunitiesQueryDto } from './dto/recommend-communities-query.dto';
 import { JoinCommunityDto } from './dto/join-community.dto';
 
@@ -1144,6 +1145,65 @@ export class CommunitiesService {
         const { members, ...rest } = community;
         const isMember = members.length > 0;
         return { ...(await this.withSignedMedia(rest)), isMember, isSaved: true, savedAt: createdAt };
+      }),
+    );
+
+    return { data, total, page, limit };
+  }
+
+  async listJoined(firebaseUid: string, query: ListJoinedCommunitiesQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const user = await this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const memberWhere = {
+      userId: user.id,
+      status: { in: [CommunityMemberStatus.ACTIVE, CommunityMemberStatus.PENDING] },
+      community: { deletedAt: null, status: CommunityStatus.PUBLISHED },
+    };
+
+    const [rows, total] = await Promise.all([
+      this.prisma.communityMember.findMany({
+        where: memberWhere,
+        include: {
+          community: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              description: true,
+              type: true,
+              access: true,
+              primaryCity: true,
+              communityCities: true,
+              coverImageKey: true,
+              iconKey: true,
+              memberCount: true,
+              experienceCount: true,
+              category: { select: { id: true, name: true } },
+              savedBy: { where: { userId: user.id }, select: { id: true } },
+            },
+          },
+        },
+        orderBy: { joinedAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.communityMember.count({ where: memberWhere }),
+    ]);
+
+    const data = await Promise.all(
+      rows.map(async ({ community, role, status, joinedAt }) => {
+        const { savedBy, ...rest } = community;
+        return {
+          ...(await this.withSignedMedia(rest)),
+          role,
+          memberStatus: status,
+          joinedAt,
+          isSaved: savedBy.length > 0,
+        };
       }),
     );
 
