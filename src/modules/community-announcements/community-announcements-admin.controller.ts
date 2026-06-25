@@ -2,12 +2,14 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   HttpCode,
   HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -20,6 +22,7 @@ import { GetUser } from '../../common/decorators/get-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CommunityAnnouncementsService } from './community-announcements.service';
+import { AdminListAnnouncementsQueryDto } from './dto/admin-list-announcements-query.dto';
 import { CreateAnnouncementDto } from './dto/create-announcement.dto';
 import { UpdateAnnouncementDto } from './dto/update-announcement.dto';
 
@@ -32,9 +35,24 @@ import { UpdateAnnouncementDto } from './dto/update-announcement.dto';
 export class CommunityAnnouncementsAdminController {
   constructor(private readonly service: CommunityAnnouncementsService) {}
 
+  @Get()
+  @ApiOperation({ summary: 'List all announcements (any status) with offset pagination' })
+  list(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @Query() query: AdminListAnnouncementsQueryDto,
+  ) {
+    return this.service.listAdmin(communityId, query);
+  }
+
+  @Get('stats')
+  @ApiOperation({ summary: 'Summary counts (published / scheduled / drafts) and 7-day reach' })
+  stats(@Param('communityId', ParseUUIDPipe) communityId: string) {
+    return this.service.adminStats(communityId);
+  }
+
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create and publish an announcement (fans out to members)' })
+  @ApiOperation({ summary: 'Create an announcement (published immediately, scheduled, or saved as draft)' })
   create(
     @Param('communityId', ParseUUIDPipe) communityId: string,
     @GetUser('id') adminId: string,

@@ -4,11 +4,17 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AuditAction, CommunityAnnouncement, Prisma } from '@prisma/client';
+import {
+  AnnouncementStatus,
+  AuditAction,
+  CommunityAnnouncement,
+  Prisma,
+} from '@prisma/client';
 import { Queue } from 'bull';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AdminListAnnouncementsQueryDto } from './dto/admin-list-announcements-query.dto';
 import { CreateAnnouncementDto } from './dto/create-announcement.dto';
 import { UpdateAnnouncementDto } from './dto/update-announcement.dto';
 
@@ -44,6 +50,10 @@ export class CommunityAnnouncementsService {
     });
     if (!community) throw new NotFoundException('Community not found');
 
+    const status = dto.status ?? AnnouncementStatus.PUBLISHED;
+    const isScheduled = status === AnnouncementStatus.SCHEDULED;
+    const isDraft = status === AnnouncementStatus.DRAFT;
+
     const announcement = await this.prisma.communityAnnouncement.create({
       data: {
         communityId,
@@ -53,6 +63,9 @@ export class CommunityAnnouncementsService {
         title: dto.title,
         body: dto.body,
         imageKey: dto.imageKey,
+        status,
+        scheduledAt: isScheduled && dto.scheduledAt ? new Date(dto.scheduledAt) : null,
+        publishedAt: isDraft || isScheduled ? null : new Date(),
       },
       include: { author: AUTHOR_SELECT },
     });
@@ -63,14 +76,19 @@ export class CommunityAnnouncementsService {
       action: AuditAction.ANNOUNCEMENT_CREATED,
       entityType: ENTITY_TYPE,
       entityId: announcement.id,
-      metadata: { communityId, category: dto.category },
+      metadata: { communityId, category: dto.category, status },
     });
 
-    await this.queue.add(
-      'fan-out',
-      { announcementId: announcement.id, communityId },
-      { removeOnComplete: true, attempts: 3, backoff: { type: 'exponential', delay: 5000 } },
-    );
+    if (!isDraft) {
+      const delay = isScheduled && dto.scheduledAt
+        ? Math.max(0, new Date(dto.scheduledAt).getTime() - Date.now())
+        : 0;
+      await this.queue.add(
+        'fan-out',
+        { announcementId: announcement.id, communityId },
+        { delay, removeOnComplete: true, attempts: 3, backoff: { type: 'exponential', delay: 5000 } },
+      );
+    }
 
     return this.present({ ...announcement, likedByMe: false, bookmarkedByMe: false });
   }
@@ -163,6 +181,90 @@ export class CommunityAnnouncementsService {
     return this.present(updated);
   }
 
+  // ─── Admin reads ─────────────────────────────────────────────────────────
+
+  async listAdmin(communityId: string, query: AdminListAnnouncementsQueryDto) {
+    const { status, page = 1, limit = 10 } = query;
+
+    const where: Prisma.CommunityAnnouncementWhereInput = {
+      communityId,
+      deletedAt: null,
+      ...(status ? { status } : {}),
+    };
+
+    const [items, total] = await Promise.all([
+      this.prisma.communityAnnouncement.findMany({
+        where,
+        include: { author: AUTHOR_SELECT },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.communityAnnouncement.count({ where }),
+    ]);
+
+    return {
+      items: await Promise.all(items.map((a) => this.present(a))),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async adminStats(communityId: string) {
+    const windowStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const prevWindowStart = new Date(windowStart.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    const [published, scheduled, drafts, reachNow, reachPrev] = await Promise.all([
+      this.prisma.communityAnnouncement.count({
+        where: { communityId, deletedAt: null, status: AnnouncementStatus.PUBLISHED },
+      }),
+      this.prisma.communityAnnouncement.count({
+        where: { communityId, deletedAt: null, status: AnnouncementStatus.SCHEDULED },
+      }),
+      this.prisma.communityAnnouncement.count({
+        where: { communityId, deletedAt: null, status: AnnouncementStatus.DRAFT },
+      }),
+      this.prisma.communityAnnouncement.aggregate({
+        where: {
+          communityId,
+          deletedAt: null,
+          status: AnnouncementStatus.PUBLISHED,
+          publishedAt: { gte: windowStart },
+        },
+        _sum: { reachCount: true },
+      }),
+      this.prisma.communityAnnouncement.aggregate({
+        where: {
+          communityId,
+          deletedAt: null,
+          status: AnnouncementStatus.PUBLISHED,
+          publishedAt: { gte: prevWindowStart, lt: windowStart },
+        },
+        _sum: { reachCount: true },
+      }),
+    ]);
+
+    const reachNowVal = reachNow._sum.reachCount ?? 0;
+    const reachPrevVal = reachPrev._sum.reachCount ?? 0;
+    const reachChangePercent =
+      reachPrevVal > 0
+        ? Math.round(((reachNowVal - reachPrevVal) / reachPrevVal) * 100)
+        : null;
+
+    return {
+      published,
+      scheduled,
+      drafts,
+      totalReach: {
+        value: reachNowVal,
+        changePercent: reachChangePercent,
+        windowDays: 7,
+      },
+    };
+  }
+
   // ─── Member reads ─────────────────────────────────────────────────────────
 
   async list(communityId: string, userId: string, cursor?: string, limit = 20) {
@@ -172,7 +274,7 @@ export class CommunityAnnouncementsService {
     const pinned = cursor
       ? []
       : await this.prisma.communityAnnouncement.findMany({
-          where: { communityId, deletedAt: null, isPinned: true },
+          where: { communityId, deletedAt: null, status: AnnouncementStatus.PUBLISHED, isPinned: true },
           orderBy: { pinnedAt: 'desc' },
           include: { author: AUTHOR_SELECT },
         });
@@ -181,6 +283,7 @@ export class CommunityAnnouncementsService {
       where: {
         communityId,
         deletedAt: null,
+        status: AnnouncementStatus.PUBLISHED,
         isPinned: false,
         ...(cursor ? { publishedAt: { lt: new Date(cursor) } } : {}),
       },
@@ -191,7 +294,7 @@ export class CommunityAnnouncementsService {
 
     const hasMore = feed.length > limit;
     const feedPage = hasMore ? feed.slice(0, limit) : feed;
-    const nextCursor = hasMore ? feedPage[feedPage.length - 1].publishedAt.toISOString() : null;
+    const nextCursor = hasMore ? feedPage[feedPage.length - 1].publishedAt?.toISOString() ?? null : null;
 
     const items = [...pinned, ...feedPage];
     const enriched = await this.enrichForUser(items, userId);
@@ -201,7 +304,7 @@ export class CommunityAnnouncementsService {
 
   async listBookmarks(communityId: string, userId: string) {
     const bookmarks = await this.prisma.announcementBookmark.findMany({
-      where: { userId, announcement: { communityId, deletedAt: null } },
+      where: { userId, announcement: { communityId, deletedAt: null, status: AnnouncementStatus.PUBLISHED } },
       orderBy: { createdAt: 'desc' },
       include: { announcement: { include: { author: AUTHOR_SELECT } } },
     });
@@ -220,6 +323,7 @@ export class CommunityAnnouncementsService {
       where: {
         communityId,
         deletedAt: null,
+        status: AnnouncementStatus.PUBLISHED,
         authorId: { not: userId },
         ...(member?.lastReadAnnouncementsAt
           ? { publishedAt: { gt: member.lastReadAnnouncementsAt } }

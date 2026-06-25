@@ -1,6 +1,6 @@
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
-import { CommunityMemberStatus, Prisma } from '@prisma/client';
+import { AnnouncementStatus, CommunityMemberStatus, Prisma } from '@prisma/client';
 import { Job } from 'bull';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -70,6 +70,17 @@ export class CommunityAnnouncementsProcessor {
       if (members.length < BATCH_SIZE) break;
       cursor = members[members.length - 1].id;
     }
+
+    // Update reach count; if this was a scheduled announcement, mark it published now.
+    await this.prisma.communityAnnouncement.update({
+      where: { id: announcementId },
+      data: {
+        reachCount: total,
+        ...(announcement.status === AnnouncementStatus.SCHEDULED
+          ? { status: AnnouncementStatus.PUBLISHED, publishedAt: new Date() }
+          : {}),
+      },
+    });
 
     this.logger.log(`Fan-out for announcement ${announcementId}: notified ${total} member(s)`);
   }

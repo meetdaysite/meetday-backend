@@ -1527,13 +1527,17 @@ model CommunityAnnouncement {
   body     String               @db.Text
   imageKey String? // S3 key, served via presigned download URL
 
+  status      AnnouncementStatus @default(PUBLISHED)
+  scheduledAt DateTime? // populated when status = SCHEDULED
+
   isPinned Boolean   @default(false)
   pinnedAt DateTime?
 
   likeCount     Int @default(0) // denormalized
   bookmarkCount Int @default(0) // denormalized
+  reachCount    Int @default(0) // total members notified; set by fan-out processor
 
-  publishedAt DateTime  @default(now())
+  publishedAt DateTime? // null for DRAFT/SCHEDULED; set to now() when published
   deletedAt   DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -1541,6 +1545,7 @@ model CommunityAnnouncement {
   likes     AnnouncementLike[]
   bookmarks AnnouncementBookmark[]
 
+  @@index([communityId, status, createdAt(sort: Desc)])
   @@index([communityId, isPinned, publishedAt(sort: Desc)])
   @@index([communityId, publishedAt(sort: Desc)])
   @@map("community_announcements")
@@ -1823,6 +1828,12 @@ enum AnnouncementCategory {
   COMMUNITY_UPDATE
   COMMUNITY_REMINDER
   GENERAL
+}
+
+enum AnnouncementStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
 }
 
 // ─── Saved Items ──────────────────────────────────────────────────────────────
