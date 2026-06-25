@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { CommunityMemberStatus, CommunityRole, CommunityStatus, EventStatus } from '@prisma/client';
+import { CommunityEventSource, CommunityMemberStatus, CommunityRole, CommunityStatus, EventStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../common/redis/redis.service';
 import { StorageService } from '../../common/storage/storage.service';
@@ -17,6 +17,11 @@ const MANAGER_ROLES: CommunityRole[] = [
 interface DailyRow {
   day: Date;
   count: number;
+}
+
+interface InterestMap {
+  totalInterestCount: number;
+  categoryInterestCounts: Map<string, number>;
 }
 
 @Injectable()
@@ -44,9 +49,11 @@ export class CommunityOverviewService {
     const now = Date.now();
     const since14 = new Date(now - SPARK_DAYS * DAY);
 
+    // Fetch all parallel data; interest map is resolved first so getUpcomingExperiences
+    // can use it to compute per-event match scores.
     const [
       memberSeries, eventAddSeries, reachSeries, messageSeries,
-      activeExperiencesValue, upcomingExperiences, managers, recentActivity, topEngagement7d,
+      activeExperiencesValue, interestMap, managers, recentActivity, topEngagement7d,
       iconUrl, coverUrl,
     ] = await Promise.all([
       this.dailySeries('community_members', 'joinedAt', communityId, since14),
@@ -54,13 +61,15 @@ export class CommunityOverviewService {
       this.dailySeries('community_post_views', 'viewedAt', communityId, since14),
       this.dailySeries('channel_messages', 'createdAt', communityId, since14, 'AND "deletedAt" IS NULL'),
       this.countActiveExperiences(communityId),
-      this.getUpcomingExperiences(communityId),
+      this.getCommunityInterestMap(communityId),
       this.getManagers(communityId),
       this.getRecentActivity(communityId),
       this.getTopEngagement(communityId, new Date(now - 7 * DAY)),
       community.iconKey ? this.storage.getPresignedDownloadUrl(community.iconKey) : Promise.resolve(null),
       community.coverImageKey ? this.storage.getPresignedDownloadUrl(community.coverImageKey) : Promise.resolve(null),
     ]);
+
+    const upcomingExperiences = await this.getUpcomingExperiences(communityId, interestMap);
 
     const payload = {
       community: {
@@ -147,15 +156,42 @@ export class CommunityOverviewService {
     });
   }
 
-  private async getUpcomingExperiences(communityId: string) {
+  /**
+   * Builds a map of categoryId → number of community interests that map to it.
+   * Used to compute a per-experience match score reflecting how broadly an event
+   * aligns with the community's interest profile.
+   */
+  private async getCommunityInterestMap(communityId: string): Promise<InterestMap> {
+    const interests = await this.prisma.communityInterest.findMany({
+      where: { communityId },
+      select: { interestId: true },
+    });
+    const totalInterestCount = interests.length;
+    if (totalInterestCount === 0) {
+      return { totalInterestCount: 0, categoryInterestCounts: new Map() };
+    }
+    const interestIds = interests.map((i) => i.interestId);
+    const mappings = await this.prisma.interestCategory.findMany({
+      where: { interestId: { in: interestIds } },
+      select: { interestId: true, categoryId: true },
+    });
+    const categoryInterestCounts = new Map<string, number>();
+    for (const m of mappings) {
+      categoryInterestCounts.set(m.categoryId, (categoryInterestCounts.get(m.categoryId) ?? 0) + 1);
+    }
+    return { totalInterestCount, categoryInterestCounts };
+  }
+
+  private async getUpcomingExperiences(communityId: string, interestMap: InterestMap) {
     const links = await this.prisma.communityEvent.findMany({
       where: { communityId, event: { status: EventStatus.PUBLISHED, eventDate: { gte: new Date() } } },
       orderBy: { event: { eventDate: 'asc' } },
       take: 6,
       select: {
+        source: true,
         event: {
           select: {
-            id: true, title: true, eventDate: true, city: true,
+            id: true, title: true, eventDate: true, city: true, categoryId: true,
             tickets: { select: { soldCount: true } },
             media: { where: { type: 'COVER' }, orderBy: { order: 'asc' }, take: 1, select: { url: true } },
           },
@@ -176,6 +212,14 @@ export class CommunityOverviewService {
     return Promise.all(
       links.map(async (l) => {
         const e = l.event;
+        const isAutoMatched = l.source === CommunityEventSource.AUTO;
+
+        let matchScore: number | null = null;
+        if (isAutoMatched && interestMap.totalInterestCount > 0 && e.categoryId) {
+          const matchingInterestCount = interestMap.categoryInterestCounts.get(e.categoryId) ?? 0;
+          matchScore = Math.round((matchingInterestCount / interestMap.totalInterestCount) * 100);
+        }
+
         return {
           id: e.id,
           title: e.title,
@@ -184,6 +228,8 @@ export class CommunityOverviewService {
           coverUrl: e.media[0]?.url ? await this.storage.getPresignedDownloadUrl(e.media[0].url) : null,
           attendeeCount: e.tickets.reduce((s, t) => s + t.soldCount, 0),
           avgRating: ratingMap.get(e.id) ? Math.round((ratingMap.get(e.id) as number) * 10) / 10 : null,
+          isAutoMatched,
+          matchScore,
         };
       }),
     );
