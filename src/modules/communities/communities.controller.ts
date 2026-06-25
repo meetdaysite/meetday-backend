@@ -10,6 +10,7 @@ import { RecommendCommunitiesQueryDto } from './dto/recommend-communities-query.
 import { JoinCommunityDto } from './dto/join-community.dto';
 import { CommunityEventsQueryDto } from './dto/community-events-query.dto';
 import { ListSavedCommunitiesQueryDto } from './dto/list-saved-communities-query.dto';
+import { ListJoinedCommunitiesQueryDto } from './dto/list-joined-communities-query.dto';
 
 @ApiTags('Communities')
 @ApiBearerAuth('firebase-token')
@@ -82,6 +83,70 @@ export class CommunitiesController {
   @ApiOkResponse({ description: 'Paginated list of saved communities. Each item includes `isSaved: true` and `isMember`.' })
   listSaved(@GetUser('uid') firebaseUid: string, @Query() query: ListSavedCommunitiesQueryDto) {
     return this.communitiesService.listSaved(firebaseUid, query);
+  }
+
+  @Get('joined')
+  @ApiOperation({
+    summary: 'List communities the authenticated user has joined or is pending in',
+    description: [
+      'Returns all communities where the caller holds an **ACTIVE** or **PENDING** `CommunityMember` record, ordered by `joinedAt` descending (most recently joined first).',
+      '**ACTIVE** — full members of a PUBLIC community, or approved members of an APPROVAL_REQUIRED community.',
+      '**PENDING** — submitted a join request to an APPROVAL_REQUIRED community; awaiting admin approval.',
+      'Only communities with `status = PUBLISHED` are returned. Communities the caller has left or been banned from are excluded.',
+    ].join('\n\n'),
+  })
+  @ApiOkResponse({
+    description: 'Paginated list. Each item includes the community fields plus membership metadata.',
+    schema: {
+      example: {
+        data: [
+          {
+            id: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+            name: 'Meetday Music Nights',
+            slug: 'meetday-music-nights',
+            description: 'A community for live music lovers in Kolkata.',
+            type: 'MEETDAY_MANAGED_PUBLIC',
+            access: 'PUBLIC',
+            primaryCity: 'Kolkata',
+            communityCities: ['Kolkata', 'Mumbai'],
+            coverImageUrl: 'https://storage.example.com/signed/cover.jpg',
+            iconUrl: 'https://storage.example.com/signed/icon.png',
+            memberCount: 1600,
+            experienceCount: 12,
+            category: { id: 'cat-uuid', name: 'Music' },
+            role: 'MEMBER',
+            memberStatus: 'ACTIVE',
+            joinedAt: '2026-05-10T08:00:00.000Z',
+            isSaved: true,
+          },
+          {
+            id: 'a1b2c3d4-0000-4562-b3fc-2c963f66afa6',
+            name: 'Indie Film Collective',
+            slug: 'indie-film-collective',
+            description: 'Curated screenings and discussions for independent cinema fans.',
+            type: 'HOST_LED',
+            access: 'APPROVAL_REQUIRED',
+            primaryCity: 'Mumbai',
+            communityCities: ['Mumbai'],
+            coverImageUrl: 'https://storage.example.com/signed/indie-cover.jpg',
+            iconUrl: null,
+            memberCount: 340,
+            experienceCount: 5,
+            category: { id: 'cat-uuid-2', name: 'Film' },
+            role: 'MEMBER',
+            memberStatus: 'PENDING',
+            joinedAt: null,
+            isSaved: false,
+          },
+        ],
+        total: 2,
+        page: 1,
+        limit: 20,
+      },
+    },
+  })
+  listJoined(@GetUser('uid') firebaseUid: string, @Query() query: ListJoinedCommunitiesQueryDto) {
+    return this.communitiesService.listJoined(firebaseUid, query);
   }
 
   @Post(':id/save')
