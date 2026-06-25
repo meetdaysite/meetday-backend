@@ -9,6 +9,7 @@ import { ListCommunitiesQueryDto } from './dto/list-communities-query.dto';
 import { RecommendCommunitiesQueryDto } from './dto/recommend-communities-query.dto';
 import { JoinCommunityDto } from './dto/join-community.dto';
 import { CommunityEventsQueryDto } from './dto/community-events-query.dto';
+import { ListSavedCommunitiesQueryDto } from './dto/list-saved-communities-query.dto';
 
 @ApiTags('Communities')
 @ApiBearerAuth('firebase-token')
@@ -74,6 +75,29 @@ export class CommunitiesController {
   })
   getCommunityStats(@Param('slug') slug: string) {
     return this.communitiesService.getStats(slug);
+  }
+
+  @Get('saved')
+  @ApiOperation({ summary: 'List communities saved by the authenticated user' })
+  @ApiOkResponse({ description: 'Paginated list of saved communities. Each item includes `isSaved: true` and `isMember`.' })
+  listSaved(@GetUser('uid') firebaseUid: string, @Query() query: ListSavedCommunitiesQueryDto) {
+    return this.communitiesService.listSaved(firebaseUid, query);
+  }
+
+  @Post(':id/save')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Save a community (idempotent)' })
+  @ApiOkResponse({ description: '{ saved: true }' })
+  saveCommunity(@Param('id', ParseUUIDPipe) id: string, @GetUser('uid') firebaseUid: string) {
+    return this.communitiesService.saveCommunity(id, firebaseUid);
+  }
+
+  @Delete(':id/save')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Unsave a community (idempotent)' })
+  @ApiOkResponse({ description: '{ saved: false }' })
+  unsaveCommunity(@Param('id', ParseUUIDPipe) id: string, @GetUser('uid') firebaseUid: string) {
+    return this.communitiesService.unsaveCommunity(id, firebaseUid);
   }
 
   @Get(':slug')

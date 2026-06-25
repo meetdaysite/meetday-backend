@@ -97,6 +97,9 @@ model User {
   feedBookmarks    CommunityPostBookmark[] @relation("FeedBookmarkUser")
   feedPollVotes    CommunityPostPollVote[] @relation("FeedPollVoteUser")
 
+  savedCommunities SavedCommunity[]
+  savedEvents      SavedEvent[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -712,6 +715,7 @@ model Event {
   scannerSessions EventScannerSession[]
   communities     CommunityEvent[]
   feedPosts       CommunityPost[]       @relation("EventFeedPosts")
+  savedBy         SavedEvent[]
 
   @@index([hostProfileId])
   @@index([categoryId])
@@ -1222,6 +1226,7 @@ model Community {
   dmConversations CommunityDmConversation[]
   announcements   CommunityAnnouncement[]
   posts           CommunityPost[]
+  savedBy         SavedCommunity[]
 
   @@index([status])
   @@index([categoryId])
@@ -1818,4 +1823,32 @@ enum AnnouncementCategory {
   COMMUNITY_UPDATE
   COMMUNITY_REMINDER
   GENERAL
+}
+
+// ─── Saved Items ──────────────────────────────────────────────────────────────
+
+model SavedCommunity {
+  id          String    @id @default(uuid())
+  userId      String
+  communityId String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+
+  @@unique([userId, communityId])
+  @@index([userId])
+  @@map("saved_communities")
+}
+
+model SavedEvent {
+  id        String   @id @default(uuid())
+  userId    String
+  eventId   String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, eventId])
+  @@index([userId])
+  @@map("saved_events")
 }

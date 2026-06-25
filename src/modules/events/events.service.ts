@@ -14,6 +14,7 @@ import { CreateEventDto } from './dto/create-event.dto';
 import { ListMyEventsQueryDto } from './dto/list-my-events-query.dto';
 import { BrowseEventsQueryDto } from './dto/browse-events-query.dto';
 import { CancelEventDto } from './dto/cancel-event.dto';
+import { ListSavedEventsQueryDto } from './dto/list-saved-events-query.dto';
 import { AuditLogService } from '../audit-log/audit-log.service';
 
 const EVENT_DETAIL_INCLUDE = {
@@ -516,7 +517,7 @@ export class EventsService {
     return cancelled;
   }
 
-  async browseEvents(query: BrowseEventsQueryDto) {
+  async browseEvents(query: BrowseEventsQueryDto, firebaseUid?: string | null) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const sortOrder = query.sortOrder ?? 'asc';
@@ -586,6 +587,18 @@ export class EventsService {
       this.prisma.event.count({ where }),
     ]);
 
+    let savedSet = new Set<string>();
+    if (firebaseUid) {
+      const user = await this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } });
+      if (user && events.length) {
+        const rows = await this.prisma.savedEvent.findMany({
+          where: { userId: user.id, eventId: { in: events.map((e) => e.id) } },
+          select: { eventId: true },
+        });
+        savedSet = new Set(rows.map((r) => r.eventId));
+      }
+    }
+
     const enriched = await Promise.all(
       events.map(async (e) => {
         const cover = e.media[0];
@@ -596,6 +609,7 @@ export class EventsService {
           ...rest,
           coverImageUrl: cover ? await this.storageService.getPresignedDownloadUrl(cover.url) : null,
           startingPrice,
+          isSaved: savedSet.has(e.id),
         };
       }),
     );
@@ -603,7 +617,7 @@ export class EventsService {
     return { events: enriched, total, page, limit };
   }
 
-  async getPublicEventById(eventId: string) {
+  async getPublicEventById(eventId: string, firebaseUid?: string | null) {
     const event = await this.prisma.event.findUnique({
       where: { id: eventId, status: EventStatus.PUBLISHED, visibility: Visibility.PUBLIC },
       select: {
@@ -710,7 +724,99 @@ export class EventsService {
       recentReviews: signedReviews,
     };
 
-    return { ...event, media: signedMedia, startingPrice, reviewSummary };
+    let isSaved = false;
+    if (firebaseUid) {
+      const user = await this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } });
+      if (user) {
+        const saved = await this.prisma.savedEvent.findUnique({
+          where: { userId_eventId: { userId: user.id, eventId } },
+          select: { id: true },
+        });
+        isSaved = !!saved;
+      }
+    }
+
+    return { ...event, media: signedMedia, startingPrice, reviewSummary, isSaved };
+  }
+
+  // ─── Save / unsave ─────────────────────────────────────────────────────────
+
+  async saveEvent(eventId: string, firebaseUid: string) {
+    const [user, event] = await Promise.all([
+      this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } }),
+      this.prisma.event.findUnique({ where: { id: eventId, status: EventStatus.PUBLISHED }, select: { id: true } }),
+    ]);
+    if (!user) throw new NotFoundException('User not found');
+    if (!event) throw new NotFoundException('Event not found');
+
+    await this.prisma.savedEvent.upsert({
+      where: { userId_eventId: { userId: user.id, eventId } },
+      create: { userId: user.id, eventId },
+      update: {},
+    });
+    return { saved: true };
+  }
+
+  async unsaveEvent(eventId: string, firebaseUid: string) {
+    const user = await this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } });
+    if (!user) throw new NotFoundException('User not found');
+
+    await this.prisma.savedEvent.deleteMany({ where: { userId: user.id, eventId } });
+    return { saved: false };
+  }
+
+  async listSavedEvents(firebaseUid: string, query: ListSavedEventsQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const user = await this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const [rows, total] = await Promise.all([
+      this.prisma.savedEvent.findMany({
+        where: { userId: user.id },
+        include: {
+          event: {
+            select: {
+              id: true,
+              title: true,
+              eventType: true,
+              eventDate: true,
+              startTime: true,
+              venueName: true,
+              city: true,
+              isFree: true,
+              tags: true,
+              status: true,
+              category: { select: { id: true, name: true } },
+              media: { where: { type: 'COVER' }, select: { url: true }, take: 1 },
+              tickets: { select: { price: true } },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.savedEvent.count({ where: { userId: user.id } }),
+    ]);
+
+    const data = await Promise.all(
+      rows.map(async ({ event, createdAt }) => {
+        const cover = event.media[0];
+        const prices = event.tickets.map((t) => Number(t.price)).filter((p) => p > 0);
+        const { media: _media, tickets: _tickets, ...rest } = event;
+        return {
+          ...rest,
+          coverImageUrl: cover ? await this.storageService.getPresignedDownloadUrl(cover.url) : null,
+          startingPrice: prices.length ? Math.min(...prices) : null,
+          isSaved: true,
+          savedAt: createdAt,
+        };
+      }),
+    );
+
+    return { data, total, page, limit };
   }
 
   async deleteEvent(userId: string, eventId: string): Promise<void> {

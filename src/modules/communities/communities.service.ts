@@ -30,6 +30,7 @@ import { SetCommunityCitiesDto } from './dto/set-community-cities.dto';
 import { AssignMemberDto } from './dto/assign-member.dto';
 import { AddCommunityEventDto } from './dto/add-community-event.dto';
 import { ListCommunitiesQueryDto } from './dto/list-communities-query.dto';
+import { ListSavedCommunitiesQueryDto } from './dto/list-saved-communities-query.dto';
 import { RecommendCommunitiesQueryDto } from './dto/recommend-communities-query.dto';
 import { JoinCommunityDto } from './dto/join-community.dto';
 
@@ -504,13 +505,20 @@ export class CommunitiesService {
     ]);
 
     let memberSet = new Set<string>();
+    let savedSet = new Set<string>();
     if (firebaseUid) {
       const user = await this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } });
-      if (user) memberSet = await this.getMembershipSet(user.id, rows.map((r) => r.id));
+      if (user) {
+        const ids = rows.map((r) => r.id);
+        [memberSet, savedSet] = await Promise.all([
+          this.getMembershipSet(user.id, ids),
+          this.getSavedSet(user.id, ids),
+        ]);
+      }
     }
 
     const data = await Promise.all(
-      rows.map(async (r) => ({ ...(await this.withSignedMedia(r)), isMember: memberSet.has(r.id) })),
+      rows.map(async (r) => ({ ...(await this.withSignedMedia(r)), isMember: memberSet.has(r.id), isSaved: savedSet.has(r.id) })),
     );
     return { data, total, page, limit };
   }
@@ -620,9 +628,14 @@ export class CommunitiesService {
     const total = ranked.length;
     const pageSlice = ranked.slice((page - 1) * limit, (page - 1) * limit + limit);
 
+    let savedSet = new Set<string>();
+    if (userId) {
+      savedSet = await this.getSavedSet(userId, pageSlice.map(({ rest }) => rest.id));
+    }
+
     const data = await Promise.all(
       pageSlice.map(async ({ rest, overlap, cityMatch }) => {
-        const base = { ...(await this.withSignedMedia(rest)), matchScore: overlap, isMember: false };
+        const base = { ...(await this.withSignedMedia(rest)), matchScore: overlap, isMember: false, isSaved: savedSet.has(rest.id) };
         // cityMatch is only meaningful (and only available) when the caller is authenticated.
         // isMember is always false here — already-joined communities are excluded from candidates.
         return firebaseUid ? { ...base, cityMatch } : base;
@@ -640,20 +653,28 @@ export class CommunitiesService {
     if (!community) throw new NotFoundException('Community not found');
 
     let isMember = false;
+    let isSaved = false;
     if (firebaseUid) {
       const user = await this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } });
       if (user) {
-        const membership = await this.prisma.communityMember.findUnique({
-          where: { communityId_userId: { communityId: community.id, userId: user.id } },
-          select: { status: true },
-        });
+        const [membership, saved] = await Promise.all([
+          this.prisma.communityMember.findUnique({
+            where: { communityId_userId: { communityId: community.id, userId: user.id } },
+            select: { status: true },
+          }),
+          this.prisma.savedCommunity.findUnique({
+            where: { userId_communityId: { userId: user.id, communityId: community.id } },
+            select: { id: true },
+          }),
+        ]);
         isMember =
           membership?.status === CommunityMemberStatus.ACTIVE ||
           membership?.status === CommunityMemberStatus.PENDING;
+        isSaved = !!saved;
       }
     }
 
-    return { ...(await this.withSignedMedia(community)), isMember };
+    return { ...(await this.withSignedMedia(community)), isMember, isSaved };
   }
 
   async getEvents(slug: string, query: { upcoming?: boolean; page?: number; limit?: number }) {
@@ -1047,6 +1068,92 @@ export class CommunitiesService {
         communityId: { in: communityIds },
         status: { in: [CommunityMemberStatus.ACTIVE, CommunityMemberStatus.PENDING] },
       },
+      select: { communityId: true },
+    });
+    return new Set(rows.map((r) => r.communityId));
+  }
+
+  // ─── Save / unsave ─────────────────────────────────────────────────────────
+
+  async saveCommunity(communityId: string, firebaseUid: string) {
+    const [user, community] = await Promise.all([
+      this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } }),
+      this.prisma.community.findFirst({ where: { id: communityId, status: CommunityStatus.PUBLISHED, deletedAt: null }, select: { id: true } }),
+    ]);
+    if (!user) throw new NotFoundException('User not found');
+    if (!community) throw new NotFoundException('Community not found');
+
+    await this.prisma.savedCommunity.upsert({
+      where: { userId_communityId: { userId: user.id, communityId } },
+      create: { userId: user.id, communityId },
+      update: {},
+    });
+    return { saved: true };
+  }
+
+  async unsaveCommunity(communityId: string, firebaseUid: string) {
+    const user = await this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } });
+    if (!user) throw new NotFoundException('User not found');
+
+    await this.prisma.savedCommunity.deleteMany({ where: { userId: user.id, communityId } });
+    return { saved: false };
+  }
+
+  async listSaved(firebaseUid: string, query: ListSavedCommunitiesQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const user = await this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const [rows, total] = await Promise.all([
+      this.prisma.savedCommunity.findMany({
+        where: { userId: user.id },
+        include: {
+          community: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              description: true,
+              type: true,
+              access: true,
+              primaryCity: true,
+              communityCities: true,
+              coverImageKey: true,
+              iconKey: true,
+              memberCount: true,
+              experienceCount: true,
+              category: { select: { id: true, name: true } },
+              members: {
+                where: { userId: user.id, status: { in: [CommunityMemberStatus.ACTIVE, CommunityMemberStatus.PENDING] } },
+                select: { status: true },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.savedCommunity.count({ where: { userId: user.id } }),
+    ]);
+
+    const data = await Promise.all(
+      rows.map(async ({ community, createdAt }) => {
+        const { members, ...rest } = community;
+        const isMember = members.length > 0;
+        return { ...(await this.withSignedMedia(rest)), isMember, isSaved: true, savedAt: createdAt };
+      }),
+    );
+
+    return { data, total, page, limit };
+  }
+
+  private async getSavedSet(userId: string, communityIds: string[]): Promise<Set<string>> {
+    if (!communityIds.length) return new Set();
+    const rows = await this.prisma.savedCommunity.findMany({
+      where: { userId, communityId: { in: communityIds } },
       select: { communityId: true },
     });
     return new Set(rows.map((r) => r.communityId));
