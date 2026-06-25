@@ -37,6 +37,11 @@ export const envSchema = z.object({
   GCP_PROJECT_ID: z.string().min(1, 'GCP_PROJECT_ID is required'),
   GCP_STORAGE_BUCKET: z.string().min(1, 'GCP_STORAGE_BUCKET is required'),
   GCP_KEY_FILE: z.string().optional(), // omit on GCP infra — SDK uses ADC automatically
+
+  // Bot protection — set RATE_LIMIT_ENABLED=false in .env to disable during local dev/testing
+  RATE_LIMIT_ENABLED: z.string().default('true').transform((v) => v !== 'false'),
+  IP_WHITELIST: z.string().default('127.0.0.1,::1'),
+  RAZORPAY_WEBHOOK_SECRET: z.string().optional(), // required in production; omit locally to skip signature check
 });
 
 export type Env = z.infer<typeof envSchema>;

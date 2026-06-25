@@ -30,6 +30,7 @@ export default () => {
     razorpay: {
       keyId: env.RAZORPAY_KEY_ID,
       keySecret: env.RAZORPAY_KEY_SECRET,
+      webhookSecret: env.RAZORPAY_WEBHOOK_SECRET,
     },
     sandbox: {
       host: env.SANDBOX_HOST,
@@ -47,5 +48,7 @@ export default () => {
       bucket: env.GCP_STORAGE_BUCKET,
       keyFile: env.GCP_KEY_FILE, // undefined on GCP infra → SDK falls back to ADC
     },
+    rateLimitEnabled: env.RATE_LIMIT_ENABLED,
+    ipWhitelist: env.IP_WHITELIST.split(',').map((ip) => ip.trim()).filter(Boolean),
   };
 };

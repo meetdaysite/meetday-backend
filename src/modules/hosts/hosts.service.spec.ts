@@ -392,7 +392,7 @@ describe('HostsService', () => {
         hostProfile: { ...baseProfile, panVerificationStatus: 'VERIFIED', user: baseProfile.user },
       });
 
-      await service.handleBankWebhook(webhookDto);
+      await service.handleBankWebhook(webhookDto, Buffer.alloc(0), '');
 
       expect(prisma.hostPayoutAccount.update).not.toHaveBeenCalled();
     });
@@ -407,7 +407,7 @@ describe('HostsService', () => {
       prisma.hostPayoutAccountHistory.create.mockResolvedValue({});
       prisma.hostProfile.update.mockResolvedValue({});
 
-      await service.handleBankWebhook(webhookDto);
+      await service.handleBankWebhook(webhookDto, Buffer.alloc(0), '');
 
       expect(prisma.hostPayoutAccount.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -426,7 +426,7 @@ describe('HostsService', () => {
       prisma.hostPayoutAccountHistory.create.mockResolvedValue({});
       prisma.hostProfile.update.mockResolvedValue({});
 
-      await service.handleBankWebhook(webhookDto);
+      await service.handleBankWebhook(webhookDto, Buffer.alloc(0), '');
 
       expect(prisma.hostProfile.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -445,7 +445,7 @@ describe('HostsService', () => {
       prisma.hostPayoutAccountHistory.create.mockResolvedValue({});
       prisma.hostProfile.update.mockResolvedValue({});
 
-      await service.handleBankWebhook({ ...webhookDto, status: 'FAILED' });
+      await service.handleBankWebhook({ ...webhookDto, status: 'FAILED' }, Buffer.alloc(0), '');
 
       expect(prisma.hostProfile.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ kycStatus: 'FAILED' }) }),
@@ -455,7 +455,7 @@ describe('HostsService', () => {
 
     it('throws NotFoundException when payout account not found', async () => {
       prisma.hostPayoutAccount.findUnique.mockResolvedValue(null);
-      await expect(service.handleBankWebhook(webhookDto)).rejects.toThrow(NotFoundException);
+      await expect(service.handleBankWebhook(webhookDto, Buffer.alloc(0), '')).rejects.toThrow(NotFoundException);
     });
   });
 

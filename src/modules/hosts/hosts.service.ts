@@ -6,7 +6,10 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
+import { createHmac } from 'crypto';
+import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { BillingCycle, CouponTarget, DiscountType, HostPlan, SubscriptionStatus } from '@prisma/client';
@@ -38,6 +41,7 @@ export class HostsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cryptoService: CryptoService,
+    private readonly configService: ConfigService,
     @Inject(KYC_PROVIDER) private readonly kycProvider: KycProvider,
     private readonly subscriptionService: SubscriptionService,
     private readonly pennyDropService: PennyDropService,
@@ -656,7 +660,9 @@ export class HostsService {
     }
   }
 
-  async handleBankWebhook(dto: BankWebhookDto) {
+  async handleBankWebhook(dto: BankWebhookDto, rawBody: Buffer, signature: string) {
+    this.verifyRazorpaySignature(rawBody, signature);
+
     const payoutAccount = await this.prisma.hostPayoutAccount.findUnique({
       where: { id: dto.hostPayoutAccountId },
       include: {
@@ -1247,5 +1253,17 @@ export class HostsService {
     };
 
     return { eventCounts, overview, recentEvents, recentNotifications, audienceInsights };
+  }
+
+  private verifyRazorpaySignature(rawBody: Buffer, signature: string): void {
+    const secret = this.configService.get<string>('razorpay.webhookSecret');
+    if (!secret) {
+      this.logger.warn('RAZORPAY_WEBHOOK_SECRET not set — skipping signature verification (dev mode)');
+      return;
+    }
+    const expected = createHmac('sha256', secret).update(rawBody).digest('hex');
+    if (expected !== signature) {
+      throw new UnauthorizedException('Invalid Razorpay webhook signature');
+    }
   }
 }

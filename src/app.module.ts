@@ -1,4 +1,4 @@
-import { Logger, Module } from '@nestjs/common';
+import { Logger, MiddlewareConsumer, Module, NestModule, RequestMethod } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bull';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
@@ -28,6 +28,8 @@ import { ConsentModule } from './modules/consent/consent.module';
 import { InterestsModule } from './modules/interests/interests.module';
 import { GraphModule } from './modules/graph/graph.module';
 import { FirebaseAuthGuard } from './common/guards/firebase-auth.guard';
+import { IpRateLimitMiddleware } from './common/middleware/ip-rate-limit.middleware';
+import { RegistrationVelocityMiddleware } from './common/middleware/registration-velocity.middleware';
 import { HealthModule } from './common/health/health.module';
 import { MailModule } from './common/mail/mail.module';
 import { CryptoModule } from './common/crypto/crypto.module';
@@ -93,4 +95,11 @@ import { StorageModule } from './common/storage/storage.module';
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(IpRateLimitMiddleware).forRoutes('*');
+    consumer
+      .apply(RegistrationVelocityMiddleware)
+      .forRoutes({ path: 'api/v1/auth/register', method: RequestMethod.POST });
+  }
+}
