@@ -324,10 +324,7 @@ export class OrdersService {
     return order;
   }
 
-  async mockConfirm(orderId: string, userId: string) {
-    if (this.configService.get<string>('NODE_ENV') === 'production')
-      throw new ForbiddenException('Mock confirm is not available in production');
-
+  async confirmOrder(orderId: string, userId: string, razorpayPaymentId: string) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       select: {
@@ -363,7 +360,7 @@ export class OrdersService {
 
     await this.prisma.order.update({
       where: { id: orderId },
-      data: { status: 'CONFIRMED', confirmedAt: new Date() },
+      data: { status: 'CONFIRMED', confirmedAt: new Date(), razorpayPaymentId },
     });
 
     this.auditLogService.log({
@@ -384,12 +381,17 @@ export class OrdersService {
 
     void this.eventsVibeService.recomputeCrowdPulse(order.eventId);
 
-    // Refresh the buyer's community-directory attendance counters.
     void this.communityMembersService
       .recomputeForEvent(order.eventId, userId)
       .catch((err) => this.logger.error('Failed to recompute community member event count', err));
 
     return { message: 'Order confirmed' };
+  }
+
+  async mockConfirm(orderId: string, userId: string) {
+    if (this.configService.get<string>('NODE_ENV') === 'production')
+      throw new ForbiddenException('Mock confirm is not available in production');
+    return this.confirmOrder(orderId, userId, 'mock');
   }
 
   async getMyOrders(userId: string, page = 1, limit = 20) {
