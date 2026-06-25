@@ -2,11 +2,13 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Patch,
   Post,
   Query,
+  RawBody,
   UseGuards,
 } from '@nestjs/common';
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
@@ -504,8 +506,12 @@ export class HostsController {
   })
   @ApiOkResponse({ description: 'Webhook processed.' })
   @ApiNotFoundResponse({ description: 'hostPayoutAccountId does not match any payout account.' })
-  handleBankWebhook(@Body() dto: BankWebhookDto) {
-    return this.hostsService.handleBankWebhook(dto);
+  handleBankWebhook(
+    @Body() dto: BankWebhookDto,
+    @RawBody() rawBody: Buffer,
+    @Headers('x-razorpay-signature') signature: string,
+  ) {
+    return this.hostsService.handleBankWebhook(dto, rawBody, signature);
   }
 
   @Post('reapply')

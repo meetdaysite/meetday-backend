@@ -247,13 +247,11 @@ export class CommunityChatGateway
     const entry = this.connectedUsers.get(client.id);
     if (!entry) return;
 
-    try {
-      await this.prisma.messageReaction.create({
-        data: { messageId: payload.messageId, userId: entry.userId, emoji: payload.emoji },
-      });
-    } catch {
-      // Unique constraint — already reacted with this emoji
-    }
+    await this.prisma.messageReaction.upsert({
+      where: { messageId_userId: { messageId: payload.messageId, userId: entry.userId } },
+      create: { messageId: payload.messageId, userId: entry.userId, emoji: payload.emoji },
+      update: { emoji: payload.emoji },
+    });
 
     const reactions = await this.chatService.getAggregatedReactions(payload.messageId);
     const message = await this.prisma.channelMessage.findUnique({
@@ -276,7 +274,7 @@ export class CommunityChatGateway
     if (!entry) return;
 
     await this.prisma.messageReaction.deleteMany({
-      where: { messageId: payload.messageId, userId: entry.userId, emoji: payload.emoji },
+      where: { messageId: payload.messageId, userId: entry.userId },
     });
 
     const reactions = await this.chatService.getAggregatedReactions(payload.messageId);

@@ -12,6 +12,7 @@ async function bootstrap() {
   const isProduction = process.env.NODE_ENV === 'production';
   const app = await NestFactory.create(AppModule, {
     bufferLogs: true,
+    rawBody: true, // required for Razorpay webhook HMAC-SHA256 signature verification
     logger: isProduction
       ? ['log', 'warn', 'error']
       : ['log', 'warn', 'error', 'debug', 'verbose'],
