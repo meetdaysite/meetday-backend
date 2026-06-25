@@ -25,6 +25,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { OptionalAuthGuard } from '../../common/guards/optional-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -41,6 +42,7 @@ import { ListMyEventsQueryDto } from './dto/list-my-events-query.dto';
 import { BrowseEventsQueryDto } from './dto/browse-events-query.dto';
 import { CancelEventDto } from './dto/cancel-event.dto';
 import { VibeMatchDto } from './dto/vibe-match.dto';
+import { ListSavedEventsQueryDto } from './dto/list-saved-events-query.dto';
 
 @ApiTags('Events')
 @ApiBearerAuth('firebase-token')
@@ -59,15 +61,40 @@ export class EventsController {
 
   @Get()
   @Public()
+  @UseGuards(OptionalAuthGuard)
   @ApiOperation({
     summary: 'Browse published events',
     description:
       'Returns paginated published events visible to the public. ' +
-      'Filter by city, category, date range, free/paid, or title search.',
+      'Filter by city, category, date range, free/paid, or title search. ' +
+      'Authenticated callers receive an `isSaved` flag on each event.',
   })
   @ApiOkResponse({ description: 'Paginated list of published events.' })
-  browseEvents(@Query() query: BrowseEventsQueryDto) {
-    return this.eventsService.browseEvents(query);
+  browseEvents(@Query() query: BrowseEventsQueryDto, @GetUser('uid') firebaseUid: string | null) {
+    return this.eventsService.browseEvents(query, firebaseUid);
+  }
+
+  @Get('saved')
+  @ApiOperation({ summary: 'List events saved by the authenticated user' })
+  @ApiOkResponse({ description: 'Paginated list of saved events. Each item includes `isSaved: true`.' })
+  listSavedEvents(@GetUser('uid') firebaseUid: string, @Query() query: ListSavedEventsQueryDto) {
+    return this.eventsService.listSavedEvents(firebaseUid, query);
+  }
+
+  @Post(':id/save')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Save an event (idempotent)' })
+  @ApiOkResponse({ description: '{ saved: true }' })
+  saveEvent(@Param('id', ParseUUIDPipe) id: string, @GetUser('uid') firebaseUid: string) {
+    return this.eventsService.saveEvent(id, firebaseUid);
+  }
+
+  @Delete(':id/save')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Unsave an event (idempotent)' })
+  @ApiOkResponse({ description: '{ saved: false }' })
+  unsaveEvent(@Param('id', ParseUUIDPipe) id: string, @GetUser('uid') firebaseUid: string) {
+    return this.eventsService.unsaveEvent(id, firebaseUid);
   }
 
   @Get(':id/reviews')
@@ -136,17 +163,19 @@ export class EventsController {
 
   @Get(':id/public')
   @Public()
+  @UseGuards(OptionalAuthGuard)
   @ApiOperation({
     summary: 'Get public event detail',
     description:
       'Returns full detail of a published, public event. ' +
       'Includes all media (presigned S3 URLs), ticket tiers, refund policy, host trust signals, ' +
-      'vibe summary, crowd pulse, what-to-expect, and a computed startingPrice.',
+      'vibe summary, crowd pulse, what-to-expect, and a computed startingPrice. ' +
+      'Authenticated callers receive an `isSaved` flag.',
   })
   @ApiOkResponse({ description: 'Event detail with signed media URLs.' })
   @ApiNotFoundResponse({ description: 'Event not found or not publicly available.' })
-  getPublicEvent(@Param('id', ParseUUIDPipe) id: string) {
-    return this.eventsService.getPublicEventById(id);
+  getPublicEvent(@Param('id', ParseUUIDPipe) id: string, @GetUser('uid') firebaseUid: string | null) {
+    return this.eventsService.getPublicEventById(id, firebaseUid);
   }
 
   // ─── Host endpoints ────────────────────────────────────────────────────────
