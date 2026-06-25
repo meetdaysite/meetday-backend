@@ -29,7 +29,7 @@ Each context narrows which \`contentType\` is accepted and who may upload. \`res
 | \`COMMUNITY_COVER\` | community UUID *(optional)* | image/* | **SUPER_ADMIN / CITY_ADMIN** |
 | \`COMMUNITY_ICON\` | community UUID *(optional)* | image/* | **SUPER_ADMIN / CITY_ADMIN** |
 | \`COMMUNITY_ANNOUNCEMENT\` | community UUID | image/* | **SUPER_ADMIN / CITY_ADMIN** |
-| \`COMMUNITY_DM_MEDIA\` | conversation UUID | **application/octet-stream** (E2EE ciphertext) | A participant of an \`ACCEPTED\` DM conversation |
+| \`COMMUNITY_DM_MEDIA\` | conversation UUID | image/* | A participant of an \`ACCEPTED\` DM conversation |
 | \`COMMUNITY_FEED_MEDIA\` | community UUID | image/*, video/mp4 | An \`ACTIVE\` member of the community |
 
 *image/* = \`image/jpeg\`, \`image/png\`, \`image/webp\`.*
@@ -42,7 +42,7 @@ Each context narrows which \`contentType\` is accepted and who may upload. \`res
 - \`REVIEW_PHOTO\` → \`users/{userId}/review-photos/{uuid}.ext\`
 - \`COMMUNITY_COVER\`/\`COMMUNITY_ICON\` → \`communities/{communityId}/{cover|icon}/{uuid}.ext\` (or \`admins/{userId}/community-media/{folder}/{uuid}.ext\` pre-creation)
 - \`COMMUNITY_ANNOUNCEMENT\` → \`communities/{communityId}/announcements/{uuid}.ext\`
-- \`COMMUNITY_DM_MEDIA\` → \`community-dms/{conversationId}/{uuid}.bin\`
+- \`COMMUNITY_DM_MEDIA\` → \`community-dms/{conversationId}/{uuid}.ext\`
 - \`COMMUNITY_FEED_MEDIA\` → \`communities/{communityId}/feed/{uuid}.ext\``,
   })
   @ApiOkResponse({ description: 'Presigned upload URL and key.' })
