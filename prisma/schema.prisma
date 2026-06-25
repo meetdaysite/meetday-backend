@@ -1406,7 +1406,7 @@ model MessageReaction {
 
   createdAt DateTime @default(now())
 
-  @@unique([messageId, userId, emoji])
+  @@unique([messageId, userId])
   @@index([messageId])
   @@map("message_reactions")
 }
