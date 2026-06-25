@@ -63,12 +63,19 @@ export class AttendeeService {
       }
     }
 
-    const profile = await this.prisma.attendeeProfile.update({
-      where: { userId: user.id },
-      data: dto,
-    });
+    const { avatarKey, ...profileFields } = dto;
 
-    return this.toResponse(profile, user.avatarUrl);
+    const [profile] = await this.prisma.$transaction([
+      this.prisma.attendeeProfile.update({
+        where: { userId: user.id },
+        data: profileFields,
+      }),
+      ...(avatarKey
+        ? [this.prisma.user.update({ where: { id: user.id }, data: { avatarUrl: avatarKey } })]
+        : []),
+    ]);
+
+    return this.toResponse(profile, avatarKey ?? user.avatarUrl);
   }
 
   async getInterests(firebaseUid: string) {

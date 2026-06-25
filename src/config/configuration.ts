@@ -42,11 +42,10 @@ export default () => {
     frontendUrl: env.FRONTEND_URL,
     internalApiKey: env.INTERNAL_API_KEY,
     aiServerUrl: env.AI_SERVER_URL,
-    s3: {
-      region: env.AWS_REGION,
-      accessKeyId: env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
-      bucket: env.AWS_S3_BUCKET,
+    gcs: {
+      projectId: env.GCP_PROJECT_ID,
+      bucket: env.GCP_STORAGE_BUCKET,
+      keyFile: env.GCP_KEY_FILE, // undefined on GCP infra → SDK falls back to ADC
     },
   };
 };

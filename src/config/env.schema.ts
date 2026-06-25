@@ -34,10 +34,9 @@ export const envSchema = z.object({
 
   AI_SERVER_URL: z.string().url('AI_SERVER_URL must be a valid URL'),
 
-  AWS_REGION: z.string().min(1, 'AWS_REGION is required'),
-  AWS_ACCESS_KEY_ID: z.string().min(1, 'AWS_ACCESS_KEY_ID is required'),
-  AWS_SECRET_ACCESS_KEY: z.string().min(1, 'AWS_SECRET_ACCESS_KEY is required'),
-  AWS_S3_BUCKET: z.string().min(1, 'AWS_S3_BUCKET is required'),
+  GCP_PROJECT_ID: z.string().min(1, 'GCP_PROJECT_ID is required'),
+  GCP_STORAGE_BUCKET: z.string().min(1, 'GCP_STORAGE_BUCKET is required'),
+  GCP_KEY_FILE: z.string().optional(), // omit on GCP infra — SDK uses ADC automatically
 });
 
 export type Env = z.infer<typeof envSchema>;
