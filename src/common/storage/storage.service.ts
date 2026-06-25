@@ -6,8 +6,7 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { ConfigService } from '@nestjs/config';
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { Storage, Bucket } from '@google-cloud/storage';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { RequestUploadUrlDto, UploadContext } from './dto/request-upload-url.dto';
@@ -46,30 +45,29 @@ const COMMUNITY_ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN'];
 
 @Injectable()
 export class StorageService {
-  private readonly s3: S3Client;
-  private readonly bucket: string;
+  private readonly bucket: Bucket;
 
   constructor(
     private readonly configService: ConfigService,
     private readonly redis: RedisService,
     private readonly prisma: PrismaService,
   ) {
-    this.s3 = new S3Client({
-      region: configService.get<string>('s3.region'),
-      credentials: {
-        accessKeyId: configService.get<string>('s3.accessKeyId'),
-        secretAccessKey: configService.get<string>('s3.secretAccessKey'),
-      },
+    const keyFile = configService.get<string | undefined>('gcs.keyFile');
+    const storage = new Storage({
+      projectId: configService.get<string>('gcs.projectId'),
+      ...(keyFile && { keyFilename: keyFile }),
     });
-    this.bucket = configService.get<string>('s3.bucket');
+    this.bucket = storage.bucket(configService.get<string>('gcs.bucket'));
   }
 
-  getPresignedUploadUrl(key: string, contentType: string): Promise<string> {
-    return getSignedUrl(
-      this.s3,
-      new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: contentType }),
-      { expiresIn: PRESIGN_TTL },
-    );
+  async getPresignedUploadUrl(key: string, contentType: string): Promise<string> {
+    const [url] = await this.bucket.file(key).getSignedUrl({
+      version: 'v4',
+      action: 'write',
+      expires: Date.now() + PRESIGN_TTL * 1000,
+      contentType,
+    });
+    return url;
   }
 
   async getPresignedDownloadUrl(key: string): Promise<string> {
@@ -77,11 +75,11 @@ export class StorageService {
     const cached = await this.redis.get<string>(cacheKey);
     if (cached) return cached;
 
-    const url = await getSignedUrl(
-      this.s3,
-      new GetObjectCommand({ Bucket: this.bucket, Key: key }),
-      { expiresIn: PRESIGN_TTL },
-    );
+    const [url] = await this.bucket.file(key).getSignedUrl({
+      version: 'v4',
+      action: 'read',
+      expires: Date.now() + PRESIGN_TTL * 1000,
+    });
     await this.redis.set(cacheKey, url, PRESIGN_CACHE_TTL);
     return url;
   }
@@ -198,7 +196,7 @@ export class StorageService {
 
       case UploadContext.COMMUNITY_DM_MEDIA: {
         // DM image. resourceId is the conversation id; only a participant of an
-        // ACCEPTED conversation may upload. Stored as a private S3 object.
+        // ACCEPTED conversation may upload. Stored as a private GCS object.
         if (!dto.resourceId) {
           throw new BadRequestException('resourceId (conversation UUID) is required for COMMUNITY_DM_MEDIA');
         }
