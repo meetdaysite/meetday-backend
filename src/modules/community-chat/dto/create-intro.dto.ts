@@ -1,23 +1,32 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { IsUUID, ValidateNested } from 'class-validator';
-import { EncryptedMessageDto, UploadConversationKeysDto } from './encrypted-message.dto';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { DmMessageType } from '@prisma/client';
+import { IsEnum, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min, ValidateIf } from 'class-validator';
 
 export class CreateIntroDto {
-  @ApiProperty({ description: 'The member to introduce yourself to' })
+  @ApiProperty({ description: 'The member to introduce yourself to', format: 'uuid' })
   @IsUUID()
   targetUserId: string;
 
-  @ApiProperty({ description: 'Encrypted intro message (opaque ciphertext)' })
-  @ValidateNested()
-  @Type(() => EncryptedMessageDto)
-  message: EncryptedMessageDto;
+  @ApiPropertyOptional({ description: 'Intro message text (required unless an image is attached).', maxLength: 2000 })
+  @ValidateIf((o) => !o.mediaKey)
+  @IsString()
+  @MaxLength(2000)
+  content?: string;
 
-  @ApiProperty({
-    description: 'Conversation-key wraps for both participants\' devices (+ optional master wraps)',
-    type: UploadConversationKeysDto,
-  })
-  @ValidateNested()
-  @Type(() => UploadConversationKeysDto)
-  keys: UploadConversationKeysDto;
+  @ApiPropertyOptional({ enum: DmMessageType, default: DmMessageType.TEXT })
+  @IsOptional()
+  @IsEnum(DmMessageType)
+  messageType?: DmMessageType;
+
+  @ApiPropertyOptional({ description: 'S3 key from a COMMUNITY_DM_MEDIA upload (image intro).' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  mediaKey?: string;
+
+  @ApiPropertyOptional({ description: 'Image size in bytes.' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  mediaSizeBytes?: number;
 }

@@ -5,24 +5,22 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CommunityMemberStatus, DirectMessagePolicy, DmConversationStatus, DmMessageType, Prisma } from '@prisma/client';
+import { CommunityMemberStatus, DirectMessagePolicy, DmConversationStatus, DmMessageType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { E2eeService } from '../e2ee/e2ee.service';
 import { StorageService } from '../../common/storage/storage.service';
+import { CryptoService } from '../../common/crypto/crypto.service';
 
 const USER_SELECT = {
   select: { id: true, firstName: true, lastName: true, avatarUrl: true },
 } as const;
 
-// The server only ever stores/returns opaque ciphertext — never plaintext.
+// `content` is stored encrypted-at-rest (AES-256-GCM); decrypted before returning.
 const DM_MESSAGE_SELECT = {
   id: true,
   conversationId: true,
   senderId: true,
-  ciphertext: true,
-  nonce: true,
-  keyEpoch: true,
+  content: true,
   messageType: true,
   mediaKey: true,
   mediaSizeBytes: true,
@@ -32,19 +30,12 @@ const DM_MESSAGE_SELECT = {
   sender: USER_SELECT,
 };
 
-/** Opaque encrypted message payload — produced and read only by clients. */
-export interface EncryptedMessagePayload {
-  ciphertext: string;
-  nonce: string;
-  keyEpoch: number;
+/** Plaintext message payload from the client — the server encrypts text at rest. */
+export interface DmMessagePayload {
+  content?: string;
   messageType?: DmMessageType;
   mediaKey?: string;
   mediaSizeBytes?: number;
-}
-
-export interface ConversationKeyWraps {
-  deviceWraps?: { recipientUserId: string; recipientDeviceId: string; epoch: number; wrappedKey: string }[];
-  masterWraps?: { userId: string; epoch: number; wrappedKey: string }[];
 }
 
 export type DmStatusForViewer = 'none' | 'intro_sent' | 'intro_received' | 'connected';
@@ -54,18 +45,24 @@ export class CommunityDmService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
-    private readonly e2ee: E2eeService,
     private readonly storage: StorageService,
+    private readonly crypto: CryptoService,
   ) {}
 
-  /** Attach a presigned GET url for an IMAGE message's encrypted blob (safe — ciphertext). */
-  private async withMediaUrl<T extends { mediaKey: string | null }>(
+  /** Decrypt the body and sign the image URL for an API/socket response. */
+  private async present<T extends { content: string | null; mediaKey: string | null }>(
     message: T,
   ): Promise<T & { mediaUrl: string | null }> {
-    const mediaUrl = message.mediaKey
-      ? await this.storage.getPresignedDownloadUrl(message.mediaKey)
-      : null;
-    return { ...message, mediaUrl };
+    const content = message.content ? this.crypto.decrypt(message.content) : null;
+    const mediaUrl = message.mediaKey ? await this.storage.getPresignedDownloadUrl(message.mediaKey) : null;
+    return { ...message, content, mediaUrl };
+  }
+
+  private previewOf(message: { content: string | null; messageType: DmMessageType } | undefined): string | null {
+    if (!message) return null;
+    if (message.messageType === DmMessageType.IMAGE && !message.content) return '📷 Photo';
+    const text = message.content ? this.crypto.decrypt(message.content) : '';
+    return text.length > 80 ? `${text.slice(0, 77)}...` : text;
   }
 
   // ─── Policy ─────────────────────────────────────────────────────────────────
@@ -110,13 +107,7 @@ export class CommunityDmService {
 
   // ─── Intro lifecycle ────────────────────────────────────────────────────────
 
-  async createIntro(
-    communityId: string,
-    initiatorId: string,
-    targetUserId: string,
-    payload: EncryptedMessagePayload,
-    wraps: ConversationKeyWraps,
-  ) {
+  async createIntro(communityId: string, initiatorId: string, targetUserId: string, payload: DmMessagePayload) {
     if (initiatorId === targetUserId) {
       throw new BadRequestException('You cannot send an intro to yourself');
     }
@@ -149,12 +140,9 @@ export class CommunityDmService {
     } else if (existing.status === DmConversationStatus.PENDING) {
       throw new ConflictException('An intro is already pending with this member');
     } else {
-      // REJECTED → reset to a fresh pending intro (re-intro is allowed). Stale
-      // messages and conversation keys are cleared — a new K is established.
+      // REJECTED → reset to a fresh pending intro (re-intro is allowed).
       await this.prisma.$transaction([
         this.prisma.communityDmMessage.deleteMany({ where: { conversationId: existing.id } }),
-        this.prisma.dmConversationDeviceKey.deleteMany({ where: { conversationId: existing.id } }),
-        this.prisma.dmConversationMasterKey.deleteMany({ where: { conversationId: existing.id } }),
         this.prisma.communityDmConversation.update({
           where: { id: existing.id },
           data: { status: DmConversationStatus.PENDING, initiatorId, respondedAt: null, lastMessageAt: null },
@@ -163,19 +151,20 @@ export class CommunityDmService {
       conversationId = existing.id;
     }
 
-    // Persist the conversation-key wraps so both participants' devices can unwrap K.
-    await this.persistKeyWraps(conversationId, wraps);
-
     const introMessage = await this.insertMessage(conversationId, initiatorId, payload);
 
     const initiator = await this.prisma.user.findUnique({ where: { id: initiatorId }, ...USER_SELECT });
+    const preview = payload.content
+      ? payload.content.length > 140
+        ? `${payload.content.slice(0, 137)}...`
+        : payload.content
+      : 'Sent you an introduction';
 
-    // Generic notification only — never include message content (zero-knowledge E2EE).
     await this.notifications.create(
       targetUserId,
       'community_intro_received',
       `${initiator?.firstName ?? 'Someone'} wants to connect`,
-      'Sent you an introduction',
+      preview,
       { communityId, conversationId, fromUserId: initiatorId },
     );
 
@@ -245,8 +234,7 @@ export class CommunityDmService {
         return {
           conversationId: c.id,
           from,
-          // Encrypted intro message — client decrypts after fetching its key wrap.
-          message: c.messages[0] ? await this.withMediaUrl(c.messages[0]) : null,
+          message: c.messages[0] ? await this.present(c.messages[0]) : null,
           sentAt: c.messages[0]?.createdAt ?? c.createdAt,
           sharedInterests: await this.sharedInterests(userId, from.id),
         };
@@ -271,7 +259,7 @@ export class CommunityDmService {
         return {
           conversationId: c.id,
           to,
-          message: c.messages[0] ? await this.withMediaUrl(c.messages[0]) : null,
+          message: c.messages[0] ? await this.present(c.messages[0]) : null,
           sentAt: c.messages[0]?.createdAt ?? c.createdAt,
         };
       }),
@@ -294,7 +282,7 @@ export class CommunityDmService {
 
   // ─── Messaging (ACCEPTED only) ──────────────────────────────────────────────
 
-  async createMessage(conversationId: string, senderId: string, payload: EncryptedMessagePayload) {
+  async createMessage(conversationId: string, senderId: string, payload: DmMessagePayload) {
     const convo = await this.prisma.communityDmConversation.findUnique({
       where: { id: conversationId },
       select: { status: true, participant1Id: true, participant2Id: true },
@@ -322,6 +310,7 @@ export class CommunityDmService {
         participant1: USER_SELECT,
         participant2: USER_SELECT,
         readStates: { where: { userId }, select: { lastReadAt: true } },
+        messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true, messageType: true } },
       },
     });
 
@@ -344,7 +333,7 @@ export class CommunityDmService {
           communityId: c.communityId,
           other,
           lastMessageAt: c.lastMessageAt,
-          // No server-side preview under E2EE — client renders from local decrypted cache.
+          lastMessagePreview: this.previewOf(c.messages[0]),
           unreadCount,
         };
       }),
@@ -379,7 +368,7 @@ export class CommunityDmService {
     const data = hasMore ? messages.slice(0, limit) : messages;
     const nextCursor = hasMore ? data[data.length - 1].createdAt.toISOString() : null;
 
-    return { messages: await Promise.all(data.map((m) => this.withMediaUrl(m))), nextCursor };
+    return { messages: await Promise.all(data.map((m) => this.present(m))), nextCursor };
   }
 
   async getTotalUnreadDmCount(communityId: string, userId: string): Promise<number> {
@@ -411,16 +400,17 @@ export class CommunityDmService {
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
-  private async insertMessage(conversationId: string, senderId: string, payload: EncryptedMessagePayload) {
+  private async insertMessage(conversationId: string, senderId: string, payload: DmMessagePayload) {
+    if (!payload.content && !payload.mediaKey) {
+      throw new BadRequestException('A message needs text or media');
+    }
     const [message] = await this.prisma.$transaction([
       this.prisma.communityDmMessage.create({
         data: {
           conversationId,
           senderId,
-          ciphertext: payload.ciphertext,
-          nonce: payload.nonce,
-          keyEpoch: payload.keyEpoch,
-          messageType: payload.messageType ?? DmMessageType.TEXT,
+          content: payload.content ? this.crypto.encrypt(payload.content) : null,
+          messageType: payload.messageType ?? (payload.mediaKey ? DmMessageType.IMAGE : DmMessageType.TEXT),
           mediaKey: payload.mediaKey,
           mediaSizeBytes: payload.mediaSizeBytes,
         },
@@ -432,103 +422,7 @@ export class CommunityDmService {
       }),
     ]);
 
-    return this.withMediaUrl(message);
-  }
-
-  // ─── Conversation key wraps (E2EE) ──────────────────────────────────────────
-
-  /** A participant uploads K wraps for participant devices (+ optional master wraps). */
-  async uploadConversationKeys(conversationId: string, callerId: string, wraps: ConversationKeyWraps) {
-    await this.assertParticipant(conversationId, callerId);
-    await this.persistKeyWraps(conversationId, wraps);
-    return { success: true };
-  }
-
-  /** Fetch the wrap(s) addressed to my device + my master wrap, so I can unwrap K. */
-  async getConversationKeysForDevice(conversationId: string, callerId: string, deviceId: string) {
-    await this.assertParticipant(conversationId, callerId);
-
-    const device = await this.prisma.userDevice.findUnique({
-      where: { userId_deviceId: { userId: callerId, deviceId } },
-      select: { id: true },
-    });
-    if (!device) throw new NotFoundException('Device not found for this user');
-
-    const [deviceKeys, masterKeys] = await Promise.all([
-      this.prisma.dmConversationDeviceKey.findMany({
-        where: { conversationId, recipientDeviceId: deviceId, recipientUserId: callerId },
-        orderBy: { epoch: 'desc' },
-        select: { epoch: true, wrappedKey: true },
-      }),
-      this.prisma.dmConversationMasterKey.findMany({
-        where: { conversationId, userId: callerId },
-        orderBy: { epoch: 'desc' },
-        select: { epoch: true, wrappedKey: true },
-      }),
-    ]);
-
-    return { deviceKeys, masterKeys };
-  }
-
-  /** Active device public keys for a community member — the bundle to wrap K to. */
-  async getMemberDeviceKeys(communityId: string, targetUserId: string) {
-    const member = await this.prisma.communityMember.findUnique({
-      where: { communityId_userId: { communityId, userId: targetUserId } },
-      select: { status: true },
-    });
-    if (!member || member.status !== CommunityMemberStatus.ACTIVE) {
-      throw new NotFoundException('Member not found in this community');
-    }
-    return this.e2ee.getActiveDeviceKeys(targetUserId);
-  }
-
-  private async persistKeyWraps(conversationId: string, wraps: ConversationKeyWraps) {
-    const ops: Prisma.PrismaPromise<unknown>[] = [];
-
-    for (const w of wraps.deviceWraps ?? []) {
-      ops.push(
-        this.prisma.dmConversationDeviceKey.upsert({
-          where: {
-            conversationId_recipientDeviceId_epoch: {
-              conversationId,
-              recipientDeviceId: w.recipientDeviceId,
-              epoch: w.epoch,
-            },
-          },
-          create: {
-            conversationId,
-            recipientUserId: w.recipientUserId,
-            recipientDeviceId: w.recipientDeviceId,
-            epoch: w.epoch,
-            wrappedKey: w.wrappedKey,
-          },
-          update: { wrappedKey: w.wrappedKey, recipientUserId: w.recipientUserId },
-        }),
-      );
-    }
-
-    for (const w of wraps.masterWraps ?? []) {
-      ops.push(
-        this.prisma.dmConversationMasterKey.upsert({
-          where: { conversationId_userId_epoch: { conversationId, userId: w.userId, epoch: w.epoch } },
-          create: { conversationId, userId: w.userId, epoch: w.epoch, wrappedKey: w.wrappedKey },
-          update: { wrappedKey: w.wrappedKey },
-        }),
-      );
-    }
-
-    if (ops.length > 0) await this.prisma.$transaction(ops);
-  }
-
-  private async assertParticipant(conversationId: string, userId: string) {
-    const convo = await this.prisma.communityDmConversation.findUnique({
-      where: { id: conversationId },
-      select: { participant1Id: true, participant2Id: true },
-    });
-    if (!convo || (convo.participant1Id !== userId && convo.participant2Id !== userId)) {
-      throw new NotFoundException('Conversation not found');
-    }
-    return convo;
+    return this.present(message);
   }
 
   private async loadForResponse(conversationId: string) {

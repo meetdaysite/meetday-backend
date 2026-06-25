@@ -388,9 +388,7 @@ export class CommunityChatGateway
     @MessageBody()
     payload: {
       conversationId: string;
-      ciphertext: string;
-      nonce: string;
-      keyEpoch: number;
+      content?: string;
       messageType?: 'TEXT' | 'IMAGE';
       mediaKey?: string;
       mediaSizeBytes?: number;
@@ -399,22 +397,20 @@ export class CommunityChatGateway
     const entry = this.connectedUsers.get(client.id);
     if (!entry) return;
 
-    if (!payload.conversationId || !payload.ciphertext || !payload.nonce) {
+    if (!payload.conversationId || (!payload.content && !payload.mediaKey)) {
       client.emit('error', {
         event: 'send-dm',
-        message: 'conversationId, ciphertext and nonce are required (E2EE)',
+        message: 'conversationId and a content or mediaKey are required',
       });
       return;
     }
 
     // createMessage enforces the conversation is ACCEPTED and the sender is a participant.
-    // The server only relays opaque ciphertext — it never sees plaintext.
+    // Text is encrypted at rest by the service; the relayed payload is decrypted for participants.
     let message;
     try {
       message = await this.dmService.createMessage(payload.conversationId, entry.userId, {
-        ciphertext: payload.ciphertext,
-        nonce: payload.nonce,
-        keyEpoch: payload.keyEpoch,
+        content: payload.content,
         messageType: payload.messageType as DmMessageType | undefined,
         mediaKey: payload.mediaKey,
         mediaSizeBytes: payload.mediaSizeBytes,

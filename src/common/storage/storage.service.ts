@@ -21,7 +21,6 @@ const CONTENT_TYPE_EXT: Record<string, string> = {
   'image/webp': 'webp',
   'video/mp4': 'mp4',
   'application/pdf': 'pdf',
-  'application/octet-stream': 'bin',
 };
 
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
@@ -37,7 +36,7 @@ const CONTEXT_CONTENT_TYPES: Record<UploadContext, readonly string[]> = {
   [UploadContext.COMMUNITY_COVER]: IMAGE_TYPES,
   [UploadContext.COMMUNITY_ICON]: IMAGE_TYPES,
   [UploadContext.COMMUNITY_ANNOUNCEMENT]: IMAGE_TYPES,
-  [UploadContext.COMMUNITY_DM_MEDIA]: ['application/octet-stream'],
+  [UploadContext.COMMUNITY_DM_MEDIA]: IMAGE_TYPES,
   [UploadContext.COMMUNITY_FEED_MEDIA]: [...IMAGE_TYPES, 'video/mp4'],
 };
 
@@ -198,8 +197,8 @@ export class StorageService {
       }
 
       case UploadContext.COMMUNITY_DM_MEDIA: {
-        // Encrypted DM blob. resourceId is the conversation id; only a participant
-        // of an ACCEPTED conversation may upload. The blob is opaque ciphertext.
+        // DM image. resourceId is the conversation id; only a participant of an
+        // ACCEPTED conversation may upload. Stored as a private S3 object.
         if (!dto.resourceId) {
           throw new BadRequestException('resourceId (conversation UUID) is required for COMMUNITY_DM_MEDIA');
         }

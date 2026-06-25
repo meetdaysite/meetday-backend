@@ -88,10 +88,6 @@ model User {
   announcementLikes     AnnouncementLike[]      @relation("AnnouncementLikeUser")
   announcementBookmarks AnnouncementBookmark[]  @relation("AnnouncementBookmarkUser")
 
-  // E2EE key directory
-  devices   UserDevice[]
-  keyBackup UserKeyBackup?
-
   // Community feed back-relations
   feedPosts        CommunityPost[]         @relation("FeedPostAuthor")
   feedComments     CommunityPostComment[]  @relation("FeedCommentAuthor")
@@ -106,37 +102,6 @@ model User {
 
   @@index([roleId])
   @@map("users")
-}
-
-// ─── E2EE Key Directory ───────────────────────────────────────────────────────
-
-model UserDevice {
-  id                String    @id @default(uuid())
-  userId            String
-  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  deviceId          String // client-generated stable id
-  identityPublicKey String    @db.Text // base64 X25519 public key
-  signingPublicKey  String?   @db.Text // base64 Ed25519 (optional, message signatures)
-  label             String? // e.g. "Chrome on Mac"
-  lastSeenAt        DateTime?
-  revokedAt         DateTime?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-
-  @@unique([userId, deviceId])
-  @@index([userId])
-  @@map("user_devices")
-}
-
-model UserKeyBackup {
-  userId           String   @id
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  wrappedMasterKey String   @db.Text // passphrase-wrapped master key — opaque
-  kdfParams        Json // { algo:'argon2id', salt, ops, mem } — non-secret
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
-  @@map("user_key_backups")
 }
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
@@ -1477,12 +1442,9 @@ model CommunityDmConversation {
   respondedAt DateTime? // when accepted/rejected
 
   lastMessageAt DateTime?
-  currentEpoch  Int       @default(1) // bumps when the conversation key K is rotated
 
-  messages    CommunityDmMessage[]
-  readStates  CommunityDmReadState[]
-  deviceKeys  DmConversationDeviceKey[]
-  masterKeys  DmConversationMasterKey[]
+  messages   CommunityDmMessage[]
+  readStates CommunityDmReadState[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1508,13 +1470,10 @@ model CommunityDmMessage {
   conversation CommunityDmConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User                    @relation("DmMessageSender", fields: [senderId], references: [id])
 
-  // E2EE payload — the server only ever stores opaque ciphertext.
-  content        String?       @db.Text // DEPRECATED legacy plaintext — no longer written
-  ciphertext     String?       @db.Text // base64 AEAD ciphertext (encrypted with the conversation key K)
-  nonce          String? // base64 AEAD nonce
-  keyEpoch       Int           @default(1) // which K epoch this message was encrypted under
+  // Server-managed: text is encrypted at rest with CryptoService (AES-256-GCM).
+  content        String?       @db.Text // encrypted-at-rest body; null for image-only messages
   messageType    DmMessageType @default(TEXT)
-  mediaKey       String? // S3 key to the encrypted blob (IMAGE messages)
+  mediaKey       String? // S3 key to the image (served via presigned URL)
   mediaSizeBytes Int?
 
   deletedAt DateTime?
@@ -1528,39 +1487,6 @@ model CommunityDmMessage {
 enum DmMessageType {
   TEXT
   IMAGE
-}
-
-model DmConversationDeviceKey {
-  id             String                  @id @default(uuid())
-  conversationId String
-  conversation   CommunityDmConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-
-  recipientUserId   String
-  recipientDeviceId String
-  epoch             Int    @default(1)
-  wrappedKey        String @db.Text // K sealed to the device's X25519 public key — opaque
-
-  createdAt DateTime @default(now())
-
-  @@unique([conversationId, recipientDeviceId, epoch])
-  @@index([recipientUserId, recipientDeviceId])
-  @@map("dm_conversation_device_keys")
-}
-
-model DmConversationMasterKey {
-  id             String                  @id @default(uuid())
-  conversationId String
-  conversation   CommunityDmConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-
-  userId     String
-  epoch      Int    @default(1)
-  wrappedKey String @db.Text // K wrapped to the user's passphrase-derived master key — opaque
-
-  createdAt DateTime @default(now())
-
-  @@unique([conversationId, userId, epoch])
-  @@index([userId])
-  @@map("dm_conversation_master_keys")
 }
 
 model CommunityDmReadState {
