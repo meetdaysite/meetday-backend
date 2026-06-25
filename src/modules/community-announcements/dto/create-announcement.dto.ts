@@ -1,6 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { AnnouncementCategory } from '@prisma/client';
-import { IsEnum, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { AnnouncementCategory, AnnouncementStatus } from '@prisma/client';
+import {
+  IsDateString,
+  IsEnum,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+  ValidateIf,
+} from 'class-validator';
 
 export class CreateAnnouncementDto {
   @ApiProperty({ enum: AnnouncementCategory, default: AnnouncementCategory.COMMUNITY_UPDATE })
@@ -24,4 +32,17 @@ export class CreateAnnouncementDto {
   @IsString()
   @MaxLength(512)
   imageKey?: string;
+
+  @ApiPropertyOptional({ enum: AnnouncementStatus, default: AnnouncementStatus.PUBLISHED })
+  @IsOptional()
+  @IsEnum(AnnouncementStatus)
+  status?: AnnouncementStatus = AnnouncementStatus.PUBLISHED;
+
+  @ApiPropertyOptional({
+    description: 'Required when status=SCHEDULED. ISO 8601 datetime in the future.',
+    example: '2026-07-01T10:00:00.000Z',
+  })
+  @ValidateIf((o) => o.status === AnnouncementStatus.SCHEDULED)
+  @IsDateString()
+  scheduledAt?: string;
 }
