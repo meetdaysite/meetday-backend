@@ -96,6 +96,7 @@ model User {
   feedViews        CommunityPostView[]     @relation("FeedViewUser")
   feedBookmarks    CommunityPostBookmark[] @relation("FeedBookmarkUser")
   feedPollVotes    CommunityPostPollVote[] @relation("FeedPollVoteUser")
+  feedReports      CommunityPostReport[]   @relation("FeedReportUser")
 
   savedCommunities SavedCommunity[]
   savedEvents      SavedEvent[]
@@ -1164,6 +1165,11 @@ enum AuditAction {
   FEED_POST_DELETED_BY_MOD
   FEED_POST_PINNED
   FEED_POST_UNPINNED
+  FEED_POST_APPROVED
+  FEED_POST_REJECTED
+  FEED_POST_CREATED_BY_ADMIN
+  FEED_POST_REPORT_RESOLVED
+  FEED_POST_REPORT_DISMISSED
 }
 
 enum ConsentType {
@@ -1260,6 +1266,8 @@ model CommunitySettings {
   // Safety
   dmPolicy     DirectMessagePolicy @default(MUTUAL_ATTENDEES_ONLY)
   photoSharing PhotoSharingPolicy  @default(REQUIRE_CONSENT_REMINDER)
+
+  requirePostApproval Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1608,6 +1616,8 @@ model CommunityPost {
   viewCount     Int @default(0) // distinct viewers (reach)
   bookmarkCount Int @default(0)
 
+  status PostStatus @default(PUBLISHED)
+
   deletedAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1619,10 +1629,12 @@ model CommunityPost {
   bookmarks   CommunityPostBookmark[]
   pollOptions CommunityPostPollOption[]
   pollVotes   CommunityPostPollVote[]
+  reports     CommunityPostReport[]
 
   @@index([communityId, isPinned, createdAt(sort: Desc)])
   @@index([communityId, createdAt(sort: Desc)])
   @@index([communityId, topic, createdAt(sort: Desc)])
+  @@index([communityId, status, createdAt(sort: Desc)])
   @@map("community_posts")
 }
 
@@ -1638,6 +1650,24 @@ enum FeedPostCategory {
   RECOMMENDATION
   QUESTION
   POLL
+}
+
+enum PostStatus {
+  PENDING
+  PUBLISHED
+  REJECTED
+}
+
+enum PostReportReason {
+  SPAM_OR_PROMOTION
+  INAPPROPRIATE_CONTENT
+  HARASSMENT_OR_ABUSE
+}
+
+enum PostReportStatus {
+  PENDING
+  RESOLVED
+  DISMISSED
 }
 
 model CommunityPostPollOption {
@@ -1683,6 +1713,27 @@ model CommunityPostBookmark {
   @@unique([postId, userId])
   @@index([userId])
   @@map("community_post_bookmarks")
+}
+
+model CommunityPostReport {
+  id          String           @id @default(uuid())
+  postId      String
+  communityId String
+  reporterId  String
+  reason      PostReportReason
+  body        String?
+  status      PostReportStatus @default(PENDING)
+  resolvedBy  String?
+  resolvedAt  DateTime?
+  createdAt   DateTime         @default(now())
+
+  post     CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  reporter User          @relation("FeedReportUser", fields: [reporterId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, reporterId])
+  @@index([postId, status])
+  @@index([communityId, status, createdAt(sort: Desc)])
+  @@map("community_post_reports")
 }
 
 model CommunityPostComment {

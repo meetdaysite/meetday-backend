@@ -53,4 +53,11 @@ export class UpdateCommunitySettingsDto {
   @IsOptional()
   @IsEnum(PhotoSharingPolicy)
   photoSharing?: PhotoSharingPolicy;
+
+  @ApiPropertyOptional({
+    description: 'When true, new member posts enter a PENDING queue and must be approved by an admin before appearing in the member feed.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  requirePostApproval?: boolean;
 }

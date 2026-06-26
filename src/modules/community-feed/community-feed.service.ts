@@ -9,6 +9,7 @@ import {
   CommunityRole,
   FeedPostType,
   PostingPermission,
+  PostStatus,
   Prisma,
 } from '@prisma/client';
 import { AuditLogService } from '../audit-log/audit-log.service';
@@ -54,7 +55,7 @@ export class CommunityFeedService {
   // ─── Posts ──────────────────────────────────────────────────────────────────
 
   async createPost(communityId: string, authorId: string, role: CommunityRole, dto: CreatePostDto) {
-    await this.assertCanPost(communityId, authorId, role);
+    const { requirePostApproval } = await this.assertCanPost(communityId, authorId, role);
 
     const postType = dto.postType ?? (dto.pollOptions?.length ? FeedPostType.POLL : FeedPostType.TEXT);
     if (postType === FeedPostType.POLL && (!dto.pollOptions || dto.pollOptions.length < 2)) {
@@ -78,6 +79,7 @@ export class CommunityFeedService {
         eventId: dto.eventId,
         content: dto.content ?? '',
         mediaKeys: dto.mediaKeys ?? [],
+        status: requirePostApproval ? PostStatus.PENDING : PostStatus.PUBLISHED,
         ...(postType === FeedPostType.POLL && dto.pollOptions
           ? { pollOptions: { create: dto.pollOptions.map((text, i) => ({ text, position: i })) } }
           : {}),
@@ -95,7 +97,7 @@ export class CommunityFeedService {
     const pinned = query.cursor
       ? []
       : await this.prisma.communityPost.findMany({
-          where: { communityId, deletedAt: null, isPinned: true, ...this.filter(query) },
+          where: { communityId, deletedAt: null, isPinned: true, status: PostStatus.PUBLISHED, ...this.filter(query) },
           orderBy: { pinnedAt: 'desc' },
           include: POST_INCLUDE,
         });
@@ -105,6 +107,7 @@ export class CommunityFeedService {
         communityId,
         deletedAt: null,
         isPinned: false,
+        status: PostStatus.PUBLISHED,
         ...this.filter(query),
         ...(query.cursor ? { createdAt: { lt: new Date(query.cursor) } } : {}),
       },
@@ -375,7 +378,7 @@ export class CommunityFeedService {
 
   private async findOrThrow(communityId: string, postId: string): Promise<PostRow> {
     const post = await this.prisma.communityPost.findFirst({
-      where: { id: postId, communityId, deletedAt: null },
+      where: { id: postId, communityId, deletedAt: null, status: PostStatus.PUBLISHED },
       include: POST_INCLUDE,
     });
     if (!post) throw new NotFoundException('Post not found');
@@ -386,10 +389,10 @@ export class CommunityFeedService {
     return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
   }
 
-  private async assertCanPost(communityId: string, userId: string, role: CommunityRole) {
+  private async assertCanPost(communityId: string, userId: string, role: CommunityRole): Promise<{ requirePostApproval: boolean }> {
     const settings = await this.prisma.communitySettings.findUnique({
       where: { communityId },
-      select: { feedEnabled: true, feedPosting: true },
+      select: { feedEnabled: true, feedPosting: true, requirePostApproval: true },
     });
     if (settings && !settings.feedEnabled) {
       throw new ForbiddenException('The feed is disabled for this community');
@@ -408,6 +411,7 @@ export class CommunityFeedService {
       });
       if (!attended) throw new ForbiddenException('Only members who attended an event can post here');
     }
+    return { requirePostApproval: settings?.requirePostApproval ?? false };
   }
 
   private computeBadge(joinedAt: Date | null, activityScore: number): Badge {
