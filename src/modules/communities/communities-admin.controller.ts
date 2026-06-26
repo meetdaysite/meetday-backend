@@ -29,6 +29,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { CommunitiesService } from './communities.service';
 import { CommunityOverviewService } from './community-overview.service';
+import { CommunityAnalyticsService } from './community-analytics.service';
 import { CreateCommunityDto } from './dto/create-community.dto';
 import { UpdateCommunityDto } from './dto/update-community.dto';
 import { UpdateCommunitySettingsDto } from './dto/update-community-settings.dto';
@@ -128,6 +129,120 @@ const MANAGER_EXAMPLE = [
   { userId: 'u5e6f7a8-b9c0-1234-ef56-012345678901', firstName: 'Manav', lastName: 'Sinha', avatarUrl: null, role: 'MODERATOR' },
 ];
 
+const GROWTH_SERIES_SAMPLE = [
+  { date: '2026-05-27', joined: 28, left: 3, netGrowth: 25 },
+  { date: '2026-05-28', joined: 14, left: 1, netGrowth: 13 },
+  { date: '2026-05-29', joined: 9,  left: 0, netGrowth: 9  },
+  { date: '2026-05-30', joined: 21, left: 2, netGrowth: 19 },
+  { date: '2026-05-31', joined: 32, left: 4, netGrowth: 28 },
+  { date: '2026-06-01', joined: 18, left: 1, netGrowth: 17 },
+  { date: '2026-06-02', joined: 11, left: 0, netGrowth: 11 },
+  { date: '2026-06-03', joined: 7,  left: 1, netGrowth: 6  },
+  { date: '2026-06-04', joined: 24, left: 2, netGrowth: 22 },
+  { date: '2026-06-05', joined: 38, left: 5, netGrowth: 33 },
+  { date: '2026-06-06', joined: 16, left: 0, netGrowth: 16 },
+  { date: '2026-06-07', joined: 12, left: 1, netGrowth: 11 },
+  { date: '2026-06-08', joined: 29, left: 3, netGrowth: 26 },
+  { date: '2026-06-09', joined: 19, left: 0, netGrowth: 19 },
+  { date: '2026-06-10', joined: 8,  left: 1, netGrowth: 7  },
+  { date: '2026-06-11', joined: 22, left: 2, netGrowth: 20 },
+  { date: '2026-06-12', joined: 31, left: 4, netGrowth: 27 },
+  { date: '2026-06-13', joined: 17, left: 0, netGrowth: 17 },
+  { date: '2026-06-14', joined: 14, left: 1, netGrowth: 13 },
+  { date: '2026-06-15', joined: 9,  left: 0, netGrowth: 9  },
+  { date: '2026-06-16', joined: 26, left: 3, netGrowth: 23 },
+  { date: '2026-06-17', joined: 41, left: 6, netGrowth: 35 },
+  { date: '2026-06-18', joined: 20, left: 1, netGrowth: 19 },
+  { date: '2026-06-19', joined: 13, left: 0, netGrowth: 13 },
+  { date: '2026-06-20', joined: 8,  left: 1, netGrowth: 7  },
+  { date: '2026-06-21', joined: 35, left: 4, netGrowth: 31 },
+  { date: '2026-06-22', joined: 28, left: 2, netGrowth: 26 },
+  { date: '2026-06-23', joined: 16, left: 1, netGrowth: 15 },
+  { date: '2026-06-24', joined: 22, left: 3, netGrowth: 19 },
+  { date: '2026-06-25', joined: 47, left: 5, netGrowth: 42 },
+];
+
+const ANALYTICS_EXAMPLE = {
+  summary: {
+    members:           { value: 1248, deltaPct: 12 },
+    activeMembers:     { value: 843,  deltaPct: 8  },
+    experiencesBooked: { value: 312,  deltaPct: 23 },
+    communityRevenue:  { value: 4680000, deltaPct: 18 },
+    retention:         { value: 91,   deltaPct: 0  },
+  },
+  growth: {
+    series: GROWTH_SERIES_SAMPLE,
+    totalJoined: 156,
+    totalLeft: 22,
+    netGrowth: 134,
+    growthRatePct: 12,
+  },
+  engagement: {
+    posts:             { value: 128,  changePct: 14  },
+    comments:          { value: 492,  changePct: 22  },
+    reactions:         { value: 1840, changePct: 31  },
+    shares:            { value: 96,   changePct: -4  },
+    chatMessages:      { value: 3200, changePct: 19  },
+    announcementReach: { value: 4100, changePct: 8   },
+  },
+  experiencesImpact: {
+    totalBookings: { value: 312, changePct: 23 },
+    topExperiences: [
+      { id: 'e1f2a3b4-c5d6-7890-ef12-345678901234', title: 'Night Rituals',       bookings: 94, revenue: 1410000, attendancePct: 87.5 },
+      { id: 'f2a3b4c5-d6e7-8901-f234-567890123456', title: 'After Hours',         bookings: 78, revenue: 1170000, attendancePct: 91.2 },
+      { id: 'a3b4c5d6-e7f8-9012-a345-678901234567', title: 'Sunset Sessions',     bookings: 64, revenue: 960000,  attendancePct: 76.4 },
+      { id: 'b4c5d6e7-f8a9-0123-b456-789012345678', title: 'Tech House Night',    bookings: 48, revenue: 720000,  attendancePct: 83.3 },
+      { id: 'c5d6e7f8-a9b0-1234-c567-890123456789', title: 'Underground Fridays', bookings: 28, revenue: 420000,  attendancePct: 67.9 },
+    ],
+  },
+  healthScore: {
+    total: 82,
+    rating: 'GOOD',
+    factors: {
+      memberGrowth:    8,
+      engagement:      20,
+      eventAttendance: 18,
+      reportRate:      20,
+      retention:       16,
+    },
+  },
+  memberInsights: {
+    interests: [
+      { name: 'Electronic Music', pct: 68 },
+      { name: 'Nightlife',        pct: 54 },
+      { name: 'Live Music',       pct: 41 },
+      { name: 'DJ Culture',       pct: 29 },
+    ],
+    topCities: [
+      { city: 'Kolkata',   pct: 72 },
+      { city: 'Mumbai',    pct: 15 },
+      { city: 'Delhi',     pct: 8  },
+      { city: 'Bangalore', pct: 3  },
+      { city: 'Hyderabad', pct: 2  },
+    ],
+    ageDistribution: [
+      { range: 'UNDER_18',   label: 'Under 18', pct: 4  },
+      { range: 'AGE_18_24',  label: '18–24',    pct: 31 },
+      { range: 'AGE_25_34',  label: '25–34',    pct: 44 },
+      { range: 'AGE_35_44',  label: '35–44',    pct: 15 },
+      { range: 'AGE_45_54',  label: '45–54',    pct: 5  },
+      { range: 'AGE_55_PLUS',label: '55+',      pct: 1  },
+    ],
+  },
+  topContributors: [
+    { userId: 'u1a2b3c4-d5e6-7890-ab12-cdef01234567', name: 'Rohan Verma',   handle: 'rohan_v',  avatarUrl: 'https://storage.googleapis.com/...', activityScore: 148 },
+    { userId: 'u6f7a8b9-c0d1-2345-ef67-123456789012', name: 'Priya Kapoor',  handle: 'priya_k',  avatarUrl: 'https://storage.googleapis.com/...', activityScore: 134 },
+    { userId: 'u7a8b9c0-d1e2-3456-f789-234567890123', name: 'Amit Sharma',   handle: 'amit_s',   avatarUrl: null,                                 activityScore: 117 },
+    { userId: 'u8b9c0d1-e2f3-4567-a890-345678901234', name: 'Nisha Gupta',   handle: 'nisha_g',  avatarUrl: 'https://storage.googleapis.com/...', activityScore: 98  },
+    { userId: 'u9c0d1e2-f3a4-5678-b901-456789012345', name: 'Karan Malhotra',handle: 'karan_m',  avatarUrl: null,                                 activityScore: 84  },
+  ],
+  topHosts: [
+    { userId: 'u5e6f7a8-b9c0-1234-ef56-012345678901', name: 'Manav Sinha', handle: 'manav_s', avatarUrl: 'https://storage.googleapis.com/...', eventCount: 7 },
+    { userId: 'u3c4d5e6-f7a8-9012-cd34-ef0123456789', name: 'Kabir Shah',  handle: 'kabir_s', avatarUrl: 'https://storage.googleapis.com/...', eventCount: 4 },
+    { userId: 'u4d5e6f7-a8b9-0123-de45-f01234567890', name: 'Ishita Dey',  handle: 'ishita_d',avatarUrl: null,                                 eventCount: 2 },
+  ],
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 @ApiTags('Communities (Admin)')
@@ -143,6 +258,7 @@ export class CommunitiesAdminController {
   constructor(
     private readonly communitiesService: CommunitiesService,
     private readonly overviewService: CommunityOverviewService,
+    private readonly analyticsService: CommunityAnalyticsService,
   ) {}
 
   // ─── List ──────────────────────────────────────────────────────────────────
@@ -255,6 +371,66 @@ export class CommunitiesAdminController {
   })
   getManagers(@Param('id', ParseUUIDPipe) id: string) {
     return this.overviewService.getManagers(id);
+  }
+
+  // ─── Analytics ─────────────────────────────────────────────────────────────
+
+  @Get(':id/analytics')
+  @ApiOperation({
+    summary: 'Community analytics (30-day window)',
+    description:
+      'Returns the full analytics payload for the admin Analytics tab. All metrics use a fixed ' +
+      '**30-day rolling window** (current period = last 30 days; prior period = 30–60 days ago for delta comparisons). ' +
+      'Results are cached in Redis for **5 minutes**.\n\n' +
+      '**Response sections:**\n\n' +
+      '**`summary`** — Five stat cards:\n' +
+      '- `members.value` = total member count (denormalized); `deltaPct` = % change in new joins vs prior 30d.\n' +
+      '- `activeMembers.value` = members with activity (`lastActivityAt`) in the last 30d.\n' +
+      '- `experiencesBooked.value` = confirmed orders on community events in the last 30d.\n' +
+      '- `communityRevenue.value` = sum of `totalAmount` on those orders in **paise** (divide by 100 for ₹).\n' +
+      '- `retention.value` = `ACTIVE members / all members × 100`; `deltaPct` is always `0` (no historical snapshot).\n\n' +
+      '**`growth`** — 30-entry daily series for the member growth chart:\n' +
+      '- `joined` / `left` / `netGrowth` per day. Note: `left` uses `updatedAt` as a proxy for `leftAt` ' +
+      '(no dedicated timestamp field exists).\n' +
+      '- `growthRatePct` = % change in new joins vs the prior 30-day window.\n\n' +
+      '**`engagement`** — Six engagement metrics with `changePct` vs the prior 30 days:\n' +
+      '`posts`, `comments`, `reactions`, `shares`, `chatMessages`, `announcementReach`.\n' +
+      '`announcementReach` is total members notified (fan-out count), **not** literal opens — ' +
+      'no open-tracking exists.\n\n' +
+      '**`experiencesImpact`** — Booking totals and a top-5 experience table:\n' +
+      '- `revenue` is in **paise**.\n' +
+      '- `attendancePct` = checked-in attendees ÷ total booked attendees × 100. ' +
+      '`null` when no booking attendee records exist yet.\n\n' +
+      '**`healthScore`** — A composite 0–100 score with five factors scored 0–20 each:\n' +
+      '`memberGrowth` (net join rate), `engagement` (actions per active member), ' +
+      '`eventAttendance` (avg check-in %), `reportRate` (inverse of soft-deleted content ratio), ' +
+      '`retention`. Rating bands: `EXCELLENT` ≥ 90, `GOOD` ≥ 75, `FAIR` ≥ 60, `NEEDS_ATTENTION` < 60.\n\n' +
+      '**`memberInsights`** — Three demographic breakdowns (percentages):\n' +
+      '- `interests`: active members who attended community events in each interest\'s category. ' +
+      'Members with no event history will not appear in any bucket.\n' +
+      '- `topCities` (top 5): % of members with a known city in their attendee profile.\n' +
+      '- `ageDistribution`: % across `AgeRange` enum values. Only members who filled in their age range.\n\n' +
+      '**`topContributors`** — Top 5 active members by `activityScore` DESC ' +
+      '(formula: `messageCount × 1 + eventsAttendedCount × 5`).\n\n' +
+      '**`topHosts`** — Top 3 HOST-role members by event count in this community.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'UUID of the community.',
+    example: 'c1d2e3f4-a5b6-7890-cdef-012345678901',
+  })
+  @ApiOkResponse({
+    description: 'Full analytics payload covering all 8 sections. Cached for 5 minutes.',
+    schema: { example: wrapData(ANALYTICS_EXAMPLE) },
+  })
+  @ApiNotFoundResponse({
+    description: 'Community not found or has been deleted.',
+    schema: {
+      example: wrapData({ message: 'Community not found', error: 'Not Found', statusCode: 404 }),
+    },
+  })
+  getAnalytics(@Param('id', ParseUUIDPipe) id: string) {
+    return this.analyticsService.getAnalytics(id);
   }
 
   // ─── Get single ────────────────────────────────────────────────────────────
