@@ -332,7 +332,7 @@ export class OrdersService {
         userId: true,
         eventId: true,
         status: true,
-        event: { select: { status: true } },
+        event: { select: { status: true, title: true, hostProfile: { select: { userId: true } } } },
         items: {
           select: {
             ticket: { select: { name: true, saleStartDate: true, saleEndDate: true } },
@@ -374,6 +374,18 @@ export class OrdersService {
     void this.notificationsService
       .create(userId, 'order_confirmed', 'Booking Confirmed!', 'Your tickets are confirmed. Open your order for QR codes.')
       .catch((err) => this.logger.error('Failed to send order_confirmed notification', err));
+
+    if (order.event.hostProfile?.userId) {
+      void this.notificationsService
+        .create(
+          order.event.hostProfile.userId,
+          'event_new_booking',
+          'New booking',
+          `Someone booked a ticket for "${order.event.title}".`,
+          { eventId: order.eventId, orderId },
+        )
+        .catch((err) => this.logger.error('Failed to send event_new_booking notification', err));
+    }
 
     void this.mailQueue
       .add('ticket-confirmation', { orderId })

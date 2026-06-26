@@ -295,7 +295,26 @@ export class CommunityDmService {
       throw new ForbiddenException('This conversation is not active — the intro must be accepted first');
     }
 
-    return this.insertMessage(conversationId, senderId, payload);
+    const recipientId = convo.participant1Id === senderId ? convo.participant2Id : convo.participant1Id;
+    const message = await this.insertMessage(conversationId, senderId, payload);
+
+    void (async () => {
+      const sender = await this.prisma.user.findUnique({ where: { id: senderId }, ...USER_SELECT });
+      if (sender) {
+        const preview = payload.content
+          ? payload.content.length > 80 ? `${payload.content.slice(0, 77)}...` : payload.content
+          : '📷 Photo';
+        await this.notifications.create(
+          recipientId,
+          'community_dm_received',
+          `${sender.firstName} sent you a message`,
+          preview,
+          { conversationId, fromUserId: senderId },
+        );
+      }
+    })().catch(() => {});
+
+    return message;
   }
 
   async listConversations(communityId: string, userId: string) {

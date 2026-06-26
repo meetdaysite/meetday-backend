@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../common/redis/redis.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AdminListMembersQueryDto, GenerateInviteDto } from './dto/admin-list-members-query.dto';
 
 const ENTITY_TYPE = 'COMMUNITY_MEMBER';
@@ -24,6 +25,7 @@ export class CommunityMembersAdminService {
     private readonly redis: RedisService,
     private readonly storage: StorageService,
     private readonly auditLogService: AuditLogService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   // ── Stats cards ────────────────────────────────────────────────────────────
@@ -299,6 +301,16 @@ export class CommunityMembersAdminService {
       metadata: { communityId },
     });
 
+    void this.communityName(communityId).then((name) =>
+      this.notifications.create(
+        targetUserId,
+        'community_member_banned',
+        'You have been banned',
+        `You have been removed from ${name}.`,
+        { communityId },
+      ),
+    ).catch(() => {});
+
     return { success: true };
   }
 
@@ -326,6 +338,16 @@ export class CommunityMembersAdminService {
       entityId: targetUserId,
       metadata: { communityId },
     });
+
+    void this.communityName(communityId).then((name) =>
+      this.notifications.create(
+        targetUserId,
+        'community_member_unbanned',
+        'Your ban has been lifted',
+        `You can now rejoin ${name}.`,
+        { communityId },
+      ),
+    ).catch(() => {});
 
     return { success: true };
   }
@@ -358,6 +380,16 @@ export class CommunityMembersAdminService {
       entityId: targetUserId,
       metadata: { communityId },
     });
+
+    void this.communityName(communityId).then((name) =>
+      this.notifications.create(
+        targetUserId,
+        'community_member_kicked',
+        'You have been removed',
+        `You have been removed from ${name}.`,
+        { communityId },
+      ),
+    ).catch(() => {});
 
     return { success: true };
   }
@@ -563,5 +595,10 @@ export class CommunityMembersAdminService {
     }
 
     return { imported, skipped, notFound, errors };
+  }
+
+  private async communityName(communityId: string): Promise<string> {
+    const c = await this.prisma.community.findUnique({ where: { id: communityId }, select: { name: true } });
+    return c?.name ?? 'the community';
   }
 }
