@@ -110,6 +110,11 @@ model User {
   savedCommunities SavedCommunity[]
   savedEvents      SavedEvent[]
 
+  // Support ticket back-relations
+  reportedTickets SupportTicket[] @relation("SupportTicketReporter")
+  assignedTickets SupportTicket[] @relation("SupportTicketAssignee")
+  resolvedTickets SupportTicket[] @relation("SupportTicketResolver")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1194,6 +1199,12 @@ enum AuditAction {
   FEED_POST_CREATED_BY_ADMIN
   FEED_POST_REPORT_RESOLVED
   FEED_POST_REPORT_DISMISSED
+
+  // Support tickets
+  SUPPORT_TICKET_CREATED
+  SUPPORT_TICKET_ASSIGNED
+  SUPPORT_TICKET_RESOLVED
+  SUPPORT_TICKET_CLOSED
 }
 
 enum ConsentType {
@@ -2088,4 +2099,60 @@ model ChatContentWarning {
   @@index([communityId])
   @@index([userId, communityId])
   @@map("chat_content_warnings")
+}
+
+// ─── Support Tickets ──────────────────────────────────────────────────────────
+
+model SupportTicket {
+  id           String                @id @default(uuid())
+  ticketNumber String                @unique
+  reporterId   String
+  reporter     User                  @relation("SupportTicketReporter", fields: [reporterId], references: [id])
+  subject      String
+  body         String                @db.Text
+  category     SupportTicketCategory
+  priority     SupportTicketPriority @default(NORMAL)
+  status       SupportTicketStatus   @default(OPEN)
+  entityType   String?
+  entityId     String?
+  assignedTo   String?
+  assignee     User?                 @relation("SupportTicketAssignee", fields: [assignedTo], references: [id])
+  resolvedBy   String?
+  resolvedAt   DateTime?
+  resolver     User?                 @relation("SupportTicketResolver", fields: [resolvedBy], references: [id])
+  resolution   String?               @db.Text
+  metadata     Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([reporterId])
+  @@index([category, status])
+  @@index([priority, status])
+  @@map("support_tickets")
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum SupportTicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum SupportTicketCategory {
+  REFUND_REQUEST
+  ACCOUNT_ISSUE
+  EVENT_ISSUE
+  PAYMENT_ISSUE
+  COMMUNITY_ISSUE
+  HOST_ISSUE
+  OTHER
 }
