@@ -137,7 +137,7 @@ export class EventsVibeService {
     if (!event) throw new NotFoundException('Event not found');
 
     let pulse = event.crowdPulse as unknown as CrowdPulseCache | null;
-    if (!pulse) {
+    if (!pulse || pulse.confidence == null) {
       pulse = await this.computeAndStoreCrowdPulse(eventId);
     }
 
