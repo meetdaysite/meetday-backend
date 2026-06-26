@@ -26,6 +26,8 @@ interface CrowdPulseCache {
   sampleSize: number; // attendees with a non-null vibeType
   confidence: number; // 0..1, scales with sampleSize
   isEstimate: boolean; // true when sampleSize is too low for confident labels
+  energyScore: number | null; // 0-100 bar fill for Energy; null when isEstimate
+  socialScore: number | null; // 0-100 bar fill for Social Friendliness; null when isEstimate
   computedAt: string;
 }
 
@@ -49,13 +51,33 @@ export class EventsVibeService {
     if (!event) throw new NotFoundException('Event not found');
 
     // Graph proximity is only available for an authenticated caller.
+    // For authenticated callers, also fetch their stored profile — body is ignored.
+    let effectiveDto = dto;
     const proximity = userId
-      ? await this.graphService.getProximityForScore(userId, eventId)
+      ? await (async () => {
+          const [prox, profile, affinities] = await Promise.all([
+            this.graphService.getProximityForScore(userId, eventId),
+            this.prisma.attendeeProfile.findUnique({
+              where: { userId },
+              select: { vibeType: true, socialStyle: true },
+            }),
+            this.prisma.userInterestAffinity.findMany({
+              where: { userId },
+              select: { interestId: true, affinity: true },
+            }),
+          ]);
+          effectiveDto = {
+            vibeType: profile?.vibeType ?? undefined,
+            socialStyle: profile?.socialStyle ?? undefined,
+            interests: affinities,
+          };
+          return prox;
+        })()
       : null;
     const hasProximity = (proximity?.knownAttendeeCount ?? 0) > 0;
 
-    const hasInput = dto.vibeType || dto.socialStyle || dto.interests?.length;
-    // With neither questionnaire answers nor any known co-attendees there is
+    const hasInput = effectiveDto.vibeType || effectiveDto.socialStyle || effectiveDto.interests?.length;
+    // With neither profile data nor any known co-attendees there is
     // nothing to score on — keep the "answer the questions" prompt.
     if (!hasInput && !hasProximity) {
       return {
@@ -82,21 +104,21 @@ export class EventsVibeService {
     const categoryInterestSet = new Set(categoryInterestIds);
 
     // ── Normalised sub-scores in [0,1] ──
-    const interestFit = this.interestFit(dto.interests ?? [], categoryInterestSet);
-    const vibeFitRaw = this.vibeFit(dto.vibeType ?? null, crowdPulse?.dominantVibeType ?? null);
+    const interestFit = this.interestFit(effectiveDto.interests ?? [], categoryInterestSet);
+    const vibeFitRaw = this.vibeFit(effectiveDto.vibeType ?? null, crowdPulse?.dominantVibeType ?? null);
     // Pull vibe fit toward neutral when we have little crowd data — don't claim
     // strong alignment off a noisy dominant vibe.
     const vibeFit = 0.5 + crowdConfidence * (vibeFitRaw - 0.5);
-    const socialFit = this.socialFit(dto.socialStyle ?? null);
+    const socialFit = this.socialFit(effectiveDto.socialStyle ?? null);
     const graphFit = this.graphFit(proximity?.knownAttendeeCount ?? 0);
 
     const score = this.combineScore({ interestFit, vibeFit, socialFit, graphFit }, userId !== undefined);
 
     // Derive matched interests for reasons
-    const likedMatched = (dto.interests ?? []).filter(
+    const likedMatched = (effectiveDto.interests ?? []).filter(
       (i) => i.affinity === 'LIKED' && categoryInterestSet.has(i.interestId),
     );
-    const dislikedMatched = (dto.interests ?? []).filter(
+    const dislikedMatched = (effectiveDto.interests ?? []).filter(
       (i) => i.affinity === 'DISLIKED' && categoryInterestSet.has(i.interestId),
     );
 
@@ -114,7 +136,7 @@ export class EventsVibeService {
 
     const reasons = this.buildReasons(
       { interestFit, vibeFit, socialFit, graphFit },
-      dto,
+      effectiveDto,
       matchedInterestNames,
       dislikedMatched.length > 0,
       similarCount,
@@ -146,8 +168,10 @@ export class EventsVibeService {
     return {
       totalAttendees: pulse.totalAttendees,
       energy: pulse.energy,
+      energyScore: pulse.energyScore ?? null,
       crowdStyle: pulse.crowdStyle,
       socialFriendliness: pulse.socialFriendliness,
+      socialScore: pulse.socialScore ?? null,
       confidence: pulse.confidence ?? 0,
       isEstimate: pulse.isEstimate ?? true,
       topAttendeeAvatars: avatars,
@@ -235,6 +259,9 @@ export class EventsVibeService {
         maxLean === partyLean ? 'Party Energy' : maxLean === socialLean ? 'Trendy & Social' : 'Laid-back & Chill';
     }
 
+    const energyScore = isEstimate ? null : Math.round(smoothed(vibeCounts.LIFE_OF_PARTY) * 100);
+    const socialScore = isEstimate ? null : Math.round(openToMeetingPct * 100);
+
     const pulse: CrowdPulseCache = {
       energy,
       dominantVibeType,
@@ -244,6 +271,8 @@ export class EventsVibeService {
       sampleSize: n,
       confidence,
       isEstimate,
+      energyScore,
+      socialScore,
       computedAt: new Date().toISOString(),
     };
 
@@ -414,7 +443,7 @@ export class EventsVibeService {
       where: { eventId, status: OrderStatus.CONFIRMED },
       select: { userId: true },
     });
-    const allIds = orders.map((o) => o.userId);
+    const allIds = [...new Set(orders.map((o) => o.userId))];
 
     const privateProfiles = await this.prisma.attendeeProfile.findMany({
       where: { userId: { in: allIds }, privacy: 'PRIVATE' },
