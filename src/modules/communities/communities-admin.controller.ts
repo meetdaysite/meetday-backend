@@ -30,6 +30,7 @@ import { GetUser } from '../../common/decorators/get-user.decorator';
 import { CommunitiesService } from './communities.service';
 import { CommunityOverviewService } from './community-overview.service';
 import { CommunityAnalyticsService } from './community-analytics.service';
+import { CommunityExperiencesAdminService } from './community-experiences-admin.service';
 import { CreateCommunityDto } from './dto/create-community.dto';
 import { UpdateCommunityDto } from './dto/update-community.dto';
 import { UpdateCommunitySettingsDto } from './dto/update-community-settings.dto';
@@ -38,6 +39,7 @@ import { SetCommunityCitiesDto } from './dto/set-community-cities.dto';
 import { AssignMemberDto } from './dto/assign-member.dto';
 import { AddCommunityEventDto } from './dto/add-community-event.dto';
 import { ListCommunitiesQueryDto } from './dto/list-communities-query.dto';
+import { ListCommunityExperiencesQueryDto } from './dto/list-community-experiences-query.dto';
 
 // ─── Shared example helpers ──────────────────────────────────────────────────
 
@@ -259,6 +261,7 @@ export class CommunitiesAdminController {
     private readonly communitiesService: CommunitiesService,
     private readonly overviewService: CommunityOverviewService,
     private readonly analyticsService: CommunityAnalyticsService,
+    private readonly experiencesAdminService: CommunityExperiencesAdminService,
   ) {}
 
   // ─── List ──────────────────────────────────────────────────────────────────
@@ -431,6 +434,24 @@ export class CommunitiesAdminController {
   })
   getAnalytics(@Param('id', ParseUUIDPipe) id: string) {
     return this.analyticsService.getAnalytics(id);
+  }
+
+  // ─── Experiences tab ───────────────────────────────────────────────────────
+
+  @Get(':id/experiences')
+  @ApiOperation({
+    summary: 'List community experiences (admin)',
+    description:
+      'Returns paginated experiences (events) linked to the community with stats, tab counts, ' +
+      'and a 30-day performance sidebar. Supports filtering by status, search by title, and sorting.',
+  })
+  @ApiParam({ name: 'id', description: 'Community UUID', example: 'c1d2e3f4-a5b6-7890-cdef-012345678901' })
+  @ApiOkResponse({ description: 'Community experiences page data.' })
+  getExperiences(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: ListCommunityExperiencesQueryDto,
+  ) {
+    return this.experiencesAdminService.listExperiences(id, query);
   }
 
   // ─── Get single ────────────────────────────────────────────────────────────
