@@ -2,11 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
-import {
-  ExperienceSort,
-  ExperienceStatusFilter,
-  ListCommunityExperiencesQueryDto,
-} from './dto/list-community-experiences-query.dto';
+import type { ExperienceStatusFilter } from './dto/list-community-experiences-query.dto';
+import { ListCommunityExperiencesQueryDto } from './dto/list-community-experiences-query.dto';
 
 type ComputedStatus = 'UPCOMING' | 'LIVE' | 'COMPLETED' | 'DRAFT' | 'CANCELLED';
 
@@ -65,8 +62,8 @@ export class CommunityExperiencesAdminService {
   async listExperiences(communityId: string, query: ListCommunityExperiencesQueryDto) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
-    const sort = query.sort ?? ExperienceSort.NEWEST_FIRST;
-    const statusFilter = query.status ?? ExperienceStatusFilter.ALL;
+    const sort = query.sort ?? 'NEWEST_FIRST';
+    const statusFilter = query.status ?? 'ALL';
 
     const now = new Date();
     const todayStart = startOfDay(now);
@@ -134,11 +131,11 @@ export class CommunityExperiencesAdminService {
     const eventWhere: Prisma.EventWhereInput = { ...searchWhere, ...statusWhere };
 
     const isAggregateSorted =
-      sort === ExperienceSort.MOST_BOOKINGS || sort === ExperienceSort.REVENUE;
+      sort === 'MOST_BOOKINGS' || sort === 'REVENUE';
 
     const prismaOrderBy: Prisma.CommunityEventOrderByWithRelationInput = isAggregateSorted
       ? { event: { eventDate: 'desc' } }
-      : sort === ExperienceSort.OLDEST
+      : sort === 'OLDEST'
         ? { event: { eventDate: 'asc' } }
         : { event: { eventDate: 'desc' } };
 
@@ -203,7 +200,7 @@ export class CommunityExperiencesAdminService {
     let pageRows = allRows;
     if (isAggregateSorted) {
       pageRows = [...allRows].sort((a, b) => {
-        if (sort === ExperienceSort.MOST_BOOKINGS) {
+        if (sort === 'MOST_BOOKINGS') {
           return (orderMap.get(b.eventId)?.count ?? 0) - (orderMap.get(a.eventId)?.count ?? 0);
         }
         return (orderMap.get(b.eventId)?.revenue ?? 0) - (orderMap.get(a.eventId)?.revenue ?? 0);
