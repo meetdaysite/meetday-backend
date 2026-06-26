@@ -112,13 +112,13 @@ export class CommunityChatModerationService {
 
       this.prisma.$queryRawUnsafe<AnalyticsRow[]>(
         `SELECT
-           DATE(created_at AT TIME ZONE 'UTC')::text AS day,
-           COUNT(*)::text                            AS messages,
-           COUNT(DISTINCT sender_id)::text           AS participants
-         FROM channel_messages
-         WHERE community_id = $1
-           AND created_at >= $2
-           AND deleted_at IS NULL
+           DATE("createdAt" AT TIME ZONE 'UTC')::text AS day,
+           COUNT(*)::text                             AS messages,
+           COUNT(DISTINCT "senderId")::text           AS participants
+         FROM "channel_messages"
+         WHERE "communityId" = $1
+           AND "createdAt" >= $2
+           AND "deletedAt" IS NULL
          GROUP BY 1 ORDER BY 1 ASC`,
         communityId,
         fourteenDaysAgo,
@@ -126,12 +126,12 @@ export class CommunityChatModerationService {
 
       this.prisma.$queryRawUnsafe<ReportAnalyticsRow[]>(
         `SELECT
-           DATE(created_at AT TIME ZONE 'UTC')::text                        AS day,
+           DATE("createdAt" AT TIME ZONE 'UTC')::text                       AS day,
            COUNT(*)::text                                                    AS reports,
            COUNT(*) FILTER (WHERE action = 'APPROVED')::text                AS approved
-         FROM channel_message_reports
-         WHERE community_id = $1
-           AND created_at >= $2
+         FROM "channel_message_reports"
+         WHERE "communityId" = $1
+           AND "createdAt" >= $2
          GROUP BY 1 ORDER BY 1 ASC`,
         communityId,
         fourteenDaysAgo,
