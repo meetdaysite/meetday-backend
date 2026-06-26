@@ -13,9 +13,10 @@ export class StorageController {
   @Post('upload-url')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Request a presigned S3 upload URL',
-    description: `Returns a presigned **PUT** URL (valid 15 min) and the S3 key.
-Upload the file directly to S3 with a \`PUT\` using the **matching \`Content-Type\` header**, then include the returned \`key\` in the relevant resource body.
+    summary: 'Request a presigned GCS upload URL',
+    description: `Returns a presigned **PUT** URL (valid 15 min) and the GCS object key.
+Upload the file directly to GCS with a **PUT** request. **You must include the exact \`Content-Type\` header** that was passed to this endpoint — it is bound into the URL signature and GCS will reject the upload with 403 if it is missing or mismatched.
+Then include the returned \`key\` in the relevant resource body (e.g. \`imageKey\`, \`coverImageKey\`, \`mediaKeys[]\`).
 
 Each context narrows which \`contentType\` is accepted and who may upload. \`resourceId\` is the UUID of the related resource. Mismatches return \`400\`; insufficient role/ownership returns \`403\`.
 
