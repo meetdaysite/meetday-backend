@@ -15,6 +15,7 @@ import {
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreatePostDto } from './dto/create-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { ListPostsQueryDto } from './dto/feed-misc.dto';
@@ -50,6 +51,7 @@ export class CommunityFeedService {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly auditLog: AuditLogService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   // ─── Posts ──────────────────────────────────────────────────────────────────
@@ -179,7 +181,7 @@ export class CommunityFeedService {
   // ─── Reactions / bookmarks / shares / views ─────────────────────────────────
 
   async react(communityId: string, postId: string, userId: string, emoji: string) {
-    await this.findOrThrow(communityId, postId);
+    const post = await this.findOrThrow(communityId, postId);
     try {
       await this.prisma.$transaction([
         this.prisma.communityPostReaction.create({ data: { postId, userId, emoji } }),
@@ -188,6 +190,22 @@ export class CommunityFeedService {
     } catch (err) {
       if (!this.isUnique(err)) throw err;
     }
+
+    if (userId !== post.authorId) {
+      void (async () => {
+        const reactor = await this.prisma.user.findUnique({ where: { id: userId }, select: { firstName: true } });
+        if (reactor) {
+          await this.notifications.create(
+            post.authorId,
+            'community_post_reacted',
+            `${reactor.firstName} reacted to your post`,
+            `${reactor.firstName} reacted with ${emoji}`,
+            { communityId, postId, reactorId: userId, emoji },
+          );
+        }
+      })().catch(() => {});
+    }
+
     return { success: true };
   }
 
@@ -264,7 +282,7 @@ export class CommunityFeedService {
   // ─── Comments ───────────────────────────────────────────────────────────────
 
   async addComment(communityId: string, postId: string, userId: string, content: string) {
-    await this.findOrThrow(communityId, postId);
+    const post = await this.findOrThrow(communityId, postId);
     const [comment] = await this.prisma.$transaction([
       this.prisma.communityPostComment.create({
         data: { postId, authorId: userId, content },
@@ -272,6 +290,17 @@ export class CommunityFeedService {
       }),
       this.prisma.communityPost.update({ where: { id: postId }, data: { commentCount: { increment: 1 } } }),
     ]);
+
+    if (userId !== post.authorId) {
+      void this.notifications.create(
+        post.authorId,
+        'community_post_commented',
+        `${comment.author.firstName} commented on your post`,
+        content.length > 100 ? `${content.slice(0, 97)}...` : content,
+        { communityId, postId, commentId: comment.id, commenterId: userId },
+      ).catch(() => {});
+    }
+
     return this.presentComment(comment);
   }
 

@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateReviewDto } from './dto/create-review.dto';
 import { UpdateReviewDto } from './dto/update-review.dto';
 
@@ -15,6 +16,7 @@ export class ReviewsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storageService: StorageService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async createReview(userId: string, dto: CreateReviewDto) {
@@ -32,7 +34,7 @@ export class ReviewsService {
     // Verify event has already taken place
     const event = await this.prisma.event.findUnique({
       where: { id: dto.eventId },
-      select: { id: true, eventDate: true, title: true, categoryId: true },
+      select: { id: true, eventDate: true, title: true, categoryId: true, hostProfile: { select: { userId: true } } },
     });
     if (!event) throw new NotFoundException('Event not found');
     if (!event.eventDate || event.eventDate > new Date())
@@ -67,6 +69,17 @@ export class ReviewsService {
     });
 
     void this.syncHostRating(dto.eventId);
+
+    if (event.hostProfile?.userId) {
+      void this.notifications.create(
+        event.hostProfile.userId,
+        'event_reviewed',
+        'New review on your event',
+        `Someone left a ${dto.rating}-star review on "${event.title}".`,
+        { eventId: dto.eventId, reviewId: review.id },
+      ).catch(() => {});
+    }
+
     return review;
   }
 
