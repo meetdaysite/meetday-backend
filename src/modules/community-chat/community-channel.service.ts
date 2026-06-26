@@ -51,6 +51,7 @@ export class CommunityChannelService {
         name: dto.name,
         slug,
         description: dto.description,
+        isPublic: dto.isPublic ?? true,
         welcomeTitle: dto.welcomeTitle,
         welcomeBody: dto.welcomeBody,
         quickReplies: dto.quickReplies ?? [],
@@ -112,6 +113,7 @@ export class CommunityChannelService {
           name: dto.name,
           slug: newSlug,
           description: dto.description,
+          isPublic: dto.isPublic,
           welcomeTitle: dto.welcomeTitle,
           welcomeBody: dto.welcomeBody,
           quickReplies: dto.quickReplies,
@@ -123,6 +125,7 @@ export class CommunityChannelService {
       where: { id: channelId },
       data: {
         description: dto.description,
+        isPublic: dto.isPublic,
         welcomeTitle: dto.welcomeTitle,
         welcomeBody: dto.welcomeBody,
         quickReplies: dto.quickReplies,

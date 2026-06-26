@@ -213,6 +213,24 @@ export class CommunityChatGateway
       }
     }
 
+    // Block muted users from sending
+    const now = new Date();
+    const isMuted = await this.prisma.communityMutedUser.findFirst({
+      where: {
+        communityId: channel.communityId,
+        userId: entry.userId,
+        AND: [
+          { OR: [{ channelId: null }, { channelId: payload.channelId }] },
+          { OR: [{ mutedUntil: null }, { mutedUntil: { gt: now } }] },
+        ],
+      },
+      select: { id: true },
+    });
+    if (isMuted) {
+      client.emit('error', { event: 'send-message', message: 'You are muted in this channel' });
+      return;
+    }
+
     // Clear typing timer for this user+channel
     const typingKey = `channel:${payload.channelId}:${entry.userId}`;
     const existingTimer = this.typingTimers.get(typingKey);

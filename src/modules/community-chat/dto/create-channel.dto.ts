@@ -14,6 +14,11 @@ export class CreateChannelDto {
   @MaxLength(80)
   name: string;
 
+  @ApiPropertyOptional({ default: true, description: 'Whether the channel is visible to all members' })
+  @IsOptional()
+  @IsBoolean()
+  isPublic?: boolean;
+
   @ApiPropertyOptional({ example: 'Plan upcoming events together.' })
   @IsOptional()
   @IsString()
