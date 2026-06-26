@@ -111,18 +111,21 @@ export class EventsController {
 
   @Post(':id/vibe-match')
   @Public()
+  @UseGuards(OptionalAuthGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Get personalised vibe match for an event',
     description:
-      'Stateless, no auth required. Pass vibeType, socialStyle, and interests with affinity ' +
-      '(LIKED / DISLIKED / OPEN_TO) to receive a 0–100 score, 3 reason blocks, and similar attendee avatars.',
+      'Auth optional. Pass vibeType, socialStyle, and interests with affinity ' +
+      '(LIKED / DISLIKED / OPEN_TO) to receive a 0–100 score, 3 reason blocks, and similar attendee avatars. ' +
+      'Authenticated callers also receive a social proximity score based on known co-attendees.',
   })
   getVibeMatch(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: VibeMatchDto,
+    @GetUser('id') userId?: string,
   ) {
-    return this.eventsVibeService.getVibeMatch(id, dto);
+    return this.eventsVibeService.getVibeMatch(id, dto, userId);
   }
 
   @Get(':id/crowd-pulse')
