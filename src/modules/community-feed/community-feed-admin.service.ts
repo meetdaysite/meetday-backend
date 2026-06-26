@@ -226,12 +226,12 @@ export class CommunityFeedAdminService {
     ] = await Promise.all([
       this.dailySeries7('community_posts', 'createdAt', communityId, since7, 'AND "deletedAt" IS NULL'),
       this.dailySeries7('community_posts', 'createdAt', communityId, since14, 'AND "deletedAt" IS NULL', since7),
-      this.dailySeries7('community_post_reactions', 'createdAt', communityId, since7),
-      this.dailySeries7('community_post_comments', 'createdAt', communityId, since7, 'AND "deletedAt" IS NULL'),
-      this.dailySeries7('community_post_shares', 'createdAt', communityId, since7),
-      this.dailySeries7('community_post_reactions', 'createdAt', communityId, since14, '', since7),
-      this.dailySeries7('community_post_comments', 'createdAt', communityId, since14, 'AND "deletedAt" IS NULL', since7),
-      this.dailySeries7('community_post_shares', 'createdAt', communityId, since14, '', since7),
+      this.dailySeriesViaPost('community_post_reactions', communityId, since7),
+      this.dailySeriesViaPost('community_post_comments', communityId, since7, 'AND "deletedAt" IS NULL'),
+      this.dailySeriesViaPost('community_post_shares', communityId, since7),
+      this.dailySeriesViaPost('community_post_reactions', communityId, since14, '', since7),
+      this.dailySeriesViaPost('community_post_comments', communityId, since14, 'AND "deletedAt" IS NULL', since7),
+      this.dailySeriesViaPost('community_post_shares', communityId, since14, '', since7),
       this.dailySeries7('community_post_reports', 'createdAt', communityId, since7),
       this.dailySeries7('community_post_reports', 'createdAt', communityId, since14, '', since7),
       this.approvedSeries(communityId, since7),
@@ -369,6 +369,35 @@ export class CommunityFeedAdminService {
       `SELECT date_trunc('day', "${tsColumn}") AS day, count(*)::int AS count
        FROM "${table}"
        WHERE "communityId" = $1 AND "${tsColumn}" >= $2 ${beforeClause} ${extraWhere}
+       GROUP BY 1 ORDER BY 1`,
+      communityId,
+      since,
+    );
+
+    const buckets = new Array(SPARK_DAYS).fill(0);
+    const startDay = new Date(since);
+    startDay.setHours(0, 0, 0, 0);
+    for (const r of rows) {
+      const idx = Math.floor((new Date(r.day).getTime() - startDay.getTime()) / DAY_MS);
+      if (idx >= 0 && idx < SPARK_DAYS) buckets[idx] = Number(r.count);
+    }
+    return buckets;
+  }
+
+  // For tables that reach the community via postId (reactions, comments, shares)
+  private async dailySeriesViaPost(
+    table: string,
+    communityId: string,
+    since: Date,
+    extraWhere = '',
+    before?: Date,
+  ): Promise<number[]> {
+    const beforeClause = before ? `AND t."createdAt" < '${before.toISOString()}'` : '';
+    const rows = await this.prisma.$queryRawUnsafe<DailyRow[]>(
+      `SELECT date_trunc('day', t."createdAt") AS day, count(*)::int AS count
+       FROM "${table}" t
+       JOIN "community_posts" p ON p.id = t."postId"
+       WHERE p."communityId" = $1 AND t."createdAt" >= $2 ${beforeClause} ${extraWhere}
        GROUP BY 1 ORDER BY 1`,
       communityId,
       since,
