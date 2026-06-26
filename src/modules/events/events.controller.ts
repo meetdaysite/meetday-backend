@@ -116,9 +116,8 @@ export class EventsController {
   @ApiOperation({
     summary: 'Get personalised vibe match for an event',
     description:
-      'Auth optional. Pass vibeType, socialStyle, and interests with affinity ' +
-      '(LIKED / DISLIKED / OPEN_TO) to receive a 0–100 score, 3 reason blocks, and similar attendee avatars. ' +
-      'Authenticated callers also receive a social proximity score based on known co-attendees.',
+      'Auth optional. For anonymous callers: pass vibeType, socialStyle, and interests in the body. ' +
+      'For authenticated callers: stored profile is used automatically; body is ignored.',
   })
   getVibeMatch(
     @Param('id', ParseUUIDPipe) id: string,
@@ -132,7 +131,23 @@ export class EventsController {
   @Public()
   @ApiOperation({
     summary: 'Get crowd pulse for an event',
-    description: 'Returns energy level, crowd style, social friendliness, and top attendee avatars.',
+    description: `Returns the crowd vibe profile for an event's confirmed attendees.
+
+**Numeric scores for bar fills:**
+- \`energyScore\` (0–100) — drives the Energy bar fill. Use a red gradient: 0 = empty, 100 = full.
+- \`socialScore\` (0–100) — drives the Social Friendliness bar fill. Use a blue gradient.
+- \`crowdStyle\` is categorical — map to fixed fills on the frontend:
+  - \`"Party Energy"\` → 80%
+  - \`"Trendy & Social"\` → 65%
+  - \`"Laid-back & Chill"\` → 35%
+  - \`"Mixed Crowd"\` → 50%
+
+**When \`isEstimate: true\` (fewer than 5 vibe-typed attendees):**
+- \`energyScore\` and \`socialScore\` are \`null\` — render bars in a muted/skeleton state.
+- Show a caption such as *"The vibe is still cooking — check back as more people join!"* beneath the bars.
+- String labels (\`energy\`, \`crowdStyle\`, \`socialFriendliness\`) are conservative defaults, not real crowd data — avoid displaying them confidently.
+
+**\`confidence\`** (0–1) reflects how much to trust the data; can be shown as a subtitle e.g. *"Based on 3 attendees"* using \`totalAttendees\`.`,
   })
   getCrowdPulse(@Param('id', ParseUUIDPipe) id: string) {
     return this.eventsVibeService.getCrowdPulse(id);
