@@ -12,6 +12,7 @@ build-dev:
   services:
     - docker:24-dind
   before_script:
+    - docker builder prune -f
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
   script:
     - docker build
@@ -20,5 +21,8 @@ build-dev:
         .
     - docker push $IMAGE:dev
     - docker push $IMAGE:$CI_COMMIT_SHORT_SHA
+  after_script:
+    - docker builder prune -f
+    - docker image prune -f
   rules:
     - if: $CI_COMMIT_BRANCH == "dev"
