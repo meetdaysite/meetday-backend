@@ -413,6 +413,67 @@ export class CommunitiesService {
     return this.findOneForAdmin(id);
   }
 
+  async archive(id: string, adminId: string) {
+    const community = await this.prisma.community.findUnique({
+      where: { id },
+      select: { id: true, status: true, deletedAt: true },
+    });
+    if (!community || community.deletedAt) throw new NotFoundException('Community not found');
+    if (community.status !== CommunityStatus.PUBLISHED) {
+      throw new BadRequestException('Only PUBLISHED communities can be archived');
+    }
+    await this.prisma.community.update({ where: { id }, data: { status: CommunityStatus.ARCHIVED } });
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: AuditAction.COMMUNITY_ARCHIVED,
+      entityType: ENTITY_TYPE,
+      entityId: id,
+    });
+    return { success: true };
+  }
+
+  async restore(id: string, adminId: string) {
+    const community = await this.prisma.community.findUnique({
+      where: { id },
+      select: { id: true, status: true, deletedAt: true },
+    });
+    if (!community || community.deletedAt) throw new NotFoundException('Community not found');
+    if (community.status !== CommunityStatus.ARCHIVED) {
+      throw new BadRequestException('Only ARCHIVED communities can be restored');
+    }
+    await this.prisma.community.update({ where: { id }, data: { status: CommunityStatus.PUBLISHED } });
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: AuditAction.COMMUNITY_RESTORED,
+      entityType: ENTITY_TYPE,
+      entityId: id,
+    });
+    return { success: true };
+  }
+
+  async softDelete(id: string, adminId: string) {
+    const community = await this.prisma.community.findUnique({
+      where: { id },
+      select: { id: true, status: true, deletedAt: true },
+    });
+    if (!community || community.deletedAt) throw new NotFoundException('Community not found');
+    if (community.status === CommunityStatus.PUBLISHED) {
+      throw new BadRequestException('Archive the community before deleting it');
+    }
+    await this.prisma.community.update({ where: { id }, data: { deletedAt: new Date() } });
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: AuditAction.COMMUNITY_DELETED,
+      entityType: ENTITY_TYPE,
+      entityId: id,
+      metadata: { finalStatus: community.status },
+    });
+    return { success: true };
+  }
+
   // ─── Reads ──────────────────────────────────────────────────────────────────
 
   async listForAdmin(query: ListCommunitiesQueryDto) {

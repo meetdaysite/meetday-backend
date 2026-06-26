@@ -888,4 +888,85 @@ export class CommunitiesAdminController {
   publish(@Param('id', ParseUUIDPipe) id: string, @GetUser('id') adminId: string) {
     return this.communitiesService.publish(id, adminId);
   }
+
+  // ─── Archive ───────────────────────────────────────────────────────────────
+
+  @Post(':id/archive')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Archive the community',
+    description:
+      'Transitions the community from `PUBLISHED` to `ARCHIVED`.\n\n' +
+      '- The community disappears from public discovery, browse, and `GET /communities/:slug` (returns 404 for members).\n' +
+      '- New members cannot join — `POST /communities/:id/join` returns 404.\n' +
+      '- Existing members retain access to historical content (chat, feed, announcements).\n' +
+      '- All community data is preserved. Use `POST :id/restore` to bring it back to PUBLISHED.\n\n' +
+      'Throws `400` if the community is not currently `PUBLISHED`.',
+  })
+  @ApiParam({ name: 'id', description: 'UUID of the community to archive.', example: 'c1d2e3f4-a5b6-7890-cdef-012345678901' })
+  @ApiOkResponse({ schema: { example: wrapData({ success: true }) } })
+  @ApiBadRequestResponse({
+    description: 'Community is not in PUBLISHED status.',
+    schema: { example: wrapData({ message: 'Only PUBLISHED communities can be archived', error: 'Bad Request', statusCode: 400 }) },
+  })
+  @ApiNotFoundResponse({
+    description: 'Community not found.',
+    schema: { example: wrapData({ message: 'Community not found', error: 'Not Found', statusCode: 404 }) },
+  })
+  archive(@Param('id', ParseUUIDPipe) id: string, @GetUser('id') adminId: string) {
+    return this.communitiesService.archive(id, adminId);
+  }
+
+  // ─── Restore ───────────────────────────────────────────────────────────────
+
+  @Post(':id/restore')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Restore an archived community',
+    description:
+      'Transitions the community from `ARCHIVED` back to `PUBLISHED`.\n\n' +
+      '- The community reappears on public discovery and browse.\n' +
+      '- Members can join again.\n\n' +
+      'Throws `400` if the community is not currently `ARCHIVED`.',
+  })
+  @ApiParam({ name: 'id', description: 'UUID of the community to restore.', example: 'c1d2e3f4-a5b6-7890-cdef-012345678901' })
+  @ApiOkResponse({ schema: { example: wrapData({ success: true }) } })
+  @ApiBadRequestResponse({
+    description: 'Community is not in ARCHIVED status.',
+    schema: { example: wrapData({ message: 'Only ARCHIVED communities can be restored', error: 'Bad Request', statusCode: 400 }) },
+  })
+  @ApiNotFoundResponse({
+    description: 'Community not found.',
+    schema: { example: wrapData({ message: 'Community not found', error: 'Not Found', statusCode: 404 }) },
+  })
+  restore(@Param('id', ParseUUIDPipe) id: string, @GetUser('id') adminId: string) {
+    return this.communitiesService.restore(id, adminId);
+  }
+
+  // ─── Delete ────────────────────────────────────────────────────────────────
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Soft-delete the community',
+    description:
+      'Soft-deletes the community by setting `deletedAt = now()`. The community is hidden from all admin and member lists immediately.\n\n' +
+      '**Allowed for:** `DRAFT` and `ARCHIVED` communities only.\n\n' +
+      '**Blocked for:** `PUBLISHED` communities — archive the community first (`POST :id/archive`) before deleting.\n\n' +
+      'All underlying data (members, posts, chat, events) is retained in the database and not hard-deleted. ' +
+      'This action is logged as `COMMUNITY_DELETED` in the audit log.',
+  })
+  @ApiParam({ name: 'id', description: 'UUID of the community to delete.', example: 'c1d2e3f4-a5b6-7890-cdef-012345678901' })
+  @ApiOkResponse({ schema: { example: wrapData({ success: true }) } })
+  @ApiBadRequestResponse({
+    description: 'Community is PUBLISHED — must be archived first.',
+    schema: { example: wrapData({ message: 'Archive the community before deleting it', error: 'Bad Request', statusCode: 400 }) },
+  })
+  @ApiNotFoundResponse({
+    description: 'Community not found or already deleted.',
+    schema: { example: wrapData({ message: 'Community not found', error: 'Not Found', statusCode: 404 }) },
+  })
+  softDelete(@Param('id', ParseUUIDPipe) id: string, @GetUser('id') adminId: string) {
+    return this.communitiesService.softDelete(id, adminId);
+  }
 }
