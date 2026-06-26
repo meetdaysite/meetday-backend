@@ -19,11 +19,13 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CommunityChatService } from './community-chat.service';
 import { CommunityChatGateway } from './community-chat.gateway';
 import { CommunityChannelService } from './community-channel.service';
+import { CommunityChatModerationService } from './community-chat-moderation.service';
 import { CommunityDmService } from './community-dm.service';
 import { CommunityPresenceService } from './community-presence.service';
 import { MinCommunityRole } from '../../common/decorators/min-community-role.decorator';
 import { MessageCursorQueryDto } from './dto/message-cursor-query.dto';
 import { CreateIntroDto } from './dto/create-intro.dto';
+import { ReportMessageDto } from './dto/report-message.dto';
 import { CommunityRoleGuard } from '../../common/guards/community-role.guard';
 
 @ApiTags('Community Chat')
@@ -36,6 +38,7 @@ export class CommunityChatController {
     private readonly chatService: CommunityChatService,
     private readonly dmService: CommunityDmService,
     private readonly presenceService: CommunityPresenceService,
+    private readonly moderationService: CommunityChatModerationService,
     private readonly gateway: CommunityChatGateway,
     private readonly prisma: PrismaService,
   ) {}
@@ -126,6 +129,20 @@ export class CommunityChatController {
     );
     this.gateway.emitToChannel(channelId, 'message-deleted', { channelId, messageId });
     return result;
+  }
+
+  @Post('channels/:channelId/messages/:messageId/report')
+  @HttpCode(HttpStatus.CREATED)
+  @MinCommunityRole(CommunityRole.MEMBER)
+  @ApiOperation({ summary: 'Report a message for moderation review' })
+  reportMessage(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @Param('channelId', ParseUUIDPipe) channelId: string,
+    @Param('messageId', ParseUUIDPipe) messageId: string,
+    @GetUser() user: { uid: string; dbUserId?: string },
+    @Body() dto: ReportMessageDto,
+  ) {
+    return this.moderationService.submitReport(communityId, channelId, messageId, user.dbUserId!, dto);
   }
 
   @Delete('channels/:channelId/banner/dismiss')

@@ -82,6 +82,14 @@ model User {
   dmConversationsAsP2    CommunityDmConversation[]   @relation("DmParticipant2")
   sentDmMessages         CommunityDmMessage[]        @relation("DmMessageSender")
   dmReadStates           CommunityDmReadState[]      @relation("DmReadStateUser")
+  channelMsgReports      ChannelMessageReport[]      @relation("channelMsgReporter")
+  channelMsgResolutions  ChannelMessageReport[]      @relation("channelMsgResolver")
+  communityMutes         CommunityMutedUser[]        @relation("mutedInCommunity")
+  communityMutedByUser   CommunityMutedUser[]        @relation("communityMuter")
+  chatKeywordsCreated    ChatKeywordAlert[]          @relation("ChatKeywordCreator")
+  chatBlockedLinksCreated ChatBlockedLink[]          @relation("ChatLinkCreator")
+  chatWarningsReceived   ChatContentWarning[]        @relation("warningReceived")
+  chatWarningsIssued     ChatContentWarning[]        @relation("warningIssued")
 
   // Community announcement back-relations
   authoredAnnouncements CommunityAnnouncement[] @relation("AnnouncementAuthor")
@@ -1159,6 +1167,16 @@ enum AuditAction {
   CHAT_MESSAGE_DELETED_BY_MOD
   CHAT_MESSAGE_PINNED
   CHAT_MESSAGE_UNPINNED
+  CHAT_USER_MUTED
+  CHAT_USER_UNMUTED
+  CHAT_WARNING_ISSUED
+  CHAT_WARNING_REVOKED
+  CHAT_REPORT_RESOLVED
+  CHAT_REPORT_DISMISSED
+  CHAT_KEYWORD_ADDED
+  CHAT_KEYWORD_REMOVED
+  CHAT_LINK_BLOCKED
+  CHAT_LINK_UNBLOCKED
 
   // Community Announcements
   ANNOUNCEMENT_CREATED
@@ -1240,6 +1258,12 @@ model Community {
   posts           CommunityPost[]
   invites         CommunityInvite[]
   savedBy         SavedCommunity[]
+
+  messageReports  ChannelMessageReport[]
+  mutedUsers      CommunityMutedUser[]
+  keywordAlerts   ChatKeywordAlert[]
+  blockedLinks    ChatBlockedLink[]
+  chatWarnings    ChatContentWarning[]
 
   @@index([status])
   @@index([categoryId])
@@ -1377,6 +1401,7 @@ model CommunityChannel {
   slug         String
   description  String?
   isDefault    Boolean  @default(false)
+  isPublic     Boolean  @default(true)
   position     Int      @default(0)
   createdBy    String
   creator      User     @relation("ChannelCreatedBy", fields: [createdBy], references: [id])
@@ -1391,6 +1416,9 @@ model CommunityChannel {
 
   messages     ChannelMessage[]
   memberStates ChannelMemberState[]
+  reports      ChannelMessageReport[]
+  mutes        CommunityMutedUser[]
+  keywordAlerts ChatKeywordAlert[]
 
   @@unique([communityId, slug])
   @@index([communityId, position])
@@ -1418,6 +1446,8 @@ model ChannelMessage {
   replyCount      Int              @default(0)
 
   reactions MessageReaction[]
+  reports   ChannelMessageReport[]
+  warnings  ChatContentWarning[]
 
   deletedAt DateTime?
   createdAt DateTime  @default(now())
@@ -1939,4 +1969,123 @@ model SavedEvent {
   @@unique([userId, eventId])
   @@index([userId])
   @@map("saved_events")
+}
+
+// ─── Community Chat Moderation ────────────────────────────────────────────────
+
+enum MessageReportReason {
+  SPAM
+  HARASSMENT
+  INAPPROPRIATE_CONTENT
+  HATE_SPEECH
+  OTHER
+}
+
+enum MessageReportStatus {
+  PENDING
+  RESOLVED
+  DISMISSED
+}
+
+enum ReportAction {
+  APPROVED
+  REMOVED
+}
+
+model ChannelMessageReport {
+  id          String              @id @default(uuid())
+  messageId   String
+  channelId   String
+  communityId String
+  reporterId  String
+  reason      MessageReportReason
+  body        String?
+  status      MessageReportStatus @default(PENDING)
+  resolvedBy  String?
+  resolvedAt  DateTime?
+  action      ReportAction?
+
+  message   ChannelMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  channel   CommunityChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  community Community      @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  reporter  User           @relation("channelMsgReporter", fields: [reporterId], references: [id])
+  resolver  User?          @relation("channelMsgResolver", fields: [resolvedBy], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([messageId, reporterId])
+  @@index([communityId, status])
+  @@index([messageId])
+  @@map("channel_message_reports")
+}
+
+model CommunityMutedUser {
+  id          String            @id @default(uuid())
+  communityId String
+  userId      String
+  channelId   String?
+  mutedBy     String
+  mutedAt     DateTime          @default(now())
+  mutedUntil  DateTime?
+  reason      String?
+
+  community   Community         @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user        User              @relation("mutedInCommunity", fields: [userId], references: [id])
+  channel     CommunityChannel? @relation(fields: [channelId], references: [id])
+  mutedByUser User              @relation("communityMuter", fields: [mutedBy], references: [id])
+
+  @@index([communityId])
+  @@index([communityId, userId])
+  @@map("community_muted_users")
+}
+
+model ChatKeywordAlert {
+  id          String            @id @default(uuid())
+  communityId String
+  keyword     String
+  channelId   String?
+  createdBy   String
+  createdAt   DateTime          @default(now())
+
+  community Community         @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  channel   CommunityChannel? @relation(fields: [channelId], references: [id])
+  creator   User              @relation("ChatKeywordCreator", fields: [createdBy], references: [id])
+
+  @@index([communityId])
+  @@map("chat_keyword_alerts")
+}
+
+model ChatBlockedLink {
+  id          String    @id @default(uuid())
+  communityId String
+  pattern     String
+  createdBy   String
+  createdAt   DateTime  @default(now())
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  creator   User      @relation("ChatLinkCreator", fields: [createdBy], references: [id])
+
+  @@index([communityId])
+  @@map("chat_blocked_links")
+}
+
+model ChatContentWarning {
+  id          String          @id @default(uuid())
+  communityId String
+  userId      String
+  messageId   String?
+  reason      String
+  issuedBy    String
+  issuedAt    DateTime        @default(now())
+  expiresAt   DateTime?
+
+  community    Community       @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user         User            @relation("warningReceived", fields: [userId], references: [id])
+  message      ChannelMessage? @relation(fields: [messageId], references: [id])
+  issuedByUser User            @relation("warningIssued", fields: [issuedBy], references: [id])
+
+  @@index([communityId])
+  @@index([userId, communityId])
+  @@map("chat_content_warnings")
 }
