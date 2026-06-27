@@ -7,6 +7,8 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { CommunitiesService } from './communities.service';
+import { CommunityFeedService } from '../community-feed/community-feed.service';
+import { ListPostsQueryDto } from '../community-feed/dto/feed-misc.dto';
 import { ListCommunitiesQueryDto } from './dto/list-communities-query.dto';
 import { RecommendCommunitiesQueryDto } from './dto/recommend-communities-query.dto';
 import { JoinCommunityDto } from './dto/join-community.dto';
@@ -22,7 +24,10 @@ import { AddCommunityEventDto } from './dto/add-community-event.dto';
 @ApiBearerAuth('firebase-token')
 @Controller('communities')
 export class CommunitiesController {
-  constructor(private readonly communitiesService: CommunitiesService) {}
+  constructor(
+    private readonly communitiesService: CommunitiesService,
+    private readonly communityFeedService: CommunityFeedService,
+  ) {}
 
   @Get()
   @Public()
@@ -464,6 +469,107 @@ export class CommunitiesController {
     @Query() query: HostExperiencesQueryDto,
   ) {
     return this.communitiesService.getHostCommunityExperiences(communityId, userId, query);
+  }
+
+  @Get(':communityId/host/feed/posts')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'Community feed posts (host view)',
+    description: [
+      'Returns the community post feed for a host. Identical response shape to `GET /communities/:communityId/feed/posts`.',
+      'Requires HOST role only — no community membership required.',
+      'Filter tabs supported: All Posts, Discussions (category=QUESTION), Experiences (category filter), Questions (category=QUESTION).',
+      'The Announcements tab is not implemented (no ANNOUNCEMENT category in schema).',
+    ].join('\n'),
+  })
+  @ApiOkResponse({
+    description: 'Cursor-paginated community feed posts.',
+    schema: {
+      example: {
+        items: [
+          {
+            id: 'post-uuid',
+            communityId: 'community-uuid',
+            postType: 'TEXT',
+            category: 'GENERAL',
+            content: "We've crossed 2,000 members! 🎉",
+            mediaUrls: [],
+            author: { id: 'user-uuid', name: 'Meetday Team', avatarUrl: 'https://...', badge: null },
+            event: null,
+            poll: null,
+            isPinned: true,
+            counts: { reactions: 248, comments: 42, shares: 18, views: 310, bookmarks: 5 },
+            reactedByMe: false,
+            myReactions: [],
+            bookmarkedByMe: false,
+            sharedByMe: false,
+            createdAt: '2026-06-25T09:00:00.000Z',
+          },
+        ],
+        nextCursor: '2026-06-24T09:15:00.000Z',
+      },
+    },
+  })
+  getHostFeedPosts(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @GetUser('id') userId: string,
+    @Query() query: ListPostsQueryDto,
+  ) {
+    return this.communityFeedService.listPosts(communityId, userId, query);
+  }
+
+  @Get(':communityId/host/feed/sidebar')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'Community feed sidebar data (host)',
+    description: [
+      'Returns right-panel data for the host community feed page:',
+      '- `about` — community description + interest tags',
+      '- `stats` — member count, experiences this month, monthly views/comments/shares, audience match %',
+      '- `upcomingExperiences` — next 2 PUBLISHED events (ordered by date ASC)',
+      '- `trendingDiscussions` — top 5 posts by comment count',
+    ].join('\n'),
+  })
+  @ApiOkResponse({
+    description: 'Sidebar widget data for the host community feed page.',
+    schema: {
+      example: {
+        about: {
+          description: 'A community for music lovers who live for the beat.',
+          interestTags: [{ id: 'int-uuid', name: 'Electronic Music', slug: 'electronic-music' }],
+        },
+        stats: {
+          membersCount: 1200,
+          experiencesThisMonth: 18,
+          monthlyViews: 2800,
+          monthlyComments: 640,
+          monthlyShares: 320,
+          audienceMatchPct: 96,
+        },
+        upcomingExperiences: [
+          {
+            id: 'evt-uuid',
+            title: 'Sunset Rooftop Party',
+            eventDate: '2025-05-24T00:00:00.000Z',
+            startTime: '6:00 PM',
+            city: 'Bangalore',
+            coverImageUrl: 'https://cdn.example.com/signed/cover.jpg',
+            interestedCount: 72,
+          },
+        ],
+        trendingDiscussions: [
+          { id: 'post-uuid', content: 'Best underground clubs in Bangalore?', category: 'QUESTION', commentCount: 27 },
+        ],
+      },
+    },
+  })
+  getHostFeedSidebar(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @GetUser('id') userId: string,
+  ) {
+    return this.communitiesService.getHostFeedSidebar(communityId, userId);
   }
 
   @Get(':communityId/host/eligible-events')

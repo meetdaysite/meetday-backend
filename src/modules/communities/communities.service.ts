@@ -19,6 +19,7 @@ import {
   InterestAffinity,
   MemberVisibility,
   OrderStatus,
+  PostStatus,
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -1931,6 +1932,123 @@ export class CommunitiesService {
     );
 
     return { data, total, page, limit };
+  }
+
+  async getHostFeedSidebar(communityId: string, userId: string) {
+    const now = new Date();
+    const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const [community, hostProfile, experiencesThisMonth, monthlyViews, monthlyComments, monthlyShares, upcomingLinks, trending] =
+      await Promise.all([
+        this.prisma.community.findFirst({
+          where: { id: communityId, status: CommunityStatus.PUBLISHED, deletedAt: null },
+          select: {
+            description: true,
+            memberCount: true,
+            interests: { select: { interestId: true, interest: { select: { id: true, name: true, slug: true } } } },
+          },
+        }),
+        this.prisma.hostProfile.findUnique({
+          where: { userId },
+          select: {
+            categories: { select: { categoryId: true } },
+            events: {
+              where: { status: EventStatus.PUBLISHED, categoryId: { not: null } },
+              select: { categoryId: true },
+            },
+          },
+        }),
+        this.prisma.communityEvent.count({ where: { communityId, addedAt: { gte: startOfThisMonth } } }),
+        this.prisma.communityPostView.count({ where: { post: { communityId }, viewedAt: { gte: startOfThisMonth } } }),
+        this.prisma.communityPostComment.count({ where: { post: { communityId }, createdAt: { gte: startOfThisMonth } } }),
+        this.prisma.communityPostShare.count({ where: { post: { communityId }, createdAt: { gte: startOfThisMonth } } }),
+        this.prisma.communityEvent.findMany({
+          where: { communityId, event: { status: EventStatus.PUBLISHED, eventDate: { gte: now } } },
+          orderBy: { event: { eventDate: 'asc' } },
+          take: 2,
+          include: {
+            event: {
+              include: {
+                media: { where: { type: 'COVER' }, take: 1 },
+                tickets: { select: { soldCount: true } },
+              },
+            },
+          },
+        }),
+        this.prisma.communityPost.findMany({
+          where: { communityId, status: PostStatus.PUBLISHED, deletedAt: null },
+          orderBy: { commentCount: 'desc' },
+          take: 5,
+          select: { id: true, content: true, category: true, commentCount: true },
+        }),
+      ]);
+
+    if (!community) throw new NotFoundException('Community not found');
+
+    // Audience match score — same computation as getHostCommunityOverview.
+    let hostInterestIds = new Set<string>();
+    if (hostProfile) {
+      const categoryIds = new Set<string>([
+        ...hostProfile.categories.map((c) => c.categoryId),
+        ...hostProfile.events.map((e) => e.categoryId).filter((id): id is string => id !== null),
+      ]);
+      if (categoryIds.size > 0) {
+        const interestMappings = await this.prisma.interestCategory.findMany({
+          where: { categoryId: { in: [...categoryIds] } },
+          select: { interestId: true },
+        });
+        hostInterestIds = new Set(interestMappings.map((m) => m.interestId));
+      }
+    }
+    const communityInterestIds = community.interests.map((i) => i.interestId);
+    let audienceMatchPct: number | null = null;
+    if (communityInterestIds.length > 0) {
+      const overlap = communityInterestIds.filter((id) => hostInterestIds.has(id)).length;
+      audienceMatchPct = Math.round((overlap / communityInterestIds.length) * 100);
+    }
+
+    // Upcoming experiences — presign cover, sum soldCount as interestedCount.
+    const upcomingExperiences = await Promise.all(
+      upcomingLinks.map(async ({ event }) => {
+        const coverUrl = event.media[0]?.url
+          ? await this.storageService.getPresignedDownloadUrl(event.media[0].url)
+          : null;
+        return {
+          id: event.id,
+          title: event.title,
+          eventDate: event.eventDate,
+          startTime: event.startTime,
+          city: event.city,
+          coverImageUrl: coverUrl,
+          interestedCount: event.tickets.reduce((n, t) => n + t.soldCount, 0),
+        };
+      }),
+    );
+
+    // Trending discussions — truncate content for sidebar preview.
+    const trendingDiscussions = trending.map((p) => ({
+      id: p.id,
+      content: p.content.length > 80 ? p.content.slice(0, 80) + '…' : p.content,
+      category: p.category,
+      commentCount: p.commentCount,
+    }));
+
+    return {
+      about: {
+        description: community.description,
+        interestTags: community.interests.map((i) => i.interest),
+      },
+      stats: {
+        membersCount: community.memberCount,
+        experiencesThisMonth,
+        monthlyViews,
+        monthlyComments,
+        monthlyShares,
+        audienceMatchPct,
+      },
+      upcomingExperiences,
+      trendingDiscussions,
+    };
   }
 
   async getHostEligibleEvents(
