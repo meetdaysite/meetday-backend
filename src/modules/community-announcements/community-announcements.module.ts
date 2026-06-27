@@ -4,6 +4,7 @@ import { StorageModule } from '../../common/storage/storage.module';
 import { CommunityRoleGuard } from '../../common/guards/community-role.guard';
 import { CommunityAnnouncementsAdminController } from './community-announcements-admin.controller';
 import { CommunityAnnouncementsController } from './community-announcements.controller';
+import { CommunityAnnouncementsHostController } from './community-announcements-host.controller';
 import { CommunityAnnouncementsProcessor } from './community-announcements.processor';
 import { CommunityAnnouncementsService } from './community-announcements.service';
 
@@ -12,7 +13,7 @@ import { CommunityAnnouncementsService } from './community-announcements.service
     BullModule.registerQueue({ name: 'community-announcements' }),
     StorageModule,
   ],
-  controllers: [CommunityAnnouncementsController, CommunityAnnouncementsAdminController],
+  controllers: [CommunityAnnouncementsController, CommunityAnnouncementsAdminController, CommunityAnnouncementsHostController],
   providers: [
     CommunityAnnouncementsService,
     CommunityAnnouncementsProcessor,

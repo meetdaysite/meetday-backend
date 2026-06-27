@@ -41,6 +41,207 @@ export class CommunityAnnouncementsService {
     @InjectQueue('community-announcements') private readonly queue: Queue,
   ) {}
 
+  // ─── Host mutations ─────────────────────────────────────────────────────────
+
+  async createAsHost(communityId: string, hostId: string, dto: CreateAnnouncementDto) {
+    const community = await this.prisma.community.findFirst({
+      where: { id: communityId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!community) throw new NotFoundException('Community not found');
+
+    const status = dto.status ?? AnnouncementStatus.PUBLISHED;
+    const isScheduled = status === AnnouncementStatus.SCHEDULED;
+    const isDraft = status === AnnouncementStatus.DRAFT;
+
+    const announcement = await this.prisma.communityAnnouncement.create({
+      data: {
+        communityId,
+        authorId: hostId,
+        authorRole: 'HOST',
+        category: dto.category,
+        title: dto.title,
+        body: dto.body,
+        imageKey: dto.imageKey,
+        status,
+        scheduledAt: isScheduled && dto.scheduledAt ? new Date(dto.scheduledAt) : null,
+        publishedAt: isDraft || isScheduled ? null : new Date(),
+      },
+      include: { author: AUTHOR_SELECT },
+    });
+
+    this.auditLog.log({
+      actorId: hostId,
+      actorRole: 'HOST',
+      action: AuditAction.ANNOUNCEMENT_CREATED,
+      entityType: ENTITY_TYPE,
+      entityId: announcement.id,
+      metadata: { communityId, category: dto.category, status },
+    });
+
+    if (!isDraft) {
+      const delay =
+        isScheduled && dto.scheduledAt
+          ? Math.max(0, new Date(dto.scheduledAt).getTime() - Date.now())
+          : 0;
+      await this.queue.add(
+        'fan-out',
+        { announcementId: announcement.id, communityId },
+        { delay, removeOnComplete: true, attempts: 3, backoff: { type: 'exponential', delay: 5000 } },
+      );
+    }
+
+    return this.present({ ...announcement, likedByMe: false, bookmarkedByMe: false });
+  }
+
+  async updateAsHost(communityId: string, id: string, hostId: string, dto: UpdateAnnouncementDto) {
+    await this.findOrThrowOwned(communityId, id, hostId);
+
+    const updated = await this.prisma.communityAnnouncement.update({
+      where: { id },
+      data: { category: dto.category, title: dto.title, body: dto.body, imageKey: dto.imageKey },
+      include: { author: AUTHOR_SELECT },
+    });
+
+    this.auditLog.log({
+      actorId: hostId,
+      actorRole: 'HOST',
+      action: AuditAction.ANNOUNCEMENT_UPDATED,
+      entityType: ENTITY_TYPE,
+      entityId: id,
+      metadata: { communityId },
+    });
+
+    return this.present(updated);
+  }
+
+  async softDeleteAsHost(communityId: string, id: string, hostId: string) {
+    await this.findOrThrowOwned(communityId, id, hostId);
+
+    await this.prisma.communityAnnouncement.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
+
+    this.auditLog.log({
+      actorId: hostId,
+      actorRole: 'HOST',
+      action: AuditAction.ANNOUNCEMENT_DELETED,
+      entityType: ENTITY_TYPE,
+      entityId: id,
+      metadata: { communityId },
+    });
+
+    return { success: true };
+  }
+
+  async pinAsHost(communityId: string, id: string, hostId: string) {
+    await this.findOrThrowOwned(communityId, id, hostId);
+
+    const updated = await this.prisma.communityAnnouncement.update({
+      where: { id },
+      data: { isPinned: true, pinnedAt: new Date() },
+      include: { author: AUTHOR_SELECT },
+    });
+
+    this.auditLog.log({
+      actorId: hostId,
+      actorRole: 'HOST',
+      action: AuditAction.ANNOUNCEMENT_PINNED,
+      entityType: ENTITY_TYPE,
+      entityId: id,
+      metadata: { communityId },
+    });
+
+    return this.present(updated);
+  }
+
+  async unpinAsHost(communityId: string, id: string, hostId: string) {
+    await this.findOrThrowOwned(communityId, id, hostId);
+
+    const updated = await this.prisma.communityAnnouncement.update({
+      where: { id },
+      data: { isPinned: false, pinnedAt: null },
+      include: { author: AUTHOR_SELECT },
+    });
+
+    this.auditLog.log({
+      actorId: hostId,
+      actorRole: 'HOST',
+      action: AuditAction.ANNOUNCEMENT_UNPINNED,
+      entityType: ENTITY_TYPE,
+      entityId: id,
+      metadata: { communityId },
+    });
+
+    return this.present(updated);
+  }
+
+  // ─── Host reads ──────────────────────────────────────────────────────────────
+
+  async listForHost(communityId: string, hostId: string, query: AdminListAnnouncementsQueryDto) {
+    const { status, page = 1, limit = 10 } = query;
+
+    const where: Prisma.CommunityAnnouncementWhereInput = {
+      communityId,
+      authorId: hostId,
+      deletedAt: null,
+      ...(status ? { status } : {}),
+    };
+
+    const [items, total] = await Promise.all([
+      this.prisma.communityAnnouncement.findMany({
+        where,
+        include: { author: AUTHOR_SELECT },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.communityAnnouncement.count({ where }),
+    ]);
+
+    return {
+      items: await Promise.all(items.map((a) => this.present(a))),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async hostStats(communityId: string, hostId: string) {
+    const windowStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const prevWindowStart = new Date(windowStart.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    const baseWhere = { communityId, authorId: hostId, deletedAt: null } as const;
+
+    const [published, scheduled, drafts, reachNow, reachPrev] = await Promise.all([
+      this.prisma.communityAnnouncement.count({ where: { ...baseWhere, status: AnnouncementStatus.PUBLISHED } }),
+      this.prisma.communityAnnouncement.count({ where: { ...baseWhere, status: AnnouncementStatus.SCHEDULED } }),
+      this.prisma.communityAnnouncement.count({ where: { ...baseWhere, status: AnnouncementStatus.DRAFT } }),
+      this.prisma.communityAnnouncement.aggregate({
+        where: { ...baseWhere, status: AnnouncementStatus.PUBLISHED, publishedAt: { gte: windowStart } },
+        _sum: { reachCount: true },
+      }),
+      this.prisma.communityAnnouncement.aggregate({
+        where: { ...baseWhere, status: AnnouncementStatus.PUBLISHED, publishedAt: { gte: prevWindowStart, lt: windowStart } },
+        _sum: { reachCount: true },
+      }),
+    ]);
+
+    const reachNowVal = reachNow._sum.reachCount ?? 0;
+    const reachPrevVal = reachPrev._sum.reachCount ?? 0;
+    const reachChangePercent =
+      reachPrevVal > 0 ? Math.round(((reachNowVal - reachPrevVal) / reachPrevVal) * 100) : null;
+
+    return {
+      published,
+      scheduled,
+      drafts,
+      totalReach: { value: reachNowVal, changePercent: reachChangePercent, windowDays: 7 },
+    };
+  }
+
   // ─── Admin mutations ────────────────────────────────────────────────────────
 
   async create(communityId: string, authorId: string, dto: CreateAnnouncementDto) {
@@ -408,6 +609,16 @@ export class CommunityAnnouncementsService {
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
+
+  private async findOrThrowOwned(communityId: string, id: string, hostId: string) {
+    const announcement = await this.prisma.communityAnnouncement.findFirst({
+      where: { id, communityId, deletedAt: null },
+    });
+    if (!announcement) throw new NotFoundException('Announcement not found');
+    if (announcement.authorId !== hostId)
+      throw new ForbiddenException('You can only modify your own announcements');
+    return announcement;
+  }
 
   private async findOrThrow(communityId: string, id: string) {
     const announcement = await this.prisma.communityAnnouncement.findFirst({

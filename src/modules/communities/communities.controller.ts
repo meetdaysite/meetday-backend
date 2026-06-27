@@ -7,6 +7,8 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { CommunitiesService } from './communities.service';
+import { CommunityFeedService } from '../community-feed/community-feed.service';
+import { ListPostsQueryDto } from '../community-feed/dto/feed-misc.dto';
 import { ListCommunitiesQueryDto } from './dto/list-communities-query.dto';
 import { RecommendCommunitiesQueryDto } from './dto/recommend-communities-query.dto';
 import { JoinCommunityDto } from './dto/join-community.dto';
@@ -15,13 +17,17 @@ import { ListSavedCommunitiesQueryDto } from './dto/list-saved-communities-query
 import { ListJoinedCommunitiesQueryDto } from './dto/list-joined-communities-query.dto';
 import { ListHostCommunitiesQueryDto } from './dto/list-host-communities-query.dto';
 import { HostEligibleEventsQueryDto } from './dto/host-eligible-events-query.dto';
+import { HostExperiencesQueryDto } from './dto/host-experiences-query.dto';
 import { AddCommunityEventDto } from './dto/add-community-event.dto';
 
 @ApiTags('Communities')
 @ApiBearerAuth('firebase-token')
 @Controller('communities')
 export class CommunitiesController {
-  constructor(private readonly communitiesService: CommunitiesService) {}
+  constructor(
+    private readonly communitiesService: CommunitiesService,
+    private readonly communityFeedService: CommunityFeedService,
+  ) {}
 
   @Get()
   @Public()
@@ -355,6 +361,215 @@ export class CommunitiesController {
     @GetUser('id') userId: string,
   ) {
     return this.communitiesService.getHostCommunityOverview(communityId, userId);
+  }
+
+  @Get(':communityId/host/audience')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'Community audience analytics (host)',
+    description: [
+      'Returns the full Audience tab payload for a community — member stats with month-over-month deltas,',
+      'age distribution (all 6 buckets), gender split, top cities, audience interests with member percentages,',
+      'activity metrics (views/comments/shares), and computed highlights.',
+      '',
+      'No membership required — any HOST can view audience analytics for any PUBLISHED community.',
+    ].join('\n'),
+  })
+  @ApiOkResponse({
+    description: 'Full audience analytics for the host dashboard Audience tab.',
+    schema: {
+      example: {
+        stats: {
+          totalMembers: 1200,
+          totalMemberGrowthPct: 18.0,
+          newMembersThisMonth: 320,
+          newMemberGrowthPct: 15.0,
+          engagementRate: 78.5,
+          engagementRateDelta: 8.2,
+          avgExperienceRating: 4.6,
+          avgExperienceRatingDelta: 0.4,
+        },
+        demographics: {
+          ageDistribution: [
+            { range: 'UNDER_18', label: 'Under 18', count: 0, pct: 0 },
+            { range: 'AGE_18_24', label: '18-24', count: 180, pct: 35.3 },
+            { range: 'AGE_25_34', label: '25-34', count: 220, pct: 43.1 },
+            { range: 'AGE_35_44', label: '35-44', count: 80, pct: 15.7 },
+            { range: 'AGE_45_54', label: '45-54', count: 22, pct: 4.3 },
+            { range: 'AGE_55_PLUS', label: '55+', count: 8, pct: 1.6 },
+          ],
+          genderSplit: { male: 40, female: 22, nonBinary: 2, malePct: 63, femalePct: 34, nonBinaryPct: 3 },
+        },
+        topCities: [
+          { city: 'Bangalore', count: 520, pct: 43.3 },
+          { city: 'Mumbai', count: 280, pct: 23.3 },
+        ],
+        interests: [
+          { id: 'int-uuid', name: 'Electronic Music', slug: 'electronic-music', memberPct: 72.0 },
+        ],
+        activity: {
+          eventViews: { total: 24560, growthPct: 12.5 },
+          comments: { total: 3402, growthPct: -4.2 },
+          shares: { total: 890, growthPct: 8.0 },
+        },
+        highlights: ['Highly active audience', 'Strong interest in Electronic Music'],
+      },
+    },
+  })
+  getHostCommunityAudience(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @GetUser('id') userId: string,
+  ) {
+    return this.communitiesService.getHostCommunityAudience(communityId, userId);
+  }
+
+  @Get(':communityId/host/experiences')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'Experiences in this community (host)',
+    description: [
+      'Returns paginated PUBLISHED events linked to this community, with per-event stats.',
+      '',
+      '**Stats:**',
+      '- `views` — total order attempts (all statuses) as engagement proxy',
+      '- `interestedCount` — number of users who bookmarked/saved the event',
+      '- `goingCount` — confirmed attendees (CONFIRMED orders)',
+    ].join('\n'),
+  })
+  @ApiOkResponse({
+    description: 'Paginated list of experiences in this community.',
+    schema: {
+      example: {
+        data: [
+          {
+            id: 'evt-uuid',
+            title: 'Deep House Rooftop Sessions',
+            description: 'An electrifying rooftop experience with deep house grooves.',
+            eventDate: '2025-05-24T00:00:00.000Z',
+            startTime: '7:00 PM',
+            city: 'Mumbai',
+            coverImageUrl: 'https://cdn.example.com/signed/cover.jpg',
+            communityEventId: 'ce-uuid',
+            addedAt: '2026-01-15T10:00:00.000Z',
+            source: 'MANUAL',
+            stats: { views: 126, interestedCount: 32, goingCount: 18 },
+          },
+        ],
+        total: 12,
+        page: 1,
+        limit: 20,
+      },
+    },
+  })
+  getHostCommunityExperiences(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @GetUser('id') userId: string,
+    @Query() query: HostExperiencesQueryDto,
+  ) {
+    return this.communitiesService.getHostCommunityExperiences(communityId, userId, query);
+  }
+
+  @Get(':communityId/host/feed/posts')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'Community feed posts (host view)',
+    description: [
+      'Returns the community post feed for a host. Identical response shape to `GET /communities/:communityId/feed/posts`.',
+      'Requires HOST role only — no community membership required.',
+      'Filter tabs supported: All Posts, Discussions (category=QUESTION), Experiences (category filter), Questions (category=QUESTION).',
+      'The Announcements tab is not implemented (no ANNOUNCEMENT category in schema).',
+    ].join('\n'),
+  })
+  @ApiOkResponse({
+    description: 'Cursor-paginated community feed posts.',
+    schema: {
+      example: {
+        items: [
+          {
+            id: 'post-uuid',
+            communityId: 'community-uuid',
+            postType: 'TEXT',
+            category: 'GENERAL',
+            content: "We've crossed 2,000 members! 🎉",
+            mediaUrls: [],
+            author: { id: 'user-uuid', name: 'Meetday Team', avatarUrl: 'https://...', badge: null },
+            event: null,
+            poll: null,
+            isPinned: true,
+            counts: { reactions: 248, comments: 42, shares: 18, views: 310, bookmarks: 5 },
+            reactedByMe: false,
+            myReactions: [],
+            bookmarkedByMe: false,
+            sharedByMe: false,
+            createdAt: '2026-06-25T09:00:00.000Z',
+          },
+        ],
+        nextCursor: '2026-06-24T09:15:00.000Z',
+      },
+    },
+  })
+  getHostFeedPosts(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @GetUser('id') userId: string,
+    @Query() query: ListPostsQueryDto,
+  ) {
+    return this.communityFeedService.listPosts(communityId, userId, query);
+  }
+
+  @Get(':communityId/host/feed/sidebar')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'Community feed sidebar data (host)',
+    description: [
+      'Returns right-panel data for the host community feed page:',
+      '- `about` — community description + interest tags',
+      '- `stats` — member count, experiences this month, monthly views/comments/shares, audience match %',
+      '- `upcomingExperiences` — next 2 PUBLISHED events (ordered by date ASC)',
+      '- `trendingDiscussions` — top 5 posts by comment count',
+    ].join('\n'),
+  })
+  @ApiOkResponse({
+    description: 'Sidebar widget data for the host community feed page.',
+    schema: {
+      example: {
+        about: {
+          description: 'A community for music lovers who live for the beat.',
+          interestTags: [{ id: 'int-uuid', name: 'Electronic Music', slug: 'electronic-music' }],
+        },
+        stats: {
+          membersCount: 1200,
+          experiencesThisMonth: 18,
+          monthlyViews: 2800,
+          monthlyComments: 640,
+          monthlyShares: 320,
+          audienceMatchPct: 96,
+        },
+        upcomingExperiences: [
+          {
+            id: 'evt-uuid',
+            title: 'Sunset Rooftop Party',
+            eventDate: '2025-05-24T00:00:00.000Z',
+            startTime: '6:00 PM',
+            city: 'Bangalore',
+            coverImageUrl: 'https://cdn.example.com/signed/cover.jpg',
+            interestedCount: 72,
+          },
+        ],
+        trendingDiscussions: [
+          { id: 'post-uuid', content: 'Best underground clubs in Bangalore?', category: 'QUESTION', commentCount: 27 },
+        ],
+      },
+    },
+  })
+  getHostFeedSidebar(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @GetUser('id') userId: string,
+  ) {
+    return this.communitiesService.getHostFeedSidebar(communityId, userId);
   }
 
   @Get(':communityId/host/eligible-events')

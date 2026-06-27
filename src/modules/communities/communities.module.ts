@@ -14,10 +14,11 @@ import { StorageModule } from '../../common/storage/storage.module';
 import { ConsentModule } from '../consent/consent.module';
 import { CommunityChatModule } from '../community-chat/community-chat.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { CommunityFeedModule } from '../community-feed/community-feed.module';
 import { CommunityRoleGuard } from '../../common/guards/community-role.guard';
 
 @Module({
-  imports: [StorageModule, ConsentModule, CommunityChatModule, NotificationsModule, MulterModule.register()],
+  imports: [StorageModule, ConsentModule, CommunityChatModule, NotificationsModule, CommunityFeedModule, MulterModule.register()],
   controllers: [CommunitiesAdminController, CommunitiesController, CommunityMembersController, CommunityMembersAdminController],
   providers: [CommunitiesService, CommunityMembersService, CommunityMembersAdminService, CommunityOverviewService, CommunityAnalyticsService, CommunityExperiencesAdminService, CommunityRoleGuard],
   exports: [CommunitiesService, CommunityMembersService],
