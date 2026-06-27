@@ -481,6 +481,99 @@ export class CommunitiesService {
 
   // ─── Reads ──────────────────────────────────────────────────────────────────
 
+  async getAdminDashboardStats() {
+    const now = new Date();
+    const d30 = new Date(now.getTime() - 30 * 86_400_000);
+    const d60 = new Date(now.getTime() - 60 * 86_400_000);
+
+    const [
+      totalCommunities,
+      activeCommunities,
+      memberAgg,
+      newCommunitiesLast30,
+      newCommunitiesPrior30,
+      newPublishedLast30,
+      newPublishedPrior30,
+      newMembersLast30,
+      newMembersPrior30,
+      upcomingNow,
+      upcomingPrior,
+      engagementRows,
+    ] = await Promise.all([
+      this.prisma.community.count({ where: { deletedAt: null } }),
+      this.prisma.community.count({ where: { deletedAt: null, status: CommunityStatus.PUBLISHED } }),
+      this.prisma.community.aggregate({ _sum: { memberCount: true }, where: { deletedAt: null } }),
+      this.prisma.community.count({ where: { deletedAt: null, createdAt: { gte: d30 } } }),
+      this.prisma.community.count({ where: { deletedAt: null, createdAt: { gte: d60, lt: d30 } } }),
+      this.prisma.community.count({ where: { deletedAt: null, publishedAt: { gte: d30 } } }),
+      this.prisma.community.count({ where: { deletedAt: null, publishedAt: { gte: d60, lt: d30 } } }),
+      this.prisma.communityMember.count({ where: { joinedAt: { gte: d30 } } }),
+      this.prisma.communityMember.count({ where: { joinedAt: { gte: d60, lt: d30 } } }),
+      // distinct upcoming events linked to any community
+      this.prisma.$queryRaw<[{ cnt: bigint }]>`
+        SELECT COUNT(DISTINCT ce."eventId") AS cnt
+        FROM community_events ce
+        JOIN events e ON e.id = ce."eventId"
+        WHERE e.status = 'PUBLISHED' AND e."eventDate" >= ${now}
+      `,
+      // same query anchored 30 days ago (events that were upcoming at that point)
+      this.prisma.$queryRaw<[{ cnt: bigint }]>`
+        SELECT COUNT(DISTINCT ce."eventId") AS cnt
+        FROM community_events ce
+        JOIN events e ON e.id = ce."eventId"
+        WHERE e.status = 'PUBLISHED'
+          AND e."eventDate" >= ${d30}
+          AND ce."addedAt" <= ${d30}
+      `,
+      // avg (active members / total members) per PUBLISHED community
+      this.prisma.$queryRaw<[{ avg_pct: string | null }]>`
+        SELECT ROUND(AVG(
+          CASE
+            WHEN c."memberCount" = 0 THEN 0
+            ELSE (active_cnt.n::FLOAT / c."memberCount") * 100
+          END
+        )::NUMERIC, 1) AS avg_pct
+        FROM communities c
+        LEFT JOIN (
+          SELECT "communityId", COUNT(*) AS n
+          FROM community_members
+          WHERE status = 'ACTIVE' AND "lastActivityAt" >= ${d30}
+          GROUP BY "communityId"
+        ) active_cnt ON active_cnt."communityId" = c.id
+        WHERE c.status = 'PUBLISHED' AND c."deletedAt" IS NULL
+      `,
+    ]);
+
+    const deltaPct = (cur: number, prior: number) =>
+      prior === 0 ? 0 : Math.round(((cur - prior) / prior) * 100);
+
+    return {
+      totalCommunities: {
+        value: totalCommunities,
+        deltaPct: deltaPct(newCommunitiesLast30, newCommunitiesPrior30),
+      },
+      activeCommunities: {
+        value: activeCommunities,
+        deltaPct: deltaPct(newPublishedLast30, newPublishedPrior30),
+      },
+      totalMembers: {
+        value: memberAgg._sum.memberCount ?? 0,
+        deltaPct: deltaPct(newMembersLast30, newMembersPrior30),
+      },
+      upcomingEvents: {
+        value: Number(upcomingNow[0]?.cnt ?? 0),
+        deltaPct: deltaPct(
+          Number(upcomingNow[0]?.cnt ?? 0),
+          Number(upcomingPrior[0]?.cnt ?? 0),
+        ),
+      },
+      avgEngagementPct: {
+        value: parseFloat(engagementRows[0]?.avg_pct ?? '0'),
+        deltaPct: null as number | null,
+      },
+    };
+  }
+
   async listForAdmin(query: ListCommunitiesQueryDto) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;

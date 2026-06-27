@@ -454,6 +454,41 @@ export class CommunitiesAdminController {
     return this.experiencesAdminService.listExperiences(id, query);
   }
 
+  // ─── Dashboard stats ───────────────────────────────────────────────────────
+
+  @Get('stats')
+  @ApiOperation({
+    summary: 'All-communities dashboard stats',
+    description:
+      'Returns the five aggregate stat cards shown at the top of the All Communities admin page.\n\n' +
+      '**Fields per card:**\n' +
+      '- `value` — current aggregate value.\n' +
+      '- `deltaPct` — percentage change vs the prior 30-day window (positive = growth). ' +
+      '`null` for `avgEngagementPct` (no historical snapshot available).\n\n' +
+      '**Card definitions:**\n' +
+      '- `totalCommunities` — all non-deleted communities.\n' +
+      '- `activeCommunities` — communities in `PUBLISHED` status.\n' +
+      '- `totalMembers` — sum of denormalized `memberCount` across all communities.\n' +
+      '- `upcomingEvents` — distinct `PUBLISHED` events with a future `eventDate` linked to at least one community.\n' +
+      '- `avgEngagementPct` — average of `(activeMembers / memberCount × 100)` per `PUBLISHED` community, ' +
+      'where active = members with `lastActivityAt` in the last 30 days.',
+  })
+  @ApiOkResponse({
+    description: 'Five dashboard stat cards.',
+    schema: {
+      example: wrapData({
+        totalCommunities:  { value: 24,   deltaPct: 12 },
+        activeCommunities: { value: 18,   deltaPct: 8  },
+        totalMembers:      { value: 18600, deltaPct: 15 },
+        upcomingEvents:    { value: 96,   deltaPct: 10 },
+        avgEngagementPct:  { value: 72.0, deltaPct: null },
+      }),
+    },
+  })
+  getDashboardStats() {
+    return this.communitiesService.getAdminDashboardStats();
+  }
+
   // ─── Get single ────────────────────────────────────────────────────────────
 
   @Get(':id')
