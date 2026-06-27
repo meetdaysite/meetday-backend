@@ -15,6 +15,7 @@ import { ListSavedCommunitiesQueryDto } from './dto/list-saved-communities-query
 import { ListJoinedCommunitiesQueryDto } from './dto/list-joined-communities-query.dto';
 import { ListHostCommunitiesQueryDto } from './dto/list-host-communities-query.dto';
 import { HostEligibleEventsQueryDto } from './dto/host-eligible-events-query.dto';
+import { HostExperiencesQueryDto } from './dto/host-experiences-query.dto';
 import { AddCommunityEventDto } from './dto/add-community-event.dto';
 
 @ApiTags('Communities')
@@ -416,6 +417,53 @@ export class CommunitiesController {
     @GetUser('id') userId: string,
   ) {
     return this.communitiesService.getHostCommunityAudience(communityId, userId);
+  }
+
+  @Get(':communityId/host/experiences')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'Experiences in this community (host)',
+    description: [
+      'Returns paginated PUBLISHED events linked to this community, with per-event stats.',
+      '',
+      '**Stats:**',
+      '- `views` — total order attempts (all statuses) as engagement proxy',
+      '- `interestedCount` — number of users who bookmarked/saved the event',
+      '- `goingCount` — confirmed attendees (CONFIRMED orders)',
+    ].join('\n'),
+  })
+  @ApiOkResponse({
+    description: 'Paginated list of experiences in this community.',
+    schema: {
+      example: {
+        data: [
+          {
+            id: 'evt-uuid',
+            title: 'Deep House Rooftop Sessions',
+            description: 'An electrifying rooftop experience with deep house grooves.',
+            eventDate: '2025-05-24T00:00:00.000Z',
+            startTime: '7:00 PM',
+            city: 'Mumbai',
+            coverImageUrl: 'https://cdn.example.com/signed/cover.jpg',
+            communityEventId: 'ce-uuid',
+            addedAt: '2026-01-15T10:00:00.000Z',
+            source: 'MANUAL',
+            stats: { views: 126, interestedCount: 32, goingCount: 18 },
+          },
+        ],
+        total: 12,
+        page: 1,
+        limit: 20,
+      },
+    },
+  })
+  getHostCommunityExperiences(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @GetUser('id') userId: string,
+    @Query() query: HostExperiencesQueryDto,
+  ) {
+    return this.communitiesService.getHostCommunityExperiences(communityId, userId, query);
   }
 
   @Get(':communityId/host/eligible-events')

@@ -1847,6 +1847,92 @@ export class CommunitiesService {
     };
   }
 
+  async getHostCommunityExperiences(
+    communityId: string,
+    _userId: string,
+    query: { page?: number; limit?: number },
+  ) {
+    const community = await this.prisma.community.findFirst({
+      where: { id: communityId, status: CommunityStatus.PUBLISHED, deletedAt: null },
+      select: { id: true },
+    });
+    if (!community) throw new NotFoundException('Community not found');
+
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const eventWhere = { communityId, event: { status: EventStatus.PUBLISHED } };
+    const [total, communityEvents] = await Promise.all([
+      this.prisma.communityEvent.count({ where: eventWhere }),
+      this.prisma.communityEvent.findMany({
+        where: eventWhere,
+        orderBy: { addedAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: {
+          event: {
+            include: {
+              media: { where: { type: 'COVER' }, take: 1 },
+            },
+          },
+        },
+      }),
+    ]);
+
+    const eventIds = communityEvents.map((ce) => ce.event.id);
+    const [totalOrdersByEvent, confirmedOrdersByEvent, savedByEvent] =
+      eventIds.length > 0
+        ? await Promise.all([
+            this.prisma.order.groupBy({
+              by: ['eventId'],
+              where: { eventId: { in: eventIds } },
+              _count: { _all: true },
+            }),
+            this.prisma.order.groupBy({
+              by: ['eventId'],
+              where: { eventId: { in: eventIds }, status: OrderStatus.CONFIRMED },
+              _count: { _all: true },
+            }),
+            this.prisma.savedEvent.groupBy({
+              by: ['eventId'],
+              where: { eventId: { in: eventIds } },
+              _count: { _all: true },
+            }),
+          ])
+        : [[], [], []];
+
+    const totalOrdersMap = new Map(totalOrdersByEvent.map((r) => [r.eventId, r._count._all]));
+    const confirmedOrdersMap = new Map(confirmedOrdersByEvent.map((r) => [r.eventId, r._count._all]));
+    const savedMap = new Map(savedByEvent.map((r) => [r.eventId, r._count._all]));
+
+    const data = await Promise.all(
+      communityEvents.map(async (ce) => {
+        const coverUrl = ce.event.media[0]?.url
+          ? await this.storageService.getPresignedDownloadUrl(ce.event.media[0].url)
+          : null;
+        return {
+          id: ce.event.id,
+          title: ce.event.title,
+          description: ce.event.description,
+          eventDate: ce.event.eventDate,
+          startTime: ce.event.startTime,
+          city: ce.event.city,
+          coverImageUrl: coverUrl,
+          communityEventId: ce.id,
+          addedAt: ce.addedAt,
+          source: ce.source,
+          stats: {
+            views: totalOrdersMap.get(ce.event.id) ?? 0,
+            interestedCount: savedMap.get(ce.event.id) ?? 0,
+            goingCount: confirmedOrdersMap.get(ce.event.id) ?? 0,
+          },
+        };
+      }),
+    );
+
+    return { data, total, page, limit };
+  }
+
   async getHostEligibleEvents(
     communityId: string,
     userId: string,
