@@ -12,10 +12,12 @@ import {
   CommunityMemberStatus,
   CommunityRole,
   CommunityStatus,
+  CommunityType,
   ConsentType,
   EventStatus,
   InterestAffinity,
   MemberVisibility,
+  OrderStatus,
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -34,6 +36,7 @@ import { ListSavedCommunitiesQueryDto } from './dto/list-saved-communities-query
 import { ListJoinedCommunitiesQueryDto } from './dto/list-joined-communities-query.dto';
 import { RecommendCommunitiesQueryDto } from './dto/recommend-communities-query.dto';
 import { JoinCommunityDto } from './dto/join-community.dto';
+import { AudienceSize, HostCommunityTab, ListHostCommunitiesQueryDto } from './dto/list-host-communities-query.dto';
 
 const COMMUNITY_DETAIL_INCLUDE = {
   settings: true,
@@ -1088,6 +1091,246 @@ export class CommunitiesService {
     );
 
     return { data, total, page, limit };
+  }
+
+  // ─── Host-facing browse ───────────────────────────────────────────────────────
+
+  async listForHost(userId: string, query: ListHostCommunitiesQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    // Resolve host's interest IDs from declared experience categories + published event categories.
+    const hostProfile = await this.prisma.hostProfile.findUnique({
+      where: { userId },
+      select: {
+        categories: { select: { categoryId: true } },
+        events: {
+          where: { status: EventStatus.PUBLISHED, categoryId: { not: null } },
+          select: { categoryId: true },
+        },
+      },
+    });
+
+    let hostInterestIds = new Set<string>();
+    if (hostProfile) {
+      const categoryIds = new Set<string>([
+        ...hostProfile.categories.map((c) => c.categoryId),
+        ...hostProfile.events.map((e) => e.categoryId).filter((id): id is string => id !== null),
+      ]);
+      if (categoryIds.size > 0) {
+        const interestMappings = await this.prisma.interestCategory.findMany({
+          where: { categoryId: { in: [...categoryIds] } },
+          select: { interestId: true },
+        });
+        hostInterestIds = new Set(interestMappings.map((m) => m.interestId));
+      }
+    }
+
+    const where: Prisma.CommunityWhereInput = {
+      status: CommunityStatus.PUBLISHED,
+      deletedAt: null,
+    };
+
+    if (query.search) where.name = { contains: query.search, mode: 'insensitive' };
+    if (query.categoryId) where.categoryId = query.categoryId;
+    if (query.city) {
+      where.OR = [{ primaryCity: query.city }, { communityCities: { has: query.city } }];
+    }
+
+    if (query.audienceSize) {
+      const rangeMap: Record<AudienceSize, Prisma.IntFilter> = {
+        [AudienceSize.SMALL]: { lt: 100 },
+        [AudienceSize.MEDIUM]: { gte: 100, lt: 500 },
+        [AudienceSize.LARGE]: { gte: 500, lt: 2000 },
+        [AudienceSize.VERY_LARGE]: { gte: 2000 },
+      };
+      where.memberCount = rangeMap[query.audienceSize];
+    }
+
+    const tab = query.tab ?? HostCommunityTab.ALL;
+    if (tab === HostCommunityTab.PUBLIC) {
+      where.access = CommunityAccess.PUBLIC;
+    } else if (tab === HostCommunityTab.APPROVAL_REQUIRED) {
+      where.access = CommunityAccess.APPROVAL_REQUIRED;
+    } else if (tab === HostCommunityTab.INVITE_ONLY) {
+      where.access = CommunityAccess.INVITE_ONLY;
+    } else {
+      // ALL and MY_COMMUNITIES tabs: apply the standalone access dropdown filter if present.
+      if (query.access) where.access = query.access;
+      if (tab === HostCommunityTab.MY_COMMUNITIES) {
+        where.members = {
+          some: {
+            userId,
+            status: { in: [CommunityMemberStatus.ACTIVE, CommunityMemberStatus.PENDING] },
+          },
+        };
+      }
+    }
+
+    const [rows, total] = await Promise.all([
+      this.prisma.community.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          description: true,
+          type: true,
+          access: true,
+          primaryCity: true,
+          communityCities: true,
+          coverImageKey: true,
+          iconKey: true,
+          memberCount: true,
+          experienceCount: true,
+          category: { select: { id: true, name: true } },
+          interests: { select: { interestId: true } },
+        },
+        orderBy: { publishedAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.community.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(total / limit);
+    if (!rows.length) return { data: [], total, page, limit, totalPages };
+
+    const communityIds = rows.map((r) => r.id);
+
+    // Batch: membership status per community.
+    const membershipRows = await this.prisma.communityMember.findMany({
+      where: {
+        userId,
+        communityId: { in: communityIds },
+        status: { in: [CommunityMemberStatus.ACTIVE, CommunityMemberStatus.PENDING] },
+      },
+      select: { communityId: true, status: true },
+    });
+    const membershipMap = new Map(membershipRows.map((r) => [r.communityId, r.status]));
+
+    // Batch: experiences this calendar month per community.
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+    const communityEventRows = await this.prisma.communityEvent.findMany({
+      where: {
+        communityId: { in: communityIds },
+        event: { eventDate: { gte: monthStart, lt: monthEnd } },
+      },
+      select: { communityId: true },
+    });
+    const experiencesThisMonthMap = new Map<string, number>();
+    for (const row of communityEventRows) {
+      experiencesThisMonthMap.set(row.communityId, (experiencesThisMonthMap.get(row.communityId) ?? 0) + 1);
+    }
+
+    // Batch: average host rating per community (from EventReview.hostRating on community-linked events).
+    const communityIdSet = new Set(communityIds);
+    const reviewRows = await this.prisma.eventReview.findMany({
+      where: {
+        hostRating: { not: null },
+        event: { communities: { some: { communityId: { in: communityIds } } } },
+      },
+      select: {
+        hostRating: true,
+        event: {
+          select: {
+            communities: {
+              where: { communityId: { in: communityIds } },
+              select: { communityId: true },
+            },
+          },
+        },
+      },
+    });
+
+    const ratingAccum = new Map<string, { sum: number; count: number }>();
+    for (const review of reviewRows) {
+      for (const ce of review.event.communities) {
+        if (communityIdSet.has(ce.communityId)) {
+          const acc = ratingAccum.get(ce.communityId) ?? { sum: 0, count: 0 };
+          acc.sum += review.hostRating!;
+          acc.count += 1;
+          ratingAccum.set(ce.communityId, acc);
+        }
+      }
+    }
+    const avgHostRatingMap = new Map<string, number | null>();
+    for (const [cid, { sum, count }] of ratingAccum) {
+      avgHostRatingMap.set(cid, count > 0 ? Math.round((sum / count) * 10) / 10 : null);
+    }
+
+    const data = await Promise.all(
+      rows.map(async (r) => {
+        const { interests, ...rest } = r;
+        const communityInterestIds = interests.map((i) => i.interestId);
+        let matchScore: number | null = null;
+        let matchLabel: string | null = null;
+        if (communityInterestIds.length > 0) {
+          const overlap = communityInterestIds.filter((id) => hostInterestIds.has(id)).length;
+          matchScore = Math.round((overlap / communityInterestIds.length) * 100);
+          if (matchScore >= 90) matchLabel = 'Great match!';
+          else if (matchScore >= 75) matchLabel = 'High engagement';
+        }
+
+        const memberStatus = membershipMap.get(r.id);
+        const signed = await this.withSignedMedia(rest);
+        return {
+          ...signed,
+          isVerified: rest.type === CommunityType.MEETDAY_MANAGED_PUBLIC,
+          experiencesThisMonth: experiencesThisMonthMap.get(r.id) ?? 0,
+          avgHostRating: avgHostRatingMap.get(r.id) ?? null,
+          matchScore,
+          matchLabel,
+          isMember: memberStatus === CommunityMemberStatus.ACTIVE,
+          isPending: memberStatus === CommunityMemberStatus.PENDING,
+        };
+      }),
+    );
+
+    return { data, total, page, limit, totalPages };
+  }
+
+  async getHostActivity(userId: string) {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const [communitiesJoined, accessRequests, pendingReviews, experienceGroups, totalCommunityViews] =
+      await Promise.all([
+        this.prisma.communityMember.count({ where: { userId, status: CommunityMemberStatus.ACTIVE } }),
+        this.prisma.communityMember.count({ where: { userId, status: CommunityMemberStatus.PENDING } }),
+        this.prisma.eventReview.count({
+          where: {
+            createdAt: { gte: thirtyDaysAgo },
+            event: {
+              hostProfile: { userId },
+              communities: { some: {} },
+            },
+          },
+        }),
+        this.prisma.communityEvent.groupBy({
+          by: ['eventId'],
+          where: { event: { hostProfile: { userId } } },
+        }),
+        this.prisma.order.count({
+          where: {
+            status: OrderStatus.CONFIRMED,
+            event: {
+              hostProfile: { userId },
+              communities: { some: {} },
+            },
+          },
+        }),
+      ]);
+
+    return {
+      communitiesJoined,
+      accessRequests,
+      pendingReviews,
+      experiencesInCommunities: experienceGroups.length,
+      totalCommunityViews,
+    };
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────────────────
