@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -1333,6 +1334,372 @@ export class CommunitiesService {
     };
   }
 
+  // ─── Host community overview ───────────────────────────────────────────────────
+
+  async getHostCommunityOverview(communityId: string, userId: string) {
+    const community = await this.prisma.community.findFirst({
+      where: { id: communityId, status: CommunityStatus.PUBLISHED, deletedAt: null },
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        description: true,
+        type: true,
+        access: true,
+        primaryCity: true,
+        communityCities: true,
+        coverImageKey: true,
+        iconKey: true,
+        memberCount: true,
+        experienceCount: true,
+        category: { select: { id: true, name: true } },
+        interests: {
+          select: {
+            interestId: true,
+            interest: { select: { id: true, name: true, slug: true } },
+          },
+        },
+      },
+    });
+    if (!community) throw new NotFoundException('Community not found');
+
+    // Resolve host interest IDs from declared experience categories + published event categories.
+    const hostProfile = await this.prisma.hostProfile.findUnique({
+      where: { userId },
+      select: {
+        categories: { select: { categoryId: true } },
+        events: {
+          where: { status: EventStatus.PUBLISHED, categoryId: { not: null } },
+          select: { categoryId: true },
+        },
+      },
+    });
+
+    let hostInterestIds = new Set<string>();
+    if (hostProfile) {
+      const categoryIds = new Set<string>([
+        ...hostProfile.categories.map((c) => c.categoryId),
+        ...hostProfile.events.map((e) => e.categoryId).filter((id): id is string => id !== null),
+      ]);
+      if (categoryIds.size > 0) {
+        const interestMappings = await this.prisma.interestCategory.findMany({
+          where: { categoryId: { in: [...categoryIds] } },
+          select: { interestId: true },
+        });
+        hostInterestIds = new Set(interestMappings.map((m) => m.interestId));
+      }
+    }
+
+    const communityInterestIds = community.interests.map((i) => i.interestId);
+    let matchScore: number | null = null;
+    let matchLabel: string | null = null;
+    let matchDescription: string | null = null;
+    if (communityInterestIds.length > 0) {
+      const overlap = communityInterestIds.filter((id) => hostInterestIds.has(id)).length;
+      matchScore = Math.round((overlap / communityInterestIds.length) * 100);
+      if (matchScore >= 90) {
+        matchLabel = 'Great match!';
+        matchDescription = 'Your audience aligns well with this community.';
+      } else if (matchScore >= 75) {
+        matchLabel = 'High engagement';
+        matchDescription = 'This community has a highly engaged audience for your content type.';
+      }
+    }
+
+    const memberRecord = await this.prisma.communityMember.findUnique({
+      where: { communityId_userId: { communityId, userId } },
+      select: { status: true, role: true },
+    });
+    const isMember = memberRecord?.status === CommunityMemberStatus.ACTIVE;
+    const isPending = memberRecord?.status === CommunityMemberStatus.PENDING;
+
+    const now = new Date();
+    const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const [memberUserRows, thisMonthCount, lastMonthCount, monthlyActiveCount, totalViews] = await Promise.all([
+      this.prisma.communityMember.findMany({
+        where: { communityId, status: CommunityMemberStatus.ACTIVE },
+        select: { userId: true },
+      }),
+      this.prisma.communityMember.count({
+        where: { communityId, status: CommunityMemberStatus.ACTIVE, joinedAt: { gte: startOfThisMonth } },
+      }),
+      this.prisma.communityMember.count({
+        where: { communityId, status: CommunityMemberStatus.ACTIVE, joinedAt: { gte: startOfLastMonth, lt: startOfThisMonth } },
+      }),
+      this.prisma.communityMember.count({
+        where: { communityId, status: CommunityMemberStatus.ACTIVE, lastActivityAt: { gte: thirtyDaysAgo } },
+      }),
+      this.prisma.order.count({
+        where: { status: OrderStatus.CONFIRMED, event: { communities: { some: { communityId } } } },
+      }),
+    ]);
+
+    const activeUserIds = memberUserRows.map((m) => m.userId);
+    const profiles =
+      activeUserIds.length > 0
+        ? await this.prisma.attendeeProfile.findMany({
+            where: { userId: { in: activeUserIds } },
+            select: { ageRange: true, gender: true, city: true },
+          })
+        : [];
+
+    // Age stats — find the modal age range.
+    const ageCounts = new Map<string, number>();
+    for (const p of profiles) {
+      if (p.ageRange) ageCounts.set(p.ageRange, (ageCounts.get(p.ageRange) ?? 0) + 1);
+    }
+    let topAgeGroup: { label: string; pct: number } | null = null;
+    if (ageCounts.size > 0) {
+      const [topRange, topCount] = [...ageCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+      topAgeGroup = {
+        label: this.ageRangeLabel(topRange),
+        pct: Math.round((topCount / profiles.length) * 100),
+      };
+    }
+
+    // Gender stats — percentages computed over MALE + FEMALE + NON_BINARY only (excluding PREFER_NOT_TO_SAY).
+    const genderCounts = { MALE: 0, FEMALE: 0, NON_BINARY: 0 };
+    let hasGenderData = false;
+    for (const p of profiles) {
+      if (p.gender && p.gender !== 'PREFER_NOT_TO_SAY') {
+        hasGenderData = true;
+        if (p.gender === 'MALE') genderCounts.MALE += 1;
+        else if (p.gender === 'FEMALE') genderCounts.FEMALE += 1;
+        else if (p.gender === 'NON_BINARY') genderCounts.NON_BINARY += 1;
+      } else if (p.gender === 'PREFER_NOT_TO_SAY') {
+        hasGenderData = true;
+      }
+    }
+    const genderTotal = genderCounts.MALE + genderCounts.FEMALE + genderCounts.NON_BINARY;
+    const genderSplit =
+      hasGenderData && genderTotal > 0
+        ? {
+            male: genderCounts.MALE,
+            female: genderCounts.FEMALE,
+            nonBinary: genderCounts.NON_BINARY,
+            malePct: Math.round((genderCounts.MALE / genderTotal) * 100),
+            femalePct: Math.round((genderCounts.FEMALE / genderTotal) * 100),
+            nonBinaryPct: Math.round((genderCounts.NON_BINARY / genderTotal) * 100),
+          }
+        : null;
+
+    // City stats — top 10 cities by member count.
+    const cityCounts = new Map<string, number>();
+    for (const p of profiles) {
+      if (p.city) cityCounts.set(p.city, (cityCounts.get(p.city) ?? 0) + 1);
+    }
+    const sortedCities = [...cityCounts.entries()].sort((a, b) => b[1] - a[1]);
+    const topCities = sortedCities.slice(0, 10).map(([city]) => city);
+
+    const memberGrowthPct =
+      lastMonthCount > 0 || thisMonthCount > 0
+        ? Math.round(((thisMonthCount - lastMonthCount) / Math.max(lastMonthCount, 1)) * 1000) / 10
+        : null;
+
+    const avgEngagementRate =
+      community.memberCount > 0
+        ? Math.round((monthlyActiveCount / community.memberCount) * 1000) / 10
+        : null;
+
+    const upcomingLinks = await this.prisma.communityEvent.findMany({
+      where: {
+        communityId,
+        event: { status: EventStatus.PUBLISHED, eventDate: { gte: now } },
+      },
+      select: {
+        event: {
+          select: {
+            id: true,
+            title: true,
+            eventDate: true,
+            startTime: true,
+            city: true,
+            media: { where: { type: 'COVER' }, select: { url: true }, take: 1 },
+            tickets: { select: { soldCount: true } },
+          },
+        },
+      },
+      take: 4,
+    });
+
+    upcomingLinks.sort((a, b) => (a.event.eventDate?.getTime() ?? 0) - (b.event.eventDate?.getTime() ?? 0));
+
+    const upcomingExperiences = await Promise.all(
+      upcomingLinks.map(async ({ event }) => {
+        const cover = event.media[0] ?? null;
+        const coverImageUrl = cover ? await this.storageService.getPresignedDownloadUrl(cover.url) : null;
+        const interestedCount = event.tickets.reduce((n, t) => n + t.soldCount, 0);
+        return {
+          id: event.id,
+          title: event.title,
+          eventDate: event.eventDate,
+          startTime: event.startTime,
+          city: event.city,
+          coverImageUrl,
+          interestedCount,
+        };
+      }),
+    );
+
+    const signed = await this.withSignedMedia({ coverImageKey: community.coverImageKey, iconKey: community.iconKey });
+
+    return {
+      community: {
+        id: community.id,
+        slug: community.slug,
+        name: community.name,
+        description: community.description,
+        type: community.type,
+        access: community.access,
+        isVerified: community.type === CommunityType.MEETDAY_MANAGED_PUBLIC,
+        primaryCity: community.primaryCity,
+        communityCities: community.communityCities,
+        coverImageUrl: signed.coverImageUrl,
+        iconUrl: signed.iconUrl,
+        interestTags: community.interests.map((i) => i.interest),
+        category: community.category,
+      },
+      audience: {
+        matchScore,
+        matchLabel,
+        matchDescription,
+        memberCount: community.memberCount,
+        memberGrowthPct,
+        topAgeGroup,
+        genderSplit,
+        topCities,
+        cityCount: cityCounts.size,
+      },
+      hostContext: {
+        isMember,
+        isPending,
+        role: memberRecord?.role ?? null,
+        permissions: {
+          canSubmitExperiences: isMember,
+          canReplyToComments: isMember,
+          canViewAnalytics: isMember,
+          canReceiveUpdates: isMember || isPending,
+        },
+      },
+      stats: {
+        totalViews,
+        experiencesPublished: community.experienceCount,
+        monthlyActiveMembers: monthlyActiveCount,
+        avgEngagementRate,
+      },
+      upcomingExperiences,
+    };
+  }
+
+  async getHostEligibleEvents(
+    communityId: string,
+    userId: string,
+    query: { search?: string; page?: number; limit?: number },
+  ) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const community = await this.prisma.community.findFirst({
+      where: { id: communityId, status: CommunityStatus.PUBLISHED, deletedAt: null },
+      select: { id: true },
+    });
+    if (!community) throw new NotFoundException('Community not found');
+
+    const memberRecord = await this.prisma.communityMember.findUnique({
+      where: { communityId_userId: { communityId, userId } },
+      select: { status: true },
+    });
+    if (memberRecord?.status !== CommunityMemberStatus.ACTIVE) {
+      throw new ForbiddenException('You must be an active member to view eligible events');
+    }
+
+    const linkedEventIds = (
+      await this.prisma.communityEvent.findMany({ where: { communityId }, select: { eventId: true } })
+    ).map((e) => e.eventId);
+
+    const hostProfile = await this.prisma.hostProfile.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    if (!hostProfile) throw new NotFoundException('Host profile not found');
+
+    const where: Prisma.EventWhereInput = {
+      hostProfileId: hostProfile.id,
+      status: EventStatus.PUBLISHED,
+      ...(linkedEventIds.length ? { id: { notIn: linkedEventIds } } : {}),
+      ...(query.search ? { title: { contains: query.search, mode: 'insensitive' } } : {}),
+    };
+
+    const [events, total] = await Promise.all([
+      this.prisma.event.findMany({
+        where,
+        select: {
+          id: true,
+          title: true,
+          eventDate: true,
+          city: true,
+          media: { where: { type: 'COVER' }, select: { url: true }, take: 1 },
+          category: { select: { id: true, name: true } },
+        },
+        orderBy: { eventDate: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.event.count({ where }),
+    ]);
+
+    const data = await Promise.all(
+      events.map(async (event) => {
+        const cover = event.media[0] ?? null;
+        const coverImageUrl = cover ? await this.storageService.getPresignedDownloadUrl(cover.url) : null;
+        return { id: event.id, title: event.title, eventDate: event.eventDate, city: event.city, coverImageUrl, category: event.category };
+      }),
+    );
+
+    return { data, total, page, limit };
+  }
+
+  async addEventAsHost(communityId: string, userId: string, dto: AddCommunityEventDto) {
+    const community = await this.prisma.community.findFirst({
+      where: { id: communityId, status: CommunityStatus.PUBLISHED, deletedAt: null },
+      select: { id: true },
+    });
+    if (!community) throw new NotFoundException('Community not found');
+
+    const memberRecord = await this.prisma.communityMember.findUnique({
+      where: { communityId_userId: { communityId, userId } },
+      select: { status: true },
+    });
+    if (memberRecord?.status !== CommunityMemberStatus.ACTIVE) {
+      throw new ForbiddenException('You must be an active member to add experiences');
+    }
+
+    const hostProfile = await this.prisma.hostProfile.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    if (!hostProfile) throw new NotFoundException('Host profile not found');
+
+    const event = await this.prisma.event.findFirst({
+      where: { id: dto.eventId, hostProfileId: hostProfile.id, status: EventStatus.PUBLISHED },
+      select: { id: true },
+    });
+    if (!event) throw new NotFoundException('Event not found or not eligible for this community');
+
+    await this.prisma.communityEvent.upsert({
+      where: { communityId_eventId: { communityId, eventId: dto.eventId } },
+      create: { communityId, eventId: dto.eventId, source: CommunityEventSource.MANUAL, addedBy: userId },
+      update: { source: CommunityEventSource.MANUAL, addedBy: userId },
+    });
+
+    await this.recalculateExperienceCount(communityId);
+    this.logUpdate(communityId);
+    return { success: true, communityId, eventId: dto.eventId };
+  }
+
   // ─── Helpers ──────────────────────────────────────────────────────────────────
 
   private async assertExists(id: string) {
@@ -1521,6 +1888,18 @@ export class CommunitiesService {
       select: { communityId: true },
     });
     return new Set(rows.map((r) => r.communityId));
+  }
+
+  private ageRangeLabel(ageRange: string): string {
+    const map: Record<string, string> = {
+      UNDER_18: 'Under 18',
+      AGE_18_24: '18-24',
+      AGE_25_34: '25-34',
+      AGE_35_44: '35-44',
+      AGE_45_54: '45-54',
+      AGE_55_PLUS: '55+',
+    };
+    return map[ageRange] ?? ageRange;
   }
 
   /** Replace stored S3 keys with presigned download URLs on cover/icon. */

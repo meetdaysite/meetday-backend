@@ -14,6 +14,8 @@ import { CommunityEventsQueryDto } from './dto/community-events-query.dto';
 import { ListSavedCommunitiesQueryDto } from './dto/list-saved-communities-query.dto';
 import { ListJoinedCommunitiesQueryDto } from './dto/list-joined-communities-query.dto';
 import { ListHostCommunitiesQueryDto } from './dto/list-host-communities-query.dto';
+import { HostEligibleEventsQueryDto } from './dto/host-eligible-events-query.dto';
+import { AddCommunityEventDto } from './dto/add-community-event.dto';
 
 @ApiTags('Communities')
 @ApiBearerAuth('firebase-token')
@@ -267,6 +269,157 @@ export class CommunitiesController {
   })
   getHostActivity(@GetUser('id') userId: string) {
     return this.communitiesService.getHostActivity(userId);
+  }
+
+  @Get(':communityId/host/overview')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'Community overview page (host perspective)',
+    description: [
+      'Returns the full detail page data a host sees when clicking into a community from their dashboard.',
+      '',
+      '**Sections returned:**',
+      '- `community` — name, slug, type, access, verified badge, cover/icon URLs, interest tags, category.',
+      '- `audience` — `matchScore` (0–100 | null), `matchLabel`, `matchDescription`, member count + growth %, top age group, gender split (null until members set gender), top cities.',
+      '- `hostContext` — membership status (`isMember`, `isPending`, `role`), derived permissions.',
+      '- `stats` — totalViews (confirmed bookings proxy), experiencesPublished, monthlyActiveMembers, avgEngagementRate.',
+      '- `upcomingExperiences` — next 4 PUBLISHED events in this community ordered by date.',
+      '',
+      '`genderSplit` is null until community members self-identify gender via `PATCH /attendee/profile`.',
+    ].join('\n'),
+  })
+  @ApiOkResponse({
+    description: 'Community overview for the host dashboard detail page.',
+    schema: {
+      example: {
+        community: {
+          id: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+          slug: 'meetday-music-nights',
+          name: 'Meetday Music Nights',
+          description: 'Electronic, live sets, rooftop parties.',
+          type: 'MEETDAY_MANAGED_PUBLIC',
+          access: 'PUBLIC',
+          isVerified: true,
+          primaryCity: 'All Cities',
+          communityCities: ['Bangalore', 'Mumbai'],
+          coverImageUrl: 'https://cdn.example.com/signed/cover.jpg',
+          iconUrl: 'https://cdn.example.com/signed/icon.png',
+          interestTags: [{ id: 'int-uuid', name: 'Electronic Music', slug: 'electronic-music' }],
+          category: { id: 'cat-uuid', name: 'Music' },
+        },
+        audience: {
+          matchScore: 96,
+          matchLabel: 'Great match!',
+          matchDescription: 'Your audience aligns well with this community.',
+          memberCount: 1200,
+          memberGrowthPct: 18.0,
+          topAgeGroup: { label: '25-34', pct: 68 },
+          genderSplit: { male: 40, female: 22, nonBinary: 2, malePct: 63, femalePct: 34, nonBinaryPct: 3 },
+          topCities: ['Bangalore', 'Mumbai', 'Delhi'],
+          cityCount: 12,
+        },
+        hostContext: {
+          isMember: true,
+          isPending: false,
+          role: 'HOST',
+          permissions: {
+            canSubmitExperiences: true,
+            canReplyToComments: true,
+            canViewAnalytics: true,
+            canReceiveUpdates: true,
+          },
+        },
+        stats: {
+          totalViews: 24560,
+          experiencesPublished: 412,
+          monthlyActiveMembers: 1024,
+          avgEngagementRate: 85.3,
+        },
+        upcomingExperiences: [
+          {
+            id: 'evt-uuid',
+            title: 'Rooftop Sunset Sessions',
+            eventDate: '2026-07-15T00:00:00.000Z',
+            startTime: '18:00',
+            city: 'Bangalore',
+            coverImageUrl: 'https://cdn.example.com/signed/event.jpg',
+            interestedCount: 120,
+          },
+        ],
+      },
+    },
+  })
+  getHostCommunityOverview(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @GetUser('id') userId: string,
+  ) {
+    return this.communitiesService.getHostCommunityOverview(communityId, userId);
+  }
+
+  @Get(':communityId/host/eligible-events')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'Host\'s published events eligible to add to a community',
+    description: [
+      'Returns the calling host\'s PUBLISHED events that are **not already linked** to this community.',
+      'Caller must be an ACTIVE member of the community (403 otherwise).',
+      'Use this to populate the "Add event" picker modal on the community overview page.',
+    ].join('\n'),
+  })
+  @ApiOkResponse({
+    description: 'Paginated list of events eligible for addition to this community.',
+    schema: {
+      example: {
+        data: [
+          {
+            id: 'evt-uuid',
+            title: 'Saturday Night Jazz',
+            eventDate: '2026-08-10T00:00:00.000Z',
+            city: 'Mumbai',
+            coverImageUrl: 'https://cdn.example.com/signed/jazz.jpg',
+            category: { id: 'cat-uuid', name: 'Music' },
+          },
+        ],
+        total: 5,
+        page: 1,
+        limit: 20,
+      },
+    },
+  })
+  getHostEligibleEvents(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @GetUser('id') userId: string,
+    @Query() query: HostEligibleEventsQueryDto,
+  ) {
+    return this.communitiesService.getHostEligibleEvents(communityId, userId, query);
+  }
+
+  @Post(':communityId/host/events')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'Add one of the host\'s published events to a community',
+    description: [
+      'Attaches a PUBLISHED event that belongs to the calling host to this community as a MANUAL link.',
+      'Caller must be an ACTIVE member of the community (403 otherwise).',
+      'Idempotent — re-adding an already-linked event upgrades it to MANUAL source.',
+    ].join('\n'),
+  })
+  @ApiOkResponse({
+    description: '{ success: true, communityId, eventId }',
+    schema: {
+      example: { success: true, communityId: '3fa85f64-5717-4562-b3fc-2c963f66afa6', eventId: 'evt-uuid' },
+    },
+  })
+  addEventAsHost(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @GetUser('id') userId: string,
+    @Body() dto: AddCommunityEventDto,
+  ) {
+    return this.communitiesService.addEventAsHost(communityId, userId, dto);
   }
 
   @Post(':id/save')

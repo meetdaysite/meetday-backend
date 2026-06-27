@@ -212,6 +212,7 @@ model AttendeeProfile {
   bio         String?
   city        String?
   ageRange    AgeRange?
+  gender      Gender?
   profession  String?
   vibeType    VibeType?
   socialStyle SocialStyle?
