@@ -7,7 +7,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { AgeRange, ProfileVisibility, SocialStyle, VibeType } from '@prisma/client';
+import { AgeRange, Gender, ProfileVisibility, SocialStyle, VibeType } from '@prisma/client';
 
 export class CreateAttendeeProfileDto {
   @ApiPropertyOptional({
@@ -38,6 +38,15 @@ export class CreateAttendeeProfileDto {
   @IsOptional()
   @IsEnum(AgeRange)
   ageRange?: AgeRange;
+
+  @ApiPropertyOptional({
+    enum: Gender,
+    example: 'PREFER_NOT_TO_SAY',
+    description: 'Optional self-identified gender. Used only for aggregate audience demographics — never surfaced individually.',
+  })
+  @IsOptional()
+  @IsEnum(Gender)
+  gender?: Gender;
 
   @ApiPropertyOptional({ maxLength: 100, example: 'Product Designer' })
   @IsOptional()
