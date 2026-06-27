@@ -357,6 +357,67 @@ export class CommunitiesController {
     return this.communitiesService.getHostCommunityOverview(communityId, userId);
   }
 
+  @Get(':communityId/host/audience')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'Community audience analytics (host)',
+    description: [
+      'Returns the full Audience tab payload for a community — member stats with month-over-month deltas,',
+      'age distribution (all 6 buckets), gender split, top cities, audience interests with member percentages,',
+      'activity metrics (views/comments/shares), and computed highlights.',
+      '',
+      'No membership required — any HOST can view audience analytics for any PUBLISHED community.',
+    ].join('\n'),
+  })
+  @ApiOkResponse({
+    description: 'Full audience analytics for the host dashboard Audience tab.',
+    schema: {
+      example: {
+        stats: {
+          totalMembers: 1200,
+          totalMemberGrowthPct: 18.0,
+          newMembersThisMonth: 320,
+          newMemberGrowthPct: 15.0,
+          engagementRate: 78.5,
+          engagementRateDelta: 8.2,
+          avgExperienceRating: 4.6,
+          avgExperienceRatingDelta: 0.4,
+        },
+        demographics: {
+          ageDistribution: [
+            { range: 'UNDER_18', label: 'Under 18', count: 0, pct: 0 },
+            { range: 'AGE_18_24', label: '18-24', count: 180, pct: 35.3 },
+            { range: 'AGE_25_34', label: '25-34', count: 220, pct: 43.1 },
+            { range: 'AGE_35_44', label: '35-44', count: 80, pct: 15.7 },
+            { range: 'AGE_45_54', label: '45-54', count: 22, pct: 4.3 },
+            { range: 'AGE_55_PLUS', label: '55+', count: 8, pct: 1.6 },
+          ],
+          genderSplit: { male: 40, female: 22, nonBinary: 2, malePct: 63, femalePct: 34, nonBinaryPct: 3 },
+        },
+        topCities: [
+          { city: 'Bangalore', count: 520, pct: 43.3 },
+          { city: 'Mumbai', count: 280, pct: 23.3 },
+        ],
+        interests: [
+          { id: 'int-uuid', name: 'Electronic Music', slug: 'electronic-music', memberPct: 72.0 },
+        ],
+        activity: {
+          eventViews: { total: 24560, growthPct: 12.5 },
+          comments: { total: 3402, growthPct: -4.2 },
+          shares: { total: 890, growthPct: 8.0 },
+        },
+        highlights: ['Highly active audience', 'Strong interest in Electronic Music'],
+      },
+    },
+  })
+  getHostCommunityAudience(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @GetUser('id') userId: string,
+  ) {
+    return this.communitiesService.getHostCommunityAudience(communityId, userId);
+  }
+
   @Get(':communityId/host/eligible-events')
   @UseGuards(RolesGuard)
   @Roles('HOST')
