@@ -375,6 +375,7 @@ model HostProfile {
 
   subscriptions HostSubscription[]
   events        Event[]
+  payouts       HostPayout[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -732,6 +733,7 @@ model Event {
   communities     CommunityEvent[]
   feedPosts       CommunityPost[]       @relation("EventFeedPosts")
   savedBy         SavedEvent[]
+  payouts         HostPayout[]
 
   @@index([hostProfileId])
   @@index([categoryId])
@@ -881,11 +883,12 @@ model Order {
   cancelledAt        DateTime?
   cancellationReason String?
 
-  user   User         @relation(fields: [userId], references: [id])
-  event  Event        @relation(fields: [eventId], references: [id])
-  coupon Coupon?      @relation(fields: [couponId], references: [id])
-  items  OrderItem[]
-  review EventReview?
+  user           User                @relation(fields: [userId], references: [id])
+  event          Event               @relation(fields: [eventId], references: [id])
+  coupon         Coupon?             @relation(fields: [couponId], references: [id])
+  items          OrderItem[]
+  review         EventReview?
+  payoutLineItem HostPayoutLineItem?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1133,6 +1136,15 @@ enum AuditAction {
   ORDER_CANCELLED
   REFUND_INITIATED
   REFUND_COMPLETED
+
+  // Payouts / settlement
+  PAYOUT_CREATED
+  PAYOUT_TRIGGERED
+  PAYOUT_COMPLETED
+  PAYOUT_FAILED
+  PAYOUT_HELD
+  PAYOUT_RELEASED
+  PAYOUT_REVERSED
 
   // Subscriptions
   SUBSCRIPTION_CREATED
@@ -2156,4 +2168,95 @@ enum SupportTicketCategory {
   COMMUNITY_ISSUE
   HOST_ISSUE
   OTHER
+}
+
+// ─── Payouts ──────────────────────────────────────────────────────────────────
+
+enum PayoutStatus {
+  PENDING     // Computed, awaiting trigger
+  PROCESSING  // Razorpay Payouts API call in flight
+  COMPLETED   // Funds transferred (webhook confirmed)
+  FAILED      // Razorpay rejected or bank bounced
+  ON_HOLD     // Admin hold (dispute / compliance / KYC lapse)
+  REVERSED    // Chargeback or reversal received from Razorpay
+}
+
+enum PayoutMode {
+  IMPS // Instant, preferred for amounts < ₹2L
+  NEFT // 2-hour batch
+  RTGS // 30-min settlement, for amounts > ₹2L
+}
+
+// One payout per (event, host) — batches all confirmed orders for that event.
+model HostPayout {
+  id      String      @id @default(uuid())
+  hostId  String
+  eventId String
+  host    HostProfile @relation(fields: [hostId], references: [id])
+  event   Event       @relation(fields: [eventId], references: [id])
+
+  // Financial snapshot at payout creation time (immutable after creation)
+  grossRevenue    Decimal // sum of (subtotal - discountAmount) across line items
+  platformFee     Decimal // sum of order.platformFee across line items
+  hostGross       Decimal // grossRevenue - platformFee
+  tdsAmount       Decimal @default(0) // Section 194-O TDS (1% of hostGross)
+  netPayoutAmount Decimal // hostGross - tdsAmount — what hits host's bank
+
+  // Razorpay Payouts API
+  razorpayPayoutId      String?    @unique // set after triggerPayout()
+  razorpayFundAccountId String // snapshot of host's fund account at payout time
+  payoutMode            PayoutMode @default(IMPS)
+
+  status       PayoutStatus @default(PENDING)
+  statusReason String? // Razorpay failure code or admin note
+  holdReason   String? // set when status = ON_HOLD
+
+  initiatedAt DateTime? // when triggerPayout() was called
+  completedAt DateTime? // from payout.processed webhook
+  failedAt    DateTime? // from payout.failed webhook
+
+  lineItems HostPayoutLineItem[]
+  history   HostPayoutHistory[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([eventId, hostId]) // idempotency: one payout per event per host
+  @@index([hostId, status])
+  @@index([status])
+  @@index([eventId])
+  @@map("host_payouts")
+}
+
+// One row per Order included in a payout — the order-level settlement ledger.
+model HostPayoutLineItem {
+  id       String     @id @default(uuid())
+  payoutId String
+  orderId  String     @unique // each Order belongs to at most one payout
+  payout   HostPayout @relation(fields: [payoutId], references: [id])
+  order    Order      @relation(fields: [orderId], references: [id])
+
+  hostGrossAmount Decimal // (order.subtotal - order.discountAmount) - order.platformFee
+  platformFee     Decimal // order.platformFee snapshot
+  netAmount       Decimal // = hostGrossAmount (TDS is deducted at the HostPayout level)
+
+  @@index([payoutId])
+  @@map("host_payout_line_items")
+}
+
+// Immutable audit trail of every status transition on a HostPayout.
+model HostPayoutHistory {
+  id         String        @id @default(uuid())
+  payoutId   String
+  payout     HostPayout    @relation(fields: [payoutId], references: [id])
+  fromStatus PayoutStatus?
+  toStatus   PayoutStatus
+  reason     String?
+  actorId    String? // null = SYSTEM or RAZORPAY_WEBHOOK
+  actorType  String? // "SYSTEM" | "ADMIN" | "RAZORPAY_WEBHOOK"
+
+  createdAt DateTime @default(now())
+
+  @@index([payoutId])
+  @@map("host_payout_history")
 }

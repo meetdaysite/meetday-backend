@@ -42,6 +42,12 @@ export const envSchema = z.object({
   RATE_LIMIT_ENABLED: z.string().default('true').transform((v) => v !== 'false'),
   IP_WHITELIST: z.string().default('127.0.0.1,::1'),
   RAZORPAY_WEBHOOK_SECRET: z.string().optional(), // required in production; omit locally to skip signature check
+  RAZORPAY_X_ACCOUNT_NUMBER: z.string().optional(), // platform's Razorpay X current account; required to trigger payouts
+  RAZORPAY_PAYOUT_WEBHOOK_SECRET: z.string().optional(), // omit locally to skip payout webhook verification
+
+  PAYOUT_HOLD_DAYS: z.coerce.number().int().nonnegative().default(7), // days after event end before payout is eligible
+  TDS_RATE: z.coerce.number().min(0).max(1).default(0.01), // Section 194-O TDS rate (1%)
+  MIN_PAYOUT_AMOUNT: z.coerce.number().nonnegative().default(100), // minimum ₹ net amount to issue a payout
 });
 
 export type Env = z.infer<typeof envSchema>;

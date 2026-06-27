@@ -31,6 +31,13 @@ export default () => {
       keyId: env.RAZORPAY_KEY_ID,
       keySecret: env.RAZORPAY_KEY_SECRET,
       webhookSecret: env.RAZORPAY_WEBHOOK_SECRET,
+      xAccountNumber: env.RAZORPAY_X_ACCOUNT_NUMBER,
+      payoutWebhookSecret: env.RAZORPAY_PAYOUT_WEBHOOK_SECRET,
+    },
+    payout: {
+      holdDays: env.PAYOUT_HOLD_DAYS,
+      tdsRate: env.TDS_RATE,
+      minPayoutAmount: env.MIN_PAYOUT_AMOUNT,
     },
     sandbox: {
       host: env.SANDBOX_HOST,

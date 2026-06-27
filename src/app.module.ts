@@ -28,6 +28,7 @@ import { ConsentModule } from './modules/consent/consent.module';
 import { InterestsModule } from './modules/interests/interests.module';
 import { GraphModule } from './modules/graph/graph.module';
 import { SupportTicketModule } from './modules/support-ticket/support-ticket.module';
+import { PayoutsModule } from './modules/payouts/payouts.module';
 import { FirebaseAuthGuard } from './common/guards/firebase-auth.guard';
 import { IpRateLimitMiddleware } from './common/middleware/ip-rate-limit.middleware';
 import { RegistrationVelocityMiddleware } from './common/middleware/registration-velocity.middleware';
@@ -84,6 +85,7 @@ import { StorageModule } from './common/storage/storage.module';
     CommunityAnnouncementsModule,
     CommunityFeedModule,
     SupportTicketModule,
+    PayoutsModule,
   ],
   providers: [
     Logger,

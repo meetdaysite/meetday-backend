@@ -1,0 +1,72 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Cron } from '@nestjs/schedule';
+import { PayoutsService } from './payouts.service';
+import { PrismaService } from '../../prisma/prisma.service';
+
+@Injectable()
+export class PayoutsCron {
+  private readonly logger = new Logger(PayoutsCron.name);
+
+  constructor(
+    private readonly payoutsService: PayoutsService,
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+  ) {}
+
+  // Runs daily at 9:30 AM IST (4:00 AM UTC)
+  @Cron('0 4 * * *', { name: 'process-due-payouts', timeZone: 'UTC' })
+  async processDuePayouts() {
+    const xConfigured = !!this.configService.get<string>('razorpay.xAccountNumber');
+
+    this.logger.log(
+      xConfigured
+        ? 'Starting daily payout batch job'
+        : 'Payout batch: RAZORPAY_X_ACCOUNT_NUMBER not set — computing settlement records only, no funds transferred',
+    );
+
+    // Find all PUBLISHED events that have concluded and have confirmed unpaid orders.
+    // The service method enforces the hold-days window and other eligibility checks.
+    const eligibleEvents = await this.prisma.event.findMany({
+      where: {
+        status: 'PUBLISHED',
+        eventDate: { not: null },
+        orders: { some: { status: 'CONFIRMED', payoutLineItem: null } },
+      },
+      select: { id: true },
+    });
+
+    this.logger.log(`Found ${eligibleEvents.length} events with pending order payouts to evaluate`);
+
+    let computed = 0;
+    let triggered = 0;
+    let skipped = 0;
+    let errors = 0;
+
+    for (const event of eligibleEvents) {
+      try {
+        const payout = await this.payoutsService.computeAndCreatePayout(event.id);
+        if (!payout) {
+          skipped++;
+          continue;
+        }
+
+        computed++;
+
+        // Only trigger the live Razorpay transfer if X account is configured.
+        // Without it, PENDING payouts stay in the ledger and are triggered once X is set up.
+        if (payout.status === 'PENDING' && xConfigured) {
+          await this.payoutsService.triggerPayout(payout.id);
+          triggered++;
+        }
+      } catch (err) {
+        errors++;
+        this.logger.error(`Payout batch error for event ${event.id}: ${err.message}`, err.stack);
+      }
+    }
+
+    this.logger.log(
+      `Payout batch complete — computed: ${computed}, triggered: ${triggered}, skipped: ${skipped}, errors: ${errors}`,
+    );
+  }
+}
