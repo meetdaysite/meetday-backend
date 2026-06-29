@@ -61,7 +61,13 @@ export class CommunitiesController {
   @Public()
   @ApiOperation({
     summary: 'Events linked to a published community',
-    description: 'Returns events ordered by eventDate ascending. Pass `upcoming=true` to restrict to PUBLISHED events with eventDate >= now.',
+    description: [
+      'Returns paginated PUBLISHED events linked to this community.',
+      '**Date:** `dateFilter=this_week|this_month|next_month` — omit for all dates. Legacy `upcoming=true` still supported.',
+      '**Experience type:** `eventType=Rooftop|Club|Live|Festival` — case-insensitive.',
+      '**Category/Interest:** `categoryId=<uuid>` or `interestSlugs[]=<slug>` (resolved via InterestCategory join). Both can be combined (union).',
+      '**Sort:** `sortBy=date|price` + `sortOrder=asc|desc` (default: date asc).',
+    ].join('\n\n'),
   })
   @ApiOkResponse({ description: 'Paginated event list with cover image, attendee count, min price, and host.' })
   getCommunityEvents(@Param('slug') slug: string, @Query() query: CommunityEventsQueryDto) {
