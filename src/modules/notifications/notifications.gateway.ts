@@ -49,6 +49,8 @@ export class NotificationsGateway implements OnGatewayInit, OnGatewayConnection 
       return;
     }
 
+    let userId: string;
+
     try {
       const decoded = await firebaseAdmin.auth().verifyIdToken(token);
 
@@ -63,12 +65,25 @@ export class NotificationsGateway implements OnGatewayInit, OnGatewayConnection 
         return;
       }
 
+      userId = user.id;
       // Join the room by DB user ID — must match the userId passed to sendToUser()
-      client.join(user.id);
-      this.logger.log(`Socket connected: userId=${user.id} socketId=${client.id}`);
+      client.join(userId);
+      this.logger.log(`Socket connected: userId=${userId} socketId=${client.id}`);
     } catch (err) {
       this.logger.warn(`Socket rejected: token verification failed — ${(err as Error).message}`);
       client.disconnect();
+      return;
+    }
+
+    // Best-effort: signal the client with their unread count so they can refresh if they
+    // missed notifications while disconnected. Failure here must NOT disconnect the user.
+    try {
+      const unreadCount = await this.prisma.notification.count({
+        where: { userId, isRead: false },
+      });
+      client.emit('unread_count', { count: unreadCount });
+    } catch (err) {
+      this.logger.warn(`Failed to emit unread_count on connect: socketId=${client.id} — ${(err as Error).message}`);
     }
   }
 
