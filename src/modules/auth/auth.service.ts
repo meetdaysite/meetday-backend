@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConsentType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../../common/storage/storage.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
 import { ConsentService } from '../consent/consent.service';
 import { RegisterDto } from './dto/register.dto';
@@ -25,6 +26,7 @@ export interface TokenUser {
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly storageService: StorageService,
     private readonly cryptoService: CryptoService,
     private readonly consentService: ConsentService,
   ) {}
@@ -335,7 +337,12 @@ export class AuthService {
       throw new NotFoundException('User not found. Please register first.');
     }
 
-    return user;
+    return {
+      ...user,
+      avatarUrl: user.avatarUrl
+        ? await this.storageService.getPresignedDownloadUrl(user.avatarUrl)
+        : null,
+    };
   }
 
   async checkPhoneExists(phone: string): Promise<{ exists: boolean }> {
