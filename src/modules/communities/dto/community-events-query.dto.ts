@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
 
 export class CommunityEventsQueryDto {
   @ApiPropertyOptional({
@@ -28,13 +28,21 @@ export class CommunityEventsQueryDto {
   @IsString()
   eventType?: string;
 
+  @ApiPropertyOptional({ description: 'Filter by category UUID.', example: 'uuid' })
+  @IsOptional()
+  @IsUUID('4')
+  categoryId?: string;
+
   @ApiPropertyOptional({
-    description: "Filter by a genre tag present in the event's tags array.",
-    example: 'EDM',
+    type: [String],
+    description: 'Filter by interest slugs (resolved to categories via InterestCategory join).',
+    example: ['electronic', 'hip-hop'],
   })
   @IsOptional()
-  @IsString()
-  genre?: string;
+  @IsArray()
+  @IsString({ each: true })
+  @Transform(({ value }) => (Array.isArray(value) ? value : [value]))
+  interestSlugs?: string[];
 
   @ApiPropertyOptional({ enum: ['date', 'price'], default: 'date' })
   @IsOptional()
