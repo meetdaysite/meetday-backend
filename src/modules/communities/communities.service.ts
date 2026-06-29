@@ -863,6 +863,18 @@ export class CommunitiesService {
       dateLte = new Date(now.getFullYear(), now.getMonth() + 2, 0, 23, 59, 59, 999);
     }
 
+    let categoryIds: string[] = [];
+    if (query.interestSlugs?.length) {
+      const interests = await this.prisma.interest.findMany({
+        where: { slug: { in: query.interestSlugs } },
+        select: { categoryMappings: { select: { categoryId: true } } },
+      });
+      categoryIds = [...new Set(interests.flatMap((i) => i.categoryMappings.map((m) => m.categoryId)))];
+    }
+    if (query.categoryId) {
+      categoryIds = [...new Set([...categoryIds, query.categoryId])];
+    }
+
     const eventFilter: Prisma.EventWhereInput = {
       status: EventStatus.PUBLISHED,
       ...(dateGte
@@ -871,7 +883,7 @@ export class CommunitiesService {
           ? { eventDate: { gte: now } }
           : {}),
       ...(query.eventType ? { eventType: { equals: query.eventType, mode: 'insensitive' } } : {}),
-      ...(query.genre ? { tags: { has: query.genre } } : {}),
+      ...(categoryIds.length ? { categoryId: { in: categoryIds } } : {}),
     };
 
     const links = await this.prisma.communityEvent.findMany({

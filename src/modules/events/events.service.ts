@@ -298,7 +298,7 @@ export class EventsService {
       entityId: eventId,
     });
 
-    void Promise.all(
+    const notifyResults = await Promise.allSettled(
       admins.map((admin) =>
         this.notificationsService.create(
           admin.id,
@@ -307,7 +307,11 @@ export class EventsService {
           `A new event "${event.title ?? 'Untitled'}" has been submitted for review.`,
         ),
       ),
-    ).catch((err) => this.logger.error('Failed to notify admins of pending event', err));
+    );
+    notifyResults.forEach((r, i) => {
+      if (r.status === 'rejected')
+        this.logger.error(`Failed to notify admin ${admins[i].id} of pending event`, r.reason);
+    });
 
     return updated;
   }
