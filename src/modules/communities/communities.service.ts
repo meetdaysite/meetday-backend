@@ -33,6 +33,7 @@ import { SetCommunityInterestsDto } from './dto/set-community-interests.dto';
 import { SetCommunityCitiesDto } from './dto/set-community-cities.dto';
 import { AssignMemberDto } from './dto/assign-member.dto';
 import { AddCommunityEventDto } from './dto/add-community-event.dto';
+import { CommunityEventsQueryDto } from './dto/community-events-query.dto';
 import { ListCommunitiesQueryDto } from './dto/list-communities-query.dto';
 import { ListSavedCommunitiesQueryDto } from './dto/list-saved-communities-query.dto';
 import { ListJoinedCommunitiesQueryDto } from './dto/list-joined-communities-query.dto';
@@ -712,10 +713,12 @@ export class CommunitiesService {
           },
         },
       });
-      if (!user) throw new NotFoundException('User not found');
-      userId = user.id;
-      userCity = user.attendeeProfile?.city ?? null;
-      interestIds = user.interestAffinities.map((a) => a.interestId);
+      if (user) {
+        userId = user.id;
+        userCity = user.attendeeProfile?.city ?? null;
+        interestIds = user.interestAffinities.map((a) => a.interestId);
+      }
+      // If no DB record yet (token valid but /auth/register not called), fall through as anonymous.
     } else {
       interestIds = query.interestIds ?? [];
     }
@@ -727,21 +730,6 @@ export class CommunitiesService {
       deletedAt: null,
       access: { not: CommunityAccess.INVITE_ONLY },
     };
-
-    // Only filter to interest-matched communities when we have a signal to match on.
-    if (interestIds.length) {
-      where.interests = { some: { interestId: { in: interestIds } } };
-    }
-
-    // Exclude communities the authenticated user already belongs to.
-    if (userId) {
-      where.members = {
-        none: {
-          userId,
-          status: { in: [CommunityMemberStatus.ACTIVE, CommunityMemberStatus.PENDING] },
-        },
-      };
-    }
 
     if (query.categoryId) where.categoryId = query.categoryId;
     if (query.city) {
@@ -788,16 +776,25 @@ export class CommunitiesService {
     const total = ranked.length;
     const pageSlice = ranked.slice((page - 1) * limit, (page - 1) * limit + limit);
 
+    const pageIds = pageSlice.map(({ rest }) => rest.id);
+
     let savedSet = new Set<string>();
+    let memberSet = new Set<string>();
     if (userId) {
-      savedSet = await this.getSavedSet(userId, pageSlice.map(({ rest }) => rest.id));
+      [savedSet, memberSet] = await Promise.all([
+        this.getSavedSet(userId, pageIds),
+        this.prisma.communityMember
+          .findMany({
+            where: { userId, communityId: { in: pageIds }, status: { in: [CommunityMemberStatus.ACTIVE, CommunityMemberStatus.PENDING] } },
+            select: { communityId: true },
+          })
+          .then((rows) => new Set(rows.map((r) => r.communityId))),
+      ]);
     }
 
     const data = await Promise.all(
       pageSlice.map(async ({ rest, overlap, cityMatch }) => {
-        const base = { ...(await this.withSignedMedia(rest)), matchScore: overlap, isMember: false, isSaved: savedSet.has(rest.id) };
-        // cityMatch is only meaningful (and only available) when the caller is authenticated.
-        // isMember is always false here — already-joined communities are excluded from candidates.
+        const base = { ...(await this.withSignedMedia(rest)), matchScore: overlap, isMember: memberSet.has(rest.id), isSaved: savedSet.has(rest.id) };
         return firebaseUid ? { ...base, cityMatch } : base;
       }),
     );
@@ -837,7 +834,7 @@ export class CommunitiesService {
     return { ...(await this.withSignedMedia(community)), isMember, isSaved };
   }
 
-  async getEvents(slug: string, query: { upcoming?: boolean; page?: number; limit?: number }) {
+  async getEvents(slug: string, query: CommunityEventsQueryDto) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
 
@@ -848,13 +845,37 @@ export class CommunitiesService {
     if (!community) throw new NotFoundException('Community not found');
 
     const now = new Date();
-    const links = await this.prisma.communityEvent.findMany({
-      where: {
-        communityId: community.id,
-        ...(query.upcoming
-          ? { event: { status: EventStatus.PUBLISHED, eventDate: { gte: now } } }
+
+    // Compute date range from preset filter
+    let dateGte: Date | undefined;
+    let dateLte: Date | undefined;
+    if (query.dateFilter === 'this_week') {
+      const end = new Date(now);
+      end.setDate(now.getDate() + (6 - now.getDay()));
+      end.setHours(23, 59, 59, 999);
+      dateGte = now;
+      dateLte = end;
+    } else if (query.dateFilter === 'this_month') {
+      dateGte = now;
+      dateLte = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    } else if (query.dateFilter === 'next_month') {
+      dateGte = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
+      dateLte = new Date(now.getFullYear(), now.getMonth() + 2, 0, 23, 59, 59, 999);
+    }
+
+    const eventFilter: Prisma.EventWhereInput = {
+      status: EventStatus.PUBLISHED,
+      ...(dateGte
+        ? { eventDate: { gte: dateGte, ...(dateLte ? { lte: dateLte } : {}) } }
+        : query.upcoming
+          ? { eventDate: { gte: now } }
           : {}),
-      },
+      ...(query.eventType ? { eventType: { equals: query.eventType, mode: 'insensitive' } } : {}),
+      ...(query.genre ? { tags: { has: query.genre } } : {}),
+    };
+
+    const links = await this.prisma.communityEvent.findMany({
+      where: { communityId: community.id, event: eventFilter },
       select: {
         source: true,
         event: {
@@ -885,7 +906,17 @@ export class CommunitiesService {
       },
     });
 
-    links.sort((a, b) => (a.event.eventDate?.getTime() ?? 0) - (b.event.eventDate?.getTime() ?? 0));
+    // Sort
+    const dir = query.sortOrder === 'desc' ? -1 : 1;
+    if (query.sortBy === 'price') {
+      const getMin = (tickets: Array<{ price: any }>) => {
+        const paid = tickets.filter((t) => Number(t.price) > 0);
+        return paid.length ? Math.min(...paid.map((t) => Number(t.price))) : 0;
+      };
+      links.sort((a, b) => dir * (getMin(a.event.tickets) - getMin(b.event.tickets)));
+    } else {
+      links.sort((a, b) => dir * ((a.event.eventDate?.getTime() ?? 0) - (b.event.eventDate?.getTime() ?? 0)));
+    }
 
     const total = links.length;
     const pageLinks = links.slice((page - 1) * limit, (page - 1) * limit + limit);
