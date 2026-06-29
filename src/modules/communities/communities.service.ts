@@ -712,10 +712,12 @@ export class CommunitiesService {
           },
         },
       });
-      if (!user) throw new NotFoundException('User not found');
-      userId = user.id;
-      userCity = user.attendeeProfile?.city ?? null;
-      interestIds = user.interestAffinities.map((a) => a.interestId);
+      if (user) {
+        userId = user.id;
+        userCity = user.attendeeProfile?.city ?? null;
+        interestIds = user.interestAffinities.map((a) => a.interestId);
+      }
+      // If no DB record yet (token valid but /auth/register not called), fall through as anonymous.
     } else {
       interestIds = query.interestIds ?? [];
     }
@@ -727,21 +729,6 @@ export class CommunitiesService {
       deletedAt: null,
       access: { not: CommunityAccess.INVITE_ONLY },
     };
-
-    // Only filter to interest-matched communities when we have a signal to match on.
-    if (interestIds.length) {
-      where.interests = { some: { interestId: { in: interestIds } } };
-    }
-
-    // Exclude communities the authenticated user already belongs to.
-    if (userId) {
-      where.members = {
-        none: {
-          userId,
-          status: { in: [CommunityMemberStatus.ACTIVE, CommunityMemberStatus.PENDING] },
-        },
-      };
-    }
 
     if (query.categoryId) where.categoryId = query.categoryId;
     if (query.city) {
@@ -788,16 +775,25 @@ export class CommunitiesService {
     const total = ranked.length;
     const pageSlice = ranked.slice((page - 1) * limit, (page - 1) * limit + limit);
 
+    const pageIds = pageSlice.map(({ rest }) => rest.id);
+
     let savedSet = new Set<string>();
+    let memberSet = new Set<string>();
     if (userId) {
-      savedSet = await this.getSavedSet(userId, pageSlice.map(({ rest }) => rest.id));
+      [savedSet, memberSet] = await Promise.all([
+        this.getSavedSet(userId, pageIds),
+        this.prisma.communityMember
+          .findMany({
+            where: { userId, communityId: { in: pageIds }, status: { in: [CommunityMemberStatus.ACTIVE, CommunityMemberStatus.PENDING] } },
+            select: { communityId: true },
+          })
+          .then((rows) => new Set(rows.map((r) => r.communityId))),
+      ]);
     }
 
     const data = await Promise.all(
       pageSlice.map(async ({ rest, overlap, cityMatch }) => {
-        const base = { ...(await this.withSignedMedia(rest)), matchScore: overlap, isMember: false, isSaved: savedSet.has(rest.id) };
-        // cityMatch is only meaningful (and only available) when the caller is authenticated.
-        // isMember is always false here — already-joined communities are excluded from candidates.
+        const base = { ...(await this.withSignedMedia(rest)), matchScore: overlap, isMember: memberSet.has(rest.id), isSaved: savedSet.has(rest.id) };
         return firebaseUid ? { ...base, cityMatch } : base;
       }),
     );

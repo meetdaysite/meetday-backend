@@ -386,12 +386,61 @@ export class EventsService {
         ...EVENT_DETAIL_INCLUDE,
         hostProfile: { select: { id: true, displayName: true, userId: true } },
         media: { orderBy: { order: 'asc' } },
+        communities: {
+          select: {
+            source: true,
+            community: {
+              select: {
+                id: true,
+                slug: true,
+                name: true,
+                description: true,
+                type: true,
+                access: true,
+                primaryCity: true,
+                memberCount: true,
+                coverImageKey: true,
+                iconKey: true,
+                events: {
+                  where: {
+                    event: {
+                      eventDate: { gte: new Date() },
+                      status: EventStatus.PUBLISHED,
+                    },
+                  },
+                  select: { id: true },
+                },
+              },
+            },
+          },
+        },
       },
     });
     if (!event) throw new NotFoundException('Event not found');
     if (event.hostProfile.userId !== userId)
       throw new ForbiddenException('You do not own this event');
-    return this.withSignedMedia(event);
+    const withMedia = await this.withSignedMedia(event);
+    const communities = await Promise.all(
+      event.communities.map(async ({ source, community }) => ({
+        id: community.id,
+        slug: community.slug,
+        name: community.name,
+        description: community.description,
+        type: community.type,
+        access: community.access,
+        city: community.primaryCity,
+        memberCount: community.memberCount,
+        upcomingExperiencesCount: community.events.length,
+        source,
+        coverImageUrl: community.coverImageKey
+          ? await this.storageService.getPresignedDownloadUrl(community.coverImageKey)
+          : null,
+        iconUrl: community.iconKey
+          ? await this.storageService.getPresignedDownloadUrl(community.iconKey)
+          : null,
+      })),
+    );
+    return { ...withMedia, communities };
   }
 
   async getEventAttendees(hostUserId: string, eventId: string, page = 1, limit = 50) {
@@ -667,12 +716,39 @@ export class EventsService {
         },
         refundPolicy: true,
         media: { orderBy: { order: 'asc' } },
+        communities: {
+          select: {
+            community: {
+              select: {
+                id: true,
+                slug: true,
+                name: true,
+                description: true,
+                type: true,
+                access: true,
+                primaryCity: true,
+                memberCount: true,
+                coverImageKey: true,
+                iconKey: true,
+                events: {
+                  where: {
+                    event: {
+                      eventDate: { gte: new Date() },
+                      status: EventStatus.PUBLISHED,
+                    },
+                  },
+                  select: { id: true },
+                },
+              },
+            },
+          },
+        },
       },
     });
 
     if (!event) throw new NotFoundException('Event not found');
 
-    const [signedMedia, reviewAgg, recentReviews] = await Promise.all([
+    const [signedMedia, reviewAgg, recentReviews, communities] = await Promise.all([
       Promise.all(
         event.media.map(async (m) => ({
           ...m,
@@ -701,6 +777,25 @@ export class EventsService {
         orderBy: { createdAt: 'desc' },
         take: 3,
       }),
+      Promise.all(
+        event.communities.map(async ({ community }) => ({
+          id: community.id,
+          slug: community.slug,
+          name: community.name,
+          description: community.description,
+          type: community.type,
+          access: community.access,
+          city: community.primaryCity,
+          memberCount: community.memberCount,
+          upcomingExperiencesCount: community.events.length,
+          coverImageUrl: community.coverImageKey
+            ? await this.storageService.getPresignedDownloadUrl(community.coverImageKey)
+            : null,
+          iconUrl: community.iconKey
+            ? await this.storageService.getPresignedDownloadUrl(community.iconKey)
+            : null,
+        })),
+      ),
     ]);
 
     const signedReviews = await Promise.all(
@@ -736,7 +831,7 @@ export class EventsService {
       }
     }
 
-    return { ...event, media: signedMedia, startingPrice, reviewSummary, isSaved };
+    return { ...event, media: signedMedia, startingPrice, reviewSummary, isSaved, communities };
   }
 
   // ─── Save / unsave ─────────────────────────────────────────────────────────
