@@ -94,6 +94,7 @@ export class EventsService {
               create: dto.tickets.map((t) => ({
                 name: t.name as string,
                 price: t.price ?? 0,
+                isFree: t.isFree ?? false,
                 totalCapacity: t.totalCapacity ?? 0,
                 maxPerPerson: t.maxPerPerson,
                 description: t.description,
@@ -193,6 +194,7 @@ export class EventsService {
               eventId,
               name: t.name as string,
               price: t.price ?? 0,
+              isFree: t.isFree ?? false,
               totalCapacity: t.totalCapacity ?? 0,
               maxPerPerson: t.maxPerPerson,
               description: t.description,

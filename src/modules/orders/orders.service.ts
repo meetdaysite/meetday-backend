@@ -182,8 +182,12 @@ export class OrdersService {
 
     // Compute financials
     let subtotal = 0;
+    let paidSubtotal = 0;
     for (const item of dto.items) {
-      subtotal += Number(ticketMap.get(item.ticketId)!.price) * item.quantity;
+      const ticket = ticketMap.get(item.ticketId)!;
+      const lineTotal = Number(ticket.price) * item.quantity;
+      subtotal += lineTotal;
+      if (!ticket.isFree) paidSubtotal += lineTotal;
     }
 
     let discountAmount = 0;
@@ -196,6 +200,8 @@ export class OrdersService {
     }
 
     const netSubtotal = subtotal - discountAmount;
+    // Platform fee only applies to paid ticket revenue
+    const paidNetSubtotal = Math.max(0, paidSubtotal - discountAmount);
 
     let feeRate = 0;
     if (!event.platformFeeWaived) {
@@ -282,7 +288,7 @@ export class OrdersService {
         ? null
         : await this.resolveHostFeePromoInTx(tx, event.hostProfile.id, dto.eventId);
 
-      let platformFee = Math.round(netSubtotal * feeRate * 100) / 100;
+      let platformFee = Math.round(paidNetSubtotal * feeRate * 100) / 100;
       if (promo) {
         if (promo.discountType === 'PERCENTAGE') {
           platformFee = Math.round(platformFee * (1 - promo.discountValue / 100) * 100) / 100;
@@ -290,7 +296,7 @@ export class OrdersService {
           platformFee = Math.round(Math.max(0, platformFee - promo.discountValue) * 100) / 100;
         }
       }
-      const taxAmount = Math.round((netSubtotal + platformFee) * gstRate * 100) / 100;
+      const taxAmount = Math.round((paidNetSubtotal + platformFee) * gstRate * 100) / 100;
       const totalAmount = Math.round((netSubtotal + platformFee + taxAmount) * 100) / 100;
 
       return tx.order.create({
@@ -350,7 +356,7 @@ export class OrdersService {
     return order;
   }
 
-  async confirmOrder(orderId: string, userId: string, razorpayPaymentId: string) {
+  async confirmOrder(orderId: string, userId: string, razorpayPaymentId: string | null) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       select: {
@@ -430,6 +436,20 @@ export class OrdersService {
     if (this.configService.get<string>('NODE_ENV') === 'production')
       throw new ForbiddenException('Mock confirm is not available in production');
     return this.confirmOrder(orderId, userId, 'mock');
+  }
+
+  async confirmFreeOrder(orderId: string, userId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { id: true, userId: true, totalAmount: true, status: true },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.userId !== userId) throw new ForbiddenException('You do not own this order');
+    if (order.status !== 'PENDING_PAYMENT')
+      throw new BadRequestException(`Order is already ${order.status.toLowerCase().replace('_', ' ')}`);
+    if (Number(order.totalAmount) !== 0)
+      throw new BadRequestException('This order requires payment — use POST /payments/initiate');
+    return this.confirmOrder(orderId, userId, null);
   }
 
   async getMyOrders(userId: string, page = 1, limit = 20) {

@@ -1,11 +1,11 @@
 /// <reference types="node" />
 import { PrismaClient, MediaType } from '@prisma/client';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { Storage } from '@google-cloud/storage';
 import * as fs from 'fs';
 import * as path from 'path';
 
 const SEED_IMAGES_DIR = path.join(__dirname, '..', 'seed-images');
-const S3_SEED_PREFIX = 'seed/events';
+const GCS_SEED_PREFIX = 'seed/events';
 
 const EXT_CONTENT_TYPE: Record<string, string> = {
   jpg: 'image/jpeg',
@@ -29,6 +29,7 @@ interface EventSeed {
   isFree: boolean;
   ticketName?: string;
   ticketPrice?: number;
+  ticketIsFree?: boolean;
   capacity?: number;
   tags: string[];
   languages: string[];
@@ -45,6 +46,35 @@ const future = (days: number): Date => {
 };
 
 const EVENTS: EventSeed[] = [
+  {
+    title: 'Free Community Tech Talk — Bangalore',
+    description:
+      'A free evening tech talk for the Bangalore community — covering the latest in AI, product thinking, and startup engineering. Open to everyone, no prior experience needed.',
+    category: 'Community Mixers',
+    city: 'Bangalore',
+    venueName: 'Hacker House Bangalore',
+    fullAddress: '6th Floor, Prestige Technostar, ITPL Main Rd, Whitefield, Bengaluru, Karnataka 560066',
+    latitude: 12.9948,
+    longitude: 77.7384,
+    eventDate: new Date('2026-07-06T00:00:00.000Z'),
+    startTime: '06:00 PM',
+    endTime: '08:30 PM',
+    isFree: true,
+    ticketName: 'Free Entry',
+    ticketPrice: 0,
+    ticketIsFree: true,
+    capacity: 100,
+    tags: ['free', 'tech talk', 'community', 'AI', 'startups', 'Bangalore'],
+    languages: ['English'],
+    whatToExpect: [
+      '3 lightning talks on AI and product',
+      'Open Q&A with speakers',
+      'Networking over snacks',
+      'Community announcements',
+    ],
+    whoShouldAttend: ['Developers', 'Product managers', 'Startup enthusiasts', 'Students', 'Anyone curious about tech'],
+    imageFile: 'community-mixer-bangalore.png',
+  },
   {
     title: 'Bangalore Angel Investor Mixer',
     description:
@@ -639,7 +669,7 @@ const EVENTS: EventSeed[] = [
   },
 ];
 
-async function uploadSeedImage(s3: S3Client, bucket: string, filename: string): Promise<string | null> {
+async function uploadSeedImage(storage: Storage, bucket: string, filename: string): Promise<string | null> {
   const filePath = path.join(SEED_IMAGES_DIR, filename);
   if (!fs.existsSync(filePath)) {
     console.log(`  MISSING   ${filename} — event will be created without cover image`);
@@ -648,16 +678,9 @@ async function uploadSeedImage(s3: S3Client, bucket: string, filename: string): 
 
   const ext = path.extname(filename).slice(1).toLowerCase();
   const contentType = EXT_CONTENT_TYPE[ext] ?? 'image/jpeg';
-  const key = `${S3_SEED_PREFIX}/${filename}`;
+  const key = `${GCS_SEED_PREFIX}/${filename}`;
 
-  await s3.send(
-    new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      Body: fs.readFileSync(filePath),
-      ContentType: contentType,
-    }),
-  );
+  await storage.bucket(bucket).file(key).save(fs.readFileSync(filePath), { contentType });
 
   return key;
 }
@@ -665,17 +688,16 @@ async function uploadSeedImage(s3: S3Client, bucket: string, filename: string): 
 export async function seedEvents(prisma: PrismaClient): Promise<void> {
   console.log('\n[Events]');
 
-  const bucket = process.env.AWS_S3_BUCKET;
-  const region = process.env.AWS_REGION;
-  const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+  const bucket = process.env.GCP_STORAGE_BUCKET;
+  const projectId = process.env.GCP_PROJECT_ID;
+  const keyFile = process.env.GCP_KEY_FILE;
 
-  let s3: S3Client | null = null;
-  if (bucket && region && accessKeyId && secretAccessKey) {
-    s3 = new S3Client({ region, credentials: { accessKeyId, secretAccessKey } });
-    console.log(`  S3 bucket : ${bucket}`);
+  let gcs: Storage | null = null;
+  if (bucket && projectId) {
+    gcs = new Storage({ projectId, ...(keyFile && { keyFilename: keyFile }) });
+    console.log(`  GCS bucket: ${bucket}`);
   } else {
-    console.log('  WARNING: S3 env vars not set — events will be created without images');
+    console.log('  WARNING: GCS env vars not set — events will be created without images');
   }
 
   // Seed demo host user + profile
@@ -736,8 +758,8 @@ export async function seedEvents(prisma: PrismaClient): Promise<void> {
 
     // Upload image
     let mediaKey: string | null = null;
-    if (s3 && bucket) {
-      mediaKey = await uploadSeedImage(s3, bucket, def.imageFile);
+    if (gcs && bucket) {
+      mediaKey = await uploadSeedImage(gcs, bucket, def.imageFile);
     }
 
     await prisma.event.create({
@@ -768,6 +790,7 @@ export async function seedEvents(prisma: PrismaClient): Promise<void> {
                 create: {
                   name: def.ticketName,
                   price: def.ticketPrice,
+                  isFree: def.ticketIsFree ?? false,
                   totalCapacity: def.capacity ?? 50,
                   maxPerPerson: 4,
                   saleStartDate: new Date(),

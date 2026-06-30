@@ -751,6 +751,7 @@ model EventTicket {
 
   name          String
   price         Decimal
+  isFree        Boolean   @default(false)
   totalCapacity Int
   soldCount     Int       @default(0) // held (PENDING) + sold (CONFIRMED); authoritative availability
   maxPerPerson  Int?

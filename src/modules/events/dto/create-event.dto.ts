@@ -40,11 +40,16 @@ export class CreateEventTicketDto {
   @MaxLength(100)
   name?: string;
 
-  @ApiPropertyOptional({ example: 499, description: 'Price in INR. Must be 0 for free events.' })
+  @ApiPropertyOptional({ example: 499, description: 'Price in INR. Must be 0 when isFree is true.' })
   @IsOptional()
   @IsNumber()
   @Min(0)
   price?: number;
+
+  @ApiPropertyOptional({ example: true, description: 'Mark this ticket tier as free. No platform fee is charged on free tickets.' })
+  @IsOptional()
+  @IsBoolean()
+  isFree?: boolean;
 
   @ApiPropertyOptional({ example: 50 })
   @IsOptional()
