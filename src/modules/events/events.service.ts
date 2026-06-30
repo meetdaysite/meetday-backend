@@ -16,6 +16,7 @@ import { BrowseEventsQueryDto } from './dto/browse-events-query.dto';
 import { CancelEventDto } from './dto/cancel-event.dto';
 import { ListSavedEventsQueryDto } from './dto/list-saved-events-query.dto';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { RedisService } from '../../common/redis/redis.service';
 
 const EVENT_DETAIL_INCLUDE = {
   tickets: true,
@@ -33,6 +34,7 @@ export class EventsService {
     private readonly storageService: StorageService,
     private readonly notificationsService: NotificationsService,
     private readonly auditLogService: AuditLogService,
+    private readonly redisService: RedisService,
   ) {}
 
   private async withSignedMedia<T extends { media: Array<{ url: string }> }>(obj: T): Promise<T> {
@@ -930,6 +932,96 @@ export class EventsService {
       throw new BadRequestException('Only DRAFT events can be deleted');
 
     await this.prisma.event.delete({ where: { id: eventId } });
+  }
+
+  async getEventPricingConfig(eventId: string) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: {
+        platformFeeWaived: true,
+        hostProfile: {
+          select: {
+            id: true,
+            subscriptions: {
+              where: { status: 'ACTIVE' },
+              select: { lockedFeeRate: true },
+              take: 1,
+            },
+          },
+        },
+      },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+
+    let feeRate = 0;
+    if (!event.platformFeeWaived) {
+      const activeSub = event.hostProfile.subscriptions[0];
+      if (activeSub) {
+        feeRate = activeSub.lockedFeeRate;
+      } else {
+        const plan = await this.prisma.subscriptionPlan.findUnique({
+          where: { plan: 'DISCOVER' },
+          select: { platformFeeRate: true },
+        });
+        feeRate = plan?.platformFeeRate ?? 0;
+      }
+    }
+
+    const promo = event.platformFeeWaived
+      ? null
+      : await this.peekActiveHostFeePromo(event.hostProfile.id, eventId);
+
+    let effectiveFeeRate = feeRate;
+    if (promo) {
+      if (promo.discountType === 'PERCENTAGE') {
+        effectiveFeeRate = Math.round(feeRate * (1 - promo.discountValue / 100) * 10000) / 10000;
+      } else {
+        effectiveFeeRate = Math.round(Math.max(0, feeRate - promo.discountValue / 100) * 10000) / 10000;
+      }
+    }
+
+    const cachedGst = await this.redisService.get<number>('platform_config:gst_rate');
+    let gstRate: number;
+    if (cachedGst !== null) {
+      gstRate = cachedGst;
+    } else {
+      const config = await this.prisma.platformConfig.findUnique({ where: { key: 'gst_rate' } });
+      gstRate = config ? parseFloat(config.value) : 0.18;
+      await this.redisService.set('platform_config:gst_rate', gstRate, 300);
+    }
+
+    return {
+      platformFeeRate: effectiveFeeRate,
+      gstRate,
+      platformFeeWaived: event.platformFeeWaived,
+      hostFeePromoApplied: !!promo,
+    };
+  }
+
+  private async peekActiveHostFeePromo(hostProfileId: string, eventId: string) {
+    const now = new Date();
+
+    const existingUsage = await this.prisma.hostFeePromoUsage.findFirst({
+      where: { eventId },
+      select: { promo: { select: { id: true, discountType: true, discountValue: true } } },
+    });
+    if (existingUsage) return existingUsage.promo;
+
+    const promo = await this.prisma.hostFeePromo.findFirst({
+      where: {
+        hostProfileId,
+        isActive: true,
+        AND: [
+          { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
+          { OR: [{ validUntil: null }, { validUntil: { gte: now } }] },
+        ],
+      },
+      select: { id: true, discountType: true, discountValue: true, maxEvents: true, eventsApplied: true },
+    });
+
+    if (!promo) return null;
+    if (promo.maxEvents !== null && promo.eventsApplied >= promo.maxEvents) return null;
+    return promo;
   }
 
 }

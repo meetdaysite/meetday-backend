@@ -9,6 +9,7 @@ import { seedInterestCategories } from './seeders/interest-category.seeder';
 import { seedEvents } from './seeders/event.seeder';
 import { seedCommunities } from './seeders/community.seeder';
 import { seedCommunityAnnouncements } from './seeders/community-announcement.seeder';
+import { seedPlatformConfig } from './seeders/platform-config.seeder';
 
 const prisma = new PrismaClient();
 
@@ -20,6 +21,7 @@ async function main() {
   await seedInterestCategories(prisma);
   await seedSuperAdmin(prisma);
   await seedSubscriptionPlans(prisma);
+  await seedPlatformConfig(prisma);
   await seedEvents(prisma);
   await seedCommunities(prisma);
   await seedCommunityAnnouncements(prisma);

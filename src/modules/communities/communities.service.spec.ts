@@ -10,6 +10,8 @@ import { CommunitiesService } from './communities.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { ConsentService } from '../consent/consent.service';
+import { MemberProfileVisibility } from '@prisma/client';
 
 function makePrisma() {
   const prisma: any = {
@@ -30,6 +32,9 @@ function makePrisma() {
 
 const mockStorage = { getPresignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/img') };
 const mockAuditLog = { log: jest.fn() };
+const mockConsent = { assertConsent: jest.fn().mockResolvedValue(undefined) };
+
+const joinDto = { profileVisibility: MemberProfileVisibility.EVENT_ATTENDEES_ONLY, guidelinesAccepted: true as const };
 
 describe('CommunitiesService', () => {
   let service: CommunitiesService;
@@ -43,6 +48,7 @@ describe('CommunitiesService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: StorageService, useValue: mockStorage },
         { provide: AuditLogService, useValue: mockAuditLog },
+        { provide: ConsentService, useValue: mockConsent },
       ],
     }).compile();
     service = moduleRef.get(CommunitiesService);
@@ -213,20 +219,20 @@ describe('CommunitiesService', () => {
     it('joins a PUBLIC community as ACTIVE', async () => {
       prisma.community.findFirst.mockResolvedValue({ id: 'c1', access: CommunityAccess.PUBLIC });
       prisma.communityMember.upsert.mockResolvedValue({ status: CommunityMemberStatus.ACTIVE });
-      const res = await service.join('c1', 'firebase-uid');
+      const res = await service.join('c1', 'firebase-uid', joinDto);
       expect(res).toEqual({ status: CommunityMemberStatus.ACTIVE });
     });
 
     it('creates a PENDING request for APPROVAL_REQUIRED communities', async () => {
       prisma.community.findFirst.mockResolvedValue({ id: 'c1', access: CommunityAccess.APPROVAL_REQUIRED });
       prisma.communityMember.upsert.mockResolvedValue({ status: CommunityMemberStatus.PENDING });
-      const res = await service.join('c1', 'firebase-uid');
+      const res = await service.join('c1', 'firebase-uid', joinDto);
       expect(res).toEqual({ status: CommunityMemberStatus.PENDING });
     });
 
     it('rejects joining an INVITE_ONLY community', async () => {
       prisma.community.findFirst.mockResolvedValue({ id: 'c1', access: CommunityAccess.INVITE_ONLY });
-      await expect(service.join('c1', 'firebase-uid')).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.join('c1', 'firebase-uid', joinDto)).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 });

@@ -17,6 +17,8 @@ import { EventsVibeService } from '../events/events-vibe.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { CommunityMembersService } from '../communities/community-members.service';
+import { RedisService } from '../../common/redis/redis.service';
+import { Prisma } from '@prisma/client';
 
 async function generateUniqueBookingId(
   check: (id: string) => Promise<boolean>,
@@ -31,7 +33,6 @@ async function generateUniqueBookingId(
   throw new Error('Failed to generate unique booking ID');
 }
 
-const GST_RATE = 0.18;
 const PENDING_EXPIRY_MINUTES = 15;
 
 @Injectable()
@@ -46,6 +47,7 @@ export class OrdersService {
     private readonly auditLogService: AuditLogService,
     private readonly eventsVibeService: EventsVibeService,
     private readonly communityMembersService: CommunityMembersService,
+    private readonly redisService: RedisService,
   ) {}
 
   async createOrder(userId: string, dto: CreateOrderDto) {
@@ -64,6 +66,7 @@ export class OrdersService {
         platformFeeWaived: true,
         hostProfile: {
           select: {
+            id: true,
             approvalStatus: true,
             subscriptions: {
               where: { status: 'ACTIVE' },
@@ -208,9 +211,15 @@ export class OrdersService {
       }
     }
 
-    const platformFee = Math.round(netSubtotal * feeRate * 100) / 100;
-    const taxAmount = Math.round((netSubtotal + platformFee) * GST_RATE * 100) / 100;
-    const totalAmount = Math.round((netSubtotal + platformFee + taxAmount) * 100) / 100;
+    const cachedGst = await this.redisService.get<number>('platform_config:gst_rate');
+    let gstRate: number;
+    if (cachedGst !== null) {
+      gstRate = cachedGst;
+    } else {
+      const config = await this.prisma.platformConfig.findUnique({ where: { key: 'gst_rate' } });
+      gstRate = config ? parseFloat(config.value) : 0.18;
+      await this.redisService.set('platform_config:gst_rate', gstRate, 300);
+    }
 
     const buyerName = `${buyer.firstName} ${buyer.lastName}`;
     const buyerEmail = buyer.email ?? buyer.phone ?? '';
@@ -268,6 +277,22 @@ export class OrdersService {
         if (couponUpdated === 0) throw new ConflictException('Promo code usage limit reached');
       }
 
+      // Resolve host fee promo and compute final financials (inside tx for atomicity)
+      const promo = event.platformFeeWaived
+        ? null
+        : await this.resolveHostFeePromoInTx(tx, event.hostProfile.id, dto.eventId);
+
+      let platformFee = Math.round(netSubtotal * feeRate * 100) / 100;
+      if (promo) {
+        if (promo.discountType === 'PERCENTAGE') {
+          platformFee = Math.round(platformFee * (1 - promo.discountValue / 100) * 100) / 100;
+        } else {
+          platformFee = Math.round(Math.max(0, platformFee - promo.discountValue) * 100) / 100;
+        }
+      }
+      const taxAmount = Math.round((netSubtotal + platformFee) * gstRate * 100) / 100;
+      const totalAmount = Math.round((netSubtotal + platformFee + taxAmount) * 100) / 100;
+
       return tx.order.create({
         data: {
           bookingId,
@@ -279,6 +304,7 @@ export class OrdersService {
           totalAmount,
           discountAmount,
           couponId: coupon?.id ?? null,
+          hostFeePromoId: promo?.id ?? null,
           items: {
             create: dto.items.map((item) => {
               const ticket = ticketMap.get(item.ticketId)!;
@@ -604,5 +630,41 @@ export class OrdersService {
     }
 
     if (expired.length > 0) this.logger.log(`Expired ${expired.length} pending order(s)`);
+  }
+
+  private async resolveHostFeePromoInTx(
+    tx: Prisma.TransactionClient,
+    hostProfileId: string,
+    eventId: string,
+  ): Promise<{ id: string; discountType: string; discountValue: number } | null> {
+    const now = new Date();
+
+    // Idempotent: if this event already has a promo usage, reuse the same promo
+    const existingUsage = await tx.hostFeePromoUsage.findFirst({
+      where: { eventId },
+      select: { promo: { select: { id: true, discountType: true, discountValue: true } } },
+    });
+    if (existingUsage) return existingUsage.promo;
+
+    // Find an active promo for this host
+    const promo = await tx.hostFeePromo.findFirst({
+      where: {
+        hostProfileId,
+        isActive: true,
+        AND: [
+          { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
+          { OR: [{ validUntil: null }, { validUntil: { gte: now } }] },
+        ],
+      },
+      select: { id: true, discountType: true, discountValue: true, maxEvents: true, eventsApplied: true },
+    });
+
+    if (!promo) return null;
+    if (promo.maxEvents !== null && promo.eventsApplied >= promo.maxEvents) return null;
+
+    await tx.hostFeePromoUsage.create({ data: { promoId: promo.id, eventId } });
+    await tx.hostFeePromo.update({ where: { id: promo.id }, data: { eventsApplied: { increment: 1 } } });
+
+    return promo;
   }
 }
