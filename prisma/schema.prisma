@@ -376,6 +376,7 @@ model HostProfile {
   subscriptions HostSubscription[]
   events        Event[]
   payouts       HostPayout[]
+  feePromos     HostFeePromo[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -734,6 +735,7 @@ model Event {
   feedPosts       CommunityPost[]       @relation("EventFeedPosts")
   savedBy         SavedEvent[]
   payouts         HostPayout[]
+  feePromoUsages  HostFeePromoUsage[]
 
   @@index([hostProfileId])
   @@index([categoryId])
@@ -749,6 +751,7 @@ model EventTicket {
 
   name          String
   price         Decimal
+  isFree        Boolean   @default(false)
   totalCapacity Int
   soldCount     Int       @default(0) // held (PENDING) + sold (CONFIRMED); authoritative availability
   maxPerPerson  Int?
@@ -875,6 +878,9 @@ model Order {
   couponId       String?
   discountAmount Decimal @default(0)
 
+  // Host fee promo applied at order creation
+  hostFeePromoId String?
+
   // Razorpay — nullable until payment is wired in
   razorpayOrderId   String? @unique
   razorpayPaymentId String? @unique
@@ -886,6 +892,7 @@ model Order {
   user           User                @relation(fields: [userId], references: [id])
   event          Event               @relation(fields: [eventId], references: [id])
   coupon         Coupon?             @relation(fields: [couponId], references: [id])
+  hostFeePromo   HostFeePromo?       @relation(fields: [hostFeePromoId], references: [id])
   items          OrderItem[]
   review         EventReview?
   payoutLineItem HostPayoutLineItem?
@@ -2259,4 +2266,53 @@ model HostPayoutHistory {
 
   @@index([payoutId])
   @@map("host_payout_history")
+}
+
+// ─── Platform Config ──────────────────────────────────────────────────────────
+
+model PlatformConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@map("platform_configs")
+}
+
+// ─── Host Fee Promos ──────────────────────────────────────────────────────────
+
+model HostFeePromo {
+  id            String      @id @default(uuid())
+  hostProfileId String
+  hostProfile   HostProfile @relation(fields: [hostProfileId], references: [id])
+
+  discountType  DiscountType
+  discountValue Float
+
+  validFrom  DateTime?
+  validUntil DateTime?
+  maxEvents  Int?
+  eventsApplied Int @default(0)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  usages HostFeePromoUsage[]
+  orders Order[]
+
+  @@index([hostProfileId])
+  @@map("host_fee_promos")
+}
+
+model HostFeePromoUsage {
+  id        String   @id @default(uuid())
+  promoId   String
+  eventId   String
+  appliedAt DateTime @default(now())
+
+  promo HostFeePromo @relation(fields: [promoId], references: [id])
+  event Event        @relation(fields: [eventId], references: [id])
+
+  @@unique([promoId, eventId])
+  @@map("host_fee_promo_usages")
 }

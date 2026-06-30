@@ -28,6 +28,10 @@ import { CreateInterestDto } from './dto/create-interest.dto';
 import { UpdateInterestDto } from './dto/update-interest.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
+import { UpdateGstRateDto } from './dto/update-gst-rate.dto';
+import { UpdatePlanFeeRateDto } from './dto/update-plan-fee-rate.dto';
+import { CreateHostFeePromoDto } from './dto/create-host-fee-promo.dto';
+import { UpdateHostFeePromoDto } from './dto/update-host-fee-promo.dto';
 import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RedisService } from '../../common/redis/redis.service';
@@ -1129,5 +1133,70 @@ export class AdminService {
     });
     void this.interestsService.invalidateCache();
     return this.signInterest(updated);
+  }
+
+  // ─── Platform Config ────────────────────────────────────────────────────────
+
+  async getPlatformConfig() {
+    const configs = await this.prisma.platformConfig.findMany();
+    return Object.fromEntries(configs.map((c) => [c.key, c.value]));
+  }
+
+  async updateGstRate(dto: UpdateGstRateDto) {
+    await this.prisma.platformConfig.upsert({
+      where: { key: 'gst_rate' },
+      create: { key: 'gst_rate', value: String(dto.gstRate) },
+      update: { value: String(dto.gstRate) },
+    });
+    await this.redis.del('platform_config:gst_rate');
+    return { gstRate: dto.gstRate };
+  }
+
+  async updateSubscriptionPlanFeeRate(plan: string, dto: UpdatePlanFeeRateDto) {
+    const existing = await this.prisma.subscriptionPlan.findUnique({ where: { plan: plan as any } });
+    if (!existing) throw new NotFoundException(`Subscription plan '${plan}' not found`);
+    const updated = await this.prisma.subscriptionPlan.update({
+      where: { plan: plan as any },
+      data: { platformFeeRate: dto.feeRate },
+    });
+    return { plan: updated.plan, platformFeeRate: updated.platformFeeRate };
+  }
+
+  // ─── Host Fee Promos ────────────────────────────────────────────────────────
+
+  async createHostFeePromo(hostProfileId: string, dto: CreateHostFeePromoDto) {
+    const host = await this.prisma.hostProfile.findUnique({ where: { id: hostProfileId }, select: { id: true } });
+    if (!host) throw new NotFoundException('Host profile not found');
+    return this.prisma.hostFeePromo.create({
+      data: {
+        hostProfileId,
+        discountType: dto.discountType,
+        discountValue: dto.discountValue,
+        validFrom: dto.validFrom ? new Date(dto.validFrom) : null,
+        validUntil: dto.validUntil ? new Date(dto.validUntil) : null,
+        maxEvents: dto.maxEvents ?? null,
+      },
+    });
+  }
+
+  async getHostFeePromos(hostProfileId: string) {
+    const host = await this.prisma.hostProfile.findUnique({ where: { id: hostProfileId }, select: { id: true } });
+    if (!host) throw new NotFoundException('Host profile not found');
+    return this.prisma.hostFeePromo.findMany({
+      where: { hostProfileId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async updateHostFeePromo(hostProfileId: string, promoId: string, dto: UpdateHostFeePromoDto) {
+    const promo = await this.prisma.hostFeePromo.findFirst({ where: { id: promoId, hostProfileId } });
+    if (!promo) throw new NotFoundException('Fee promo not found');
+    return this.prisma.hostFeePromo.update({
+      where: { id: promoId },
+      data: {
+        ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+        ...(dto.validUntil !== undefined && { validUntil: new Date(dto.validUntil) }),
+      },
+    });
   }
 }

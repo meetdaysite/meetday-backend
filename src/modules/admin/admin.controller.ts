@@ -51,6 +51,10 @@ import { CreateInterestDto } from './dto/create-interest.dto';
 import { UpdateInterestDto } from './dto/update-interest.dto';
 import { SetInterestCategoriesDto } from './dto/set-interest-categories.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
+import { UpdateGstRateDto } from './dto/update-gst-rate.dto';
+import { UpdatePlanFeeRateDto } from './dto/update-plan-fee-rate.dto';
+import { CreateHostFeePromoDto } from './dto/create-host-fee-promo.dto';
+import { UpdateHostFeePromoDto } from './dto/update-host-fee-promo.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth('firebase-token')
@@ -1172,5 +1176,74 @@ export class AdminController {
     @Body('isVisible') isVisible: boolean,
   ) {
     return this.reviewsService.setReviewVisibility(id, isVisible);
+  }
+
+  // ─── Platform Config ───────────────────────────────────────────────────────
+
+  @Get('platform-config')
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({ summary: 'Get all platform config values (gst_rate, etc.)' })
+  @ApiOkResponse({ description: 'Key-value map of all platform config entries.' })
+  getPlatformConfig() {
+    return this.adminService.getPlatformConfig();
+  }
+
+  @Patch('platform-config/gst-rate')
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({ summary: 'Update platform GST rate', description: 'Updates the GST rate applied to all new orders. Value is a decimal (e.g. 0.18 = 18%). Only SUPER_ADMIN.' })
+  @ApiBody({ type: UpdateGstRateDto })
+  @ApiOkResponse({ description: 'Updated GST rate.' })
+  updateGstRate(@Body() dto: UpdateGstRateDto) {
+    return this.adminService.updateGstRate(dto);
+  }
+
+  @Patch('subscription-plans/:plan/fee-rate')
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({ summary: 'Update platform fee rate for a subscription plan', description: 'Updates the platformFeeRate on a subscription plan (DISCOVER, SELL, COMMUNITY). Only SUPER_ADMIN.' })
+  @ApiParam({ name: 'plan', enum: ['DISCOVER', 'SELL', 'COMMUNITY'] })
+  @ApiBody({ type: UpdatePlanFeeRateDto })
+  @ApiOkResponse({ description: 'Updated plan fee rate.' })
+  @ApiNotFoundResponse({ description: 'Plan not found.' })
+  updateSubscriptionPlanFeeRate(@Param('plan') plan: string, @Body() dto: UpdatePlanFeeRateDto) {
+    return this.adminService.updateSubscriptionPlanFeeRate(plan, dto);
+  }
+
+  // ─── Host Fee Promos ───────────────────────────────────────────────────────
+
+  @Post('hosts/:hostProfileId/fee-promos')
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({ summary: 'Create a platform fee promo for a host', description: 'Grants a host a time-based or event-count-based discount on their platform fee. Only SUPER_ADMIN.' })
+  @ApiParam({ name: 'hostProfileId', type: String })
+  @ApiBody({ type: CreateHostFeePromoDto })
+  @ApiCreatedResponse({ description: 'Fee promo created.' })
+  @ApiNotFoundResponse({ description: 'Host profile not found.' })
+  createHostFeePromo(@Param('hostProfileId', ParseUUIDPipe) hostProfileId: string, @Body() dto: CreateHostFeePromoDto) {
+    return this.adminService.createHostFeePromo(hostProfileId, dto);
+  }
+
+  @Get('hosts/:hostProfileId/fee-promos')
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({ summary: 'List fee promos for a host' })
+  @ApiParam({ name: 'hostProfileId', type: String })
+  @ApiOkResponse({ description: 'Array of fee promos.' })
+  @ApiNotFoundResponse({ description: 'Host profile not found.' })
+  getHostFeePromos(@Param('hostProfileId', ParseUUIDPipe) hostProfileId: string) {
+    return this.adminService.getHostFeePromos(hostProfileId);
+  }
+
+  @Patch('hosts/:hostProfileId/fee-promos/:promoId')
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({ summary: 'Deactivate or update a host fee promo' })
+  @ApiParam({ name: 'hostProfileId', type: String })
+  @ApiParam({ name: 'promoId', type: String })
+  @ApiBody({ type: UpdateHostFeePromoDto })
+  @ApiOkResponse({ description: 'Updated fee promo.' })
+  @ApiNotFoundResponse({ description: 'Promo not found.' })
+  updateHostFeePromo(
+    @Param('hostProfileId', ParseUUIDPipe) hostProfileId: string,
+    @Param('promoId', ParseUUIDPipe) promoId: string,
+    @Body() dto: UpdateHostFeePromoDto,
+  ) {
+    return this.adminService.updateHostFeePromo(hostProfileId, promoId, dto);
   }
 }

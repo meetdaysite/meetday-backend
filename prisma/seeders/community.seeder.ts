@@ -1,12 +1,12 @@
 /// <reference types="node" />
 import { PrismaClient } from '@prisma/client';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { Storage } from '@google-cloud/storage';
 import * as fs from 'fs';
 import * as path from 'path';
 
 const COVERS_DIR = path.join(__dirname, '..', 'seed-community-covers');
 const ICONS_DIR = path.join(__dirname, '..', '..', 'interest-images');
-const S3_SEED_PREFIX = 'seed/communities';
+const GCS_SEED_PREFIX = 'seed/communities';
 
 const EXT_CONTENT_TYPE: Record<string, string> = {
   jpg: 'image/jpeg',
@@ -187,7 +187,7 @@ const COMMUNITIES: CommunitySeed[] = [
 ];
 
 async function uploadImage(
-  s3: S3Client,
+  storage: Storage,
   bucket: string,
   filePath: string,
   key: string,
@@ -201,14 +201,7 @@ async function uploadImage(
   const ext = path.extname(filePath).slice(1).toLowerCase();
   const contentType = EXT_CONTENT_TYPE[ext] ?? 'image/jpeg';
 
-  await s3.send(
-    new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      Body: fs.readFileSync(filePath),
-      ContentType: contentType,
-    }),
-  );
+  await storage.bucket(bucket).file(key).save(fs.readFileSync(filePath), { contentType });
 
   return key;
 }
@@ -216,17 +209,16 @@ async function uploadImage(
 export async function seedCommunities(prisma: PrismaClient): Promise<void> {
   console.log('\n[Communities]');
 
-  const bucket = process.env.AWS_S3_BUCKET;
-  const region = process.env.AWS_REGION;
-  const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+  const bucket = process.env.GCP_STORAGE_BUCKET;
+  const projectId = process.env.GCP_PROJECT_ID;
+  const keyFile = process.env.GCP_KEY_FILE;
 
-  let s3: S3Client | null = null;
-  if (bucket && region && accessKeyId && secretAccessKey) {
-    s3 = new S3Client({ region, credentials: { accessKeyId, secretAccessKey } });
-    console.log(`  S3 bucket : ${bucket}`);
+  let gcs: Storage | null = null;
+  if (bucket && projectId) {
+    gcs = new Storage({ projectId, ...(keyFile && { keyFilename: keyFile }) });
+    console.log(`  GCS bucket: ${bucket}`);
   } else {
-    console.log('  WARNING: S3 env vars not set — communities will be created without images');
+    console.log('  WARNING: GCS env vars not set — communities will be created without images');
   }
 
   // Creator — prefer the super admin (Meetday-managed communities); fall back to the demo host.
@@ -273,19 +265,19 @@ export async function seedCommunities(prisma: PrismaClient): Promise<void> {
     // Upload images
     let coverImageKey: string | null = null;
     let iconKey: string | null = null;
-    if (s3 && bucket) {
+    if (gcs && bucket) {
       coverImageKey = await uploadImage(
-        s3,
+        gcs,
         bucket,
         path.join(COVERS_DIR, `${def.interestSlug}.png`),
-        `${S3_SEED_PREFIX}/${def.interestSlug}/cover.png`,
+        `${GCS_SEED_PREFIX}/${def.interestSlug}/cover.png`,
         `${def.name} cover`,
       );
       iconKey = await uploadImage(
-        s3,
+        gcs,
         bucket,
         path.join(ICONS_DIR, `${def.interestSlug}.png`),
-        `${S3_SEED_PREFIX}/${def.interestSlug}/icon.png`,
+        `${GCS_SEED_PREFIX}/${def.interestSlug}/icon.png`,
         `${def.name} icon`,
       );
     }

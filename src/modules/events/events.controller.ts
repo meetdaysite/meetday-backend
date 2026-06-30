@@ -196,6 +196,31 @@ export class EventsController {
     return this.eventsService.getPublicEventById(id, firebaseUid);
   }
 
+  @Get(':id/pricing-config')
+  @Public()
+  @ApiOperation({
+    summary: 'Get pricing config for an event',
+    description:
+      'Returns the effective platform fee rate and GST rate for an event. ' +
+      'The frontend uses these values to compute the full price breakdown dynamically ' +
+      'before the user places an order.',
+  })
+  @ApiOkResponse({
+    description: 'Effective rates for client-side price preview.',
+    schema: {
+      example: {
+        platformFeeRate: 0.08,
+        gstRate: 0.18,
+        platformFeeWaived: false,
+        hostFeePromoApplied: true,
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Event not found.' })
+  getEventPricingConfig(@Param('id', ParseUUIDPipe) id: string) {
+    return this.eventsService.getEventPricingConfig(id);
+  }
+
   // ─── Host endpoints ────────────────────────────────────────────────────────
 
   @Post('copilot/generate-draft')

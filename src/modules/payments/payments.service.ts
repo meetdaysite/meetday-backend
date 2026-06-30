@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  InternalServerErrorException,
   Logger,
   NotFoundException,
   UnauthorizedException,
@@ -55,11 +56,23 @@ export class PaymentsService {
       return { razorpayOrderId: order.razorpayOrderId, amount: amountInPaise, currency: 'INR', keyId: this.keyId };
     }
 
-    const razorpayOrder = await this.razorpay.orders.create({
-      amount: amountInPaise,
-      currency: 'INR',
-      receipt: dto.orderId,
-    });
+    let razorpayOrder: any;
+    try {
+      razorpayOrder = await this.razorpay.orders.create({
+        amount: amountInPaise,
+        currency: 'INR',
+        receipt: dto.orderId,
+      });
+    } catch (err: any) {
+      const rzpError = err?.error ?? err;
+      this.logger.error(
+        `Razorpay order creation failed [${rzpError?.code ?? 'UNKNOWN'}]: ${rzpError?.description ?? err?.message}`,
+      );
+      if (err?.statusCode === 400) {
+        throw new BadRequestException(rzpError?.description ?? 'Payment initiation failed');
+      }
+      throw new InternalServerErrorException('Payment gateway error. Please try again later.');
+    }
 
     await this.prisma.order.update({
       where: { id: dto.orderId },

@@ -21,7 +21,9 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiParam,
   ApiTags,
+  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -76,6 +78,99 @@ export class OrdersController {
     @GetUser('id') userId: string,
   ) {
     return this.ordersService.mockConfirm(id, userId);
+  }
+
+  @Post(':id/confirm-free')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Confirm a free (zero-amount) order',
+    description: `
+Confirms a \`PENDING_PAYMENT\` order whose \`totalAmount\` is exactly **₹0**.
+
+Use this endpoint when **all tickets in the order are free** (\`isFree: true\`). It bypasses Razorpay entirely and immediately transitions the order to \`CONFIRMED\`.
+
+**When to call this vs the payment flow:**
+- \`totalAmount === 0\` → call this endpoint
+- \`totalAmount > 0\`  → call \`POST /payments/initiate\` instead
+
+**Side effects on success** (same as a paid order confirmation):
+- Order status set to \`CONFIRMED\`
+- Ticket confirmation email queued for the buyer
+- In-app notification sent to the buyer
+- In-app notification sent to the host
+- Crowd pulse recomputed for the event
+- Community member event count updated
+- Audit log entry created
+    `.trim(),
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'UUID of the order to confirm.',
+    example: 'a3f1c2e4-5b67-4d89-9f01-234567890abc',
+  })
+  @ApiOkResponse({
+    description: 'Order confirmed successfully.',
+    schema: {
+      example: { message: 'Order confirmed' },
+    },
+  })
+  @ApiBadRequestResponse({
+    description: 'Order cannot be confirmed for one of the following reasons.',
+    schema: {
+      examples: {
+        not_free: {
+          summary: 'Order has a non-zero total',
+          value: {
+            statusCode: 400,
+            message: 'This order requires payment — use POST /payments/initiate',
+            error: 'Bad Request',
+          },
+        },
+        wrong_status: {
+          summary: 'Order is not in PENDING_PAYMENT',
+          value: {
+            statusCode: 400,
+            message: 'Order is already confirmed',
+            error: 'Bad Request',
+          },
+        },
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Missing or invalid Firebase token.',
+    schema: {
+      example: {
+        statusCode: 401,
+        message: 'Unauthorized',
+      },
+    },
+  })
+  @ApiForbiddenResponse({
+    description: 'Authenticated user does not own this order.',
+    schema: {
+      example: {
+        statusCode: 403,
+        message: 'You do not own this order',
+        error: 'Forbidden',
+      },
+    },
+  })
+  @ApiNotFoundResponse({
+    description: 'No order found with the given ID.',
+    schema: {
+      example: {
+        statusCode: 404,
+        message: 'Order not found',
+        error: 'Not Found',
+      },
+    },
+  })
+  confirmFreeOrder(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') userId: string,
+  ) {
+    return this.ordersService.confirmFreeOrder(id, userId);
   }
 
   @Get('me')
