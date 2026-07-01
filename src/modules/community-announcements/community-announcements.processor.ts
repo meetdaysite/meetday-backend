@@ -1,8 +1,9 @@
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
-import { AnnouncementStatus, CommunityMemberStatus, Prisma } from '@prisma/client';
+import { AnnouncementStatus, CommunityMemberStatus } from '@prisma/client';
 import { Job } from 'bull';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 interface FanOutJob {
   announcementId: string;
@@ -15,7 +16,10 @@ const BATCH_SIZE = 500;
 export class CommunityAnnouncementsProcessor {
   private readonly logger = new Logger(CommunityAnnouncementsProcessor.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   @Process('fan-out')
   async handleFanOut(job: Job<FanOutJob>) {
@@ -31,16 +35,14 @@ export class CommunityAnnouncementsProcessor {
       return;
     }
 
-    const metadata: Prisma.InputJsonValue = {
-      communityId,
-      announcementId,
-      category: announcement.category,
-    };
+    const metadata = { communityId, announcementId, category: announcement.category };
 
     let cursor: string | undefined;
     let total = 0;
 
-    // Page through active members (excluding the author) and bulk-create notifications.
+    // Page through active members (excluding the author) and create notifications.
+    // notificationsService.create() is used per member so each recipient receives a
+    // real-time socket push and their Redis unread-count cache is invalidated.
     for (;;) {
       const members = await this.prisma.communityMember.findMany({
         where: {
@@ -56,15 +58,17 @@ export class CommunityAnnouncementsProcessor {
 
       if (members.length === 0) break;
 
-      await this.prisma.notification.createMany({
-        data: members.map((m) => ({
-          userId: m.userId,
-          type: 'community_announcement',
-          title: announcement.community.name,
-          body: announcement.title,
-          metadata,
-        })),
-      });
+      await Promise.allSettled(
+        members.map((m) =>
+          this.notificationsService.create(
+            m.userId,
+            'community_announcement',
+            announcement.community.name,
+            announcement.title,
+            metadata,
+          ),
+        ),
+      );
 
       total += members.length;
       if (members.length < BATCH_SIZE) break;

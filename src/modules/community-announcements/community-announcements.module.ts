@@ -7,11 +7,13 @@ import { CommunityAnnouncementsController } from './community-announcements.cont
 import { CommunityAnnouncementsHostController } from './community-announcements-host.controller';
 import { CommunityAnnouncementsProcessor } from './community-announcements.processor';
 import { CommunityAnnouncementsService } from './community-announcements.service';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
     BullModule.registerQueue({ name: 'community-announcements' }),
     StorageModule,
+    NotificationsModule,
   ],
   controllers: [CommunityAnnouncementsController, CommunityAnnouncementsAdminController, CommunityAnnouncementsHostController],
   providers: [
