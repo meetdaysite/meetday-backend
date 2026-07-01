@@ -17,6 +17,7 @@ import { CancelEventDto } from './dto/cancel-event.dto';
 import { ListSavedEventsQueryDto } from './dto/list-saved-events-query.dto';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { RedisService } from '../../common/redis/redis.service';
+import { RefundsService } from '../refunds/refunds.service';
 
 const EVENT_DETAIL_INCLUDE = {
   tickets: true,
@@ -35,6 +36,7 @@ export class EventsService {
     private readonly notificationsService: NotificationsService,
     private readonly auditLogService: AuditLogService,
     private readonly redisService: RedisService,
+    private readonly refundsService: RefundsService,
   ) {}
 
   private async withSignedMedia<T extends { media: Array<{ url: string }> }>(obj: T): Promise<T> {
@@ -571,7 +573,41 @@ export class EventsService {
       entityId: eventId,
       metadata: { reason: dto.cancellationReason, pendingOrdersCancelled: pendingOrders.length },
     });
+
+    // Fan out refunds for all paid, confirmed orders
+    void this.fanOutEventCancellationRefunds(eventId, userId);
+
     return cancelled;
+  }
+
+  private async fanOutEventCancellationRefunds(eventId: string, actorId: string) {
+    const confirmedOrders = await this.prisma.order.findMany({
+      where: { eventId, status: { in: ['CONFIRMED', 'PARTIALLY_REFUNDED'] } },
+      include: {
+        items: {
+          include: { attendees: { where: { cancelledAt: null }, select: { id: true } } },
+        },
+      },
+    });
+
+    for (const order of confirmedOrders) {
+      const items = order.items
+        .map((item) => ({
+          orderItemId: item.id,
+          quantity: item.quantity - item.cancelledCount,
+          attendeeIds: item.attendees.map((a) => a.id),
+        }))
+        .filter((i) => i.quantity > 0 && i.attendeeIds.length > 0);
+
+      if (items.length === 0) continue;
+
+      await this.refundsService
+        .initiateCancellation(order.id, items, 'EVENT_CANCELLED', actorId)
+        .catch((err) => this.logger.error(`Failed to initiate refund for order ${order.id}`, err));
+    }
+
+    if (confirmedOrders.length > 0)
+      this.logger.log(`Initiated refunds for ${confirmedOrders.length} confirmed order(s) on event ${eventId}`);
   }
 
   async browseEvents(query: BrowseEventsQueryDto, firebaseUid?: string | null) {
@@ -998,6 +1034,65 @@ export class EventsService {
       platformFeeWaived: event.platformFeeWaived,
       hostFeePromoApplied: !!promo,
     };
+  }
+
+  async getAvailableOffers(eventId: string, userId: string) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId, status: EventStatus.PUBLISHED },
+      select: { id: true },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+
+    const now = new Date();
+    const cacheKey = `event_offers:${eventId}`;
+
+    let candidates = await this.redisService.get<any[]>(cacheKey);
+    if (!candidates) {
+      const rows = await this.prisma.coupon.findMany({
+        where: {
+          eventId,
+          target: 'ATTENDEE',
+          isActive: true,
+          AND: [
+            { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
+            { OR: [{ validUntil: null }, { validUntil: { gte: now } }] },
+          ],
+        },
+        select: {
+          id: true,
+          code: true,
+          description: true,
+          discountType: true,
+          discountValue: true,
+          maxDiscountAmount: true,
+          minOrderValue: true,
+          validUntil: true,
+          maxUsages: true,
+          usageCount: true,
+          maxUsagesPerUser: true,
+        },
+      });
+
+      // Drop globally exhausted codes before caching
+      candidates = rows.filter((c) => c.maxUsages === null || c.usageCount < c.maxUsages);
+      await this.redisService.set(cacheKey, candidates, 60);
+    }
+
+    // Per-user filter: exclude codes this user has personally exhausted
+    const usable = await Promise.all(
+      candidates.map(async (c) => {
+        if (!c.maxUsagesPerUser) return c;
+        const used = await this.prisma.order.count({
+          where: { userId, couponId: c.id, status: { in: ['CONFIRMED', 'PENDING_PAYMENT'] } },
+        });
+        return used < c.maxUsagesPerUser ? c : null;
+      }),
+    );
+
+    // Return only the fields the frontend needs — no internal counters
+    return usable
+      .filter(Boolean)
+      .map(({ id: _id, maxUsages: _mu, usageCount: _uc, maxUsagesPerUser: _mup, ...safe }) => safe);
   }
 
   private async peekActiveHostFeePromo(hostProfileId: string, eventId: string) {

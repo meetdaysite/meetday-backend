@@ -10,6 +10,7 @@ import {
   Post,
   Query,
   UseGuards,
+  ValidationPipe,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
@@ -31,6 +32,7 @@ import { GetUser } from '../../common/decorators/get-user.decorator';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ValidateCouponDto } from './dto/validate-coupon.dto';
+import { CancelTicketsDto } from '../refunds/dto/cancel-tickets.dto';
 
 @ApiTags('Orders')
 @ApiBearerAuth('firebase-token')
@@ -237,17 +239,44 @@ Use this endpoint when **all tickets in the order are free** (\`isFree: true\`).
     return this.ordersService.getOrderById(id, userId);
   }
 
+  @Post(':id/cancel-tickets')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Cancel specific tickets on a confirmed order',
+    description:
+      'Cancels one or more individual ticket slots within a CONFIRMED or PARTIALLY_REFUNDED order. ' +
+      'Pass the exact OrderItem IDs, quantities, and attendee IDs to cancel. ' +
+      'Validates the event refund window and blocks cancellation for already checked-in attendees. ' +
+      'A refund is automatically initiated to the original payment method per the event refund policy. ' +
+      'If all tickets are cancelled the order transitions to CANCELLED; otherwise to PARTIALLY_REFUNDED.',
+  })
+  @ApiOkResponse({ description: 'Cancellation initiated. Returns refundId and refund amount in paise.' })
+  @ApiBadRequestResponse({
+    description: 'Validation error — window passed, attendee checked-in, quantity mismatch, or no active tickets.',
+  })
+  @ApiNotFoundResponse({ description: 'Order not found.' })
+  @ApiForbiddenResponse({ description: 'Order belongs to a different user.' })
+  cancelTickets(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') userId: string,
+    @Body(new ValidationPipe({ transform: true, whitelist: true })) dto: CancelTicketsDto,
+  ) {
+    return this.ordersService.cancelTickets(id, userId, dto);
+  }
+
   @Post(':id/cancel')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Cancel a confirmed order',
+    summary: 'Cancel all remaining tickets on a confirmed order',
     description:
-      'Cancels a CONFIRMED order and releases ticket capacity. ' +
-      'Validates the refund window defined on the event. ' +
-      'Actual refund processing is handled when Razorpay is wired in.',
+      'Convenience endpoint that cancels every active ticket in a CONFIRMED or PARTIALLY_REFUNDED order at once. ' +
+      'Equivalent to calling POST /orders/:id/cancel-tickets with all active OrderItem IDs. ' +
+      'Blocked if any attendee has already checked in.',
   })
-  @ApiOkResponse({ description: 'Order cancelled.' })
-  @ApiBadRequestResponse({ description: 'Order is not CONFIRMED, or cancellation window has passed.' })
+  @ApiOkResponse({ description: 'Cancellation initiated. Returns refundId and refund amount in paise.' })
+  @ApiBadRequestResponse({
+    description: 'Order is not cancellable, window has passed, or an attendee is already checked in.',
+  })
   @ApiNotFoundResponse({ description: 'Order not found.' })
   @ApiForbiddenResponse({ description: 'Order belongs to a different user.' })
   cancelOrder(

@@ -19,6 +19,8 @@ import { ValidateCouponDto } from './dto/validate-coupon.dto';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { CommunityMembersService } from '../communities/community-members.service';
 import { RedisService } from '../../common/redis/redis.service';
+import { RefundsService } from '../refunds/refunds.service';
+import { CancelTicketsDto } from '../refunds/dto/cancel-tickets.dto';
 import { Prisma } from '@prisma/client';
 
 async function generateUniqueBookingId(
@@ -49,6 +51,7 @@ export class OrdersService {
     private readonly eventsVibeService: EventsVibeService,
     private readonly communityMembersService: CommunityMembersService,
     private readonly redisService: RedisService,
+    private readonly refundsService: RefundsService,
   ) {}
 
   async createOrder(userId: string, dto: CreateOrderDto) {
@@ -634,85 +637,54 @@ export class OrdersService {
     return order;
   }
 
-  async cancelOrder(orderId: string, userId: string) {
+  async cancelTickets(orderId: string, userId: string, dto: CancelTicketsDto) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      include: {
-        items: { select: { ticketId: true, quantity: true } },
-        event: {
-          select: {
-            eventDate: true,
-            refundPolicy: { select: { type: true, cutoffHours: true, refundPercent: true } },
-          },
-        },
-      },
+      select: { id: true, userId: true, eventId: true, status: true },
     });
-
     if (!order) throw new NotFoundException('Order not found');
     if (order.userId !== userId) throw new ForbiddenException('You do not own this order');
-    if (order.status !== 'CONFIRMED')
-      throw new BadRequestException('Only confirmed orders can be cancelled');
+    if (order.status !== 'CONFIRMED' && order.status !== 'PARTIALLY_REFUNDED')
+      throw new BadRequestException('Only confirmed orders can have tickets cancelled');
 
-    const cutoffHours = order.event.refundPolicy?.cutoffHours ?? null;
-    if (cutoffHours !== null && order.event.eventDate) {
-      const cutoff = new Date(order.event.eventDate.getTime() - cutoffHours * 60 * 60 * 1000);
-      if (new Date() > cutoff)
-        throw new BadRequestException(
-          `Cancellation window has passed (must cancel at least ${cutoffHours}h before the event)`,
-        );
-    }
+    const refund = await this.refundsService.initiateCancellation(orderId, dto.items, 'USER_CANCELLED', userId);
 
-    const policy = order.event.refundPolicy;
-    let refundAmount = 0;
-    if (policy) {
-      if (policy.type === 'FULL') {
-        refundAmount = Number(order.totalAmount);
-      } else if (policy.type === 'PARTIAL' && policy.refundPercent) {
-        refundAmount = Math.round(Number(order.totalAmount) * (policy.refundPercent / 100) * 100) / 100;
-      }
-      // NO_REFUND → refundAmount stays 0
-    }
-
-    await this.prisma.$transaction(async (tx) => {
-      for (const item of order.items) {
-        await tx.$executeRaw`
-          UPDATE event_tickets
-          SET "soldCount" = GREATEST("soldCount" - ${item.quantity}, 0)
-          WHERE id = ${item.ticketId}
-        `;
-      }
-      if (order.couponId) {
-        await tx.$executeRaw`
-          UPDATE coupons
-          SET usage_count = GREATEST(usage_count - 1, 0)
-          WHERE id = ${order.couponId}
-        `;
-      }
-      await tx.order.update({
-        where: { id: orderId },
-        data: { status: 'CANCELLED', cancelledAt: new Date(), cancellationReason: 'USER_CANCELLED' },
-      });
-    });
-
-    this.auditLogService.log({
-      actorId: userId,
-      actorRole: 'ATTENDEE',
-      action: 'ORDER_CANCELLED',
-      entityType: 'ORDER',
-      entityId: orderId,
-      metadata: { reason: 'USER_CANCELLED', refundAmount },
-    });
-
-    void this.notificationsService
-      .create(userId, 'order_cancelled', 'Booking Cancelled', 'Your order has been cancelled.')
-      .catch((err) => this.logger.error('Failed to send order_cancelled notification', err));
-
-    // Refresh the buyer's community-directory attendance counters.
     void this.communityMembersService
       .recomputeForEvent(order.eventId, userId)
       .catch((err) => this.logger.error('Failed to recompute community member event count', err));
 
-    return { message: 'Order cancelled successfully', refundAmount };
+    return { message: 'Cancellation initiated', refundId: refund.id, refundAmountPaise: refund.totalAmount };
+  }
+
+  // Convenience: cancel every active ticket in the order in one call
+  async cancelOrder(orderId: string, userId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        items: {
+          include: {
+            attendees: { where: { cancelledAt: null }, select: { id: true } },
+          },
+        },
+      },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.userId !== userId) throw new ForbiddenException('You do not own this order');
+    if (order.status !== 'CONFIRMED' && order.status !== 'PARTIALLY_REFUNDED')
+      throw new BadRequestException('Only confirmed orders can be cancelled');
+
+    const items = order.items
+      .map((item) => ({
+        orderItemId: item.id,
+        quantity: item.quantity - item.cancelledCount,
+        attendeeIds: item.attendees.map((a) => a.id),
+      }))
+      .filter((i) => i.quantity > 0 && i.attendeeIds.length > 0);
+
+    if (items.length === 0)
+      throw new BadRequestException('No active tickets remaining on this order');
+
+    return this.cancelTickets(orderId, userId, { items });
   }
 
   @Cron(CronExpression.EVERY_5_MINUTES)

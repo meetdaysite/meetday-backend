@@ -113,7 +113,9 @@ describe('Coupon Checkout (E2E)', () => {
   });
 
   beforeEach(async () => {
-    // Delete order/event data not covered by shared truncateTables, in FK order
+    // Delete order/event/notification data not covered by shared truncateTables, in FK order
+    await prisma.notification.deleteMany();
+    await prisma.savedEvent.deleteMany();
     await prisma.eventReview.deleteMany();
     await prisma.hostPayoutLineItem.deleteMany();
     await prisma.orderAttendee.deleteMany();
@@ -689,6 +691,408 @@ describe('Coupon Checkout (E2E)', () => {
       expect(res.status).toBe(201);
       expect(Number(res.body.data.minOrderValue)).toBe(300);
       expect(Number(res.body.data.maxDiscountAmount)).toBe(200);
+    });
+  });
+
+  // ── GET /events/:id/available-offers ─────────────────────────────────────
+
+  describe('GET /events/:id/available-offers', () => {
+    it('returns active event-scoped ATTENDEE coupons the user can redeem', async () => {
+      const { event } = await seedEventFixture(prisma, hostUser.id);
+      await seedCoupon(prisma, superAdminUser.id, {
+        code: 'OFFER10',
+        discountType: 'FLAT',
+        discountValue: 10,
+        description: '₹10 off',
+        eventId: event.id,
+        maxDiscountAmount: null,
+        minOrderValue: null,
+      });
+
+      const res = await request(app.getHttpServer())
+        .get(`/events/${event.id}/available-offers`)
+        .set(authHeader(TEST_UIDS.user));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(1);
+      expect(res.body.data[0]).toMatchObject({
+        code: 'OFFER10',
+        discountType: 'FLAT',
+        discountValue: 10,
+        description: '₹10 off',
+      });
+    });
+
+    it('does not expose internal fields (id, usageCount, maxUsages, maxUsagesPerUser)', async () => {
+      const { event } = await seedEventFixture(prisma, hostUser.id);
+      await seedCoupon(prisma, superAdminUser.id, {
+        code: 'NOLEAK',
+        eventId: event.id,
+        maxUsages: 50,
+        maxUsagesPerUser: 2,
+      });
+
+      const res = await request(app.getHttpServer())
+        .get(`/events/${event.id}/available-offers`)
+        .set(authHeader(TEST_UIDS.user));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data[0]).not.toHaveProperty('id');
+      expect(res.body.data[0]).not.toHaveProperty('usageCount');
+      expect(res.body.data[0]).not.toHaveProperty('maxUsages');
+      expect(res.body.data[0]).not.toHaveProperty('maxUsagesPerUser');
+    });
+
+    it('returns an empty array when no coupons exist for the event', async () => {
+      const { event } = await seedEventFixture(prisma, hostUser.id);
+
+      const res = await request(app.getHttpServer())
+        .get(`/events/${event.id}/available-offers`)
+        .set(authHeader(TEST_UIDS.user));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(0);
+    });
+
+    it('excludes platform-wide coupons (eventId: null)', async () => {
+      const { event } = await seedEventFixture(prisma, hostUser.id);
+      // Platform-wide — no eventId
+      await seedCoupon(prisma, superAdminUser.id, { code: 'GLOBAL20' });
+
+      const res = await request(app.getHttpServer())
+        .get(`/events/${event.id}/available-offers`)
+        .set(authHeader(TEST_UIDS.user));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(0);
+    });
+
+    it('excludes coupons tied to a different event', async () => {
+      const { hostProfile, event: event1 } = await seedEventFixture(prisma, hostUser.id);
+      const event2 = await prisma.event.create({
+        data: { hostProfileId: hostProfile.id, title: 'Other Event', status: 'PUBLISHED' },
+      });
+
+      // Coupon for event2 only
+      await seedCoupon(prisma, superAdminUser.id, { code: 'EV2ONLY', eventId: event2.id });
+
+      const res = await request(app.getHttpServer())
+        .get(`/events/${event1.id}/available-offers`)
+        .set(authHeader(TEST_UIDS.user));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(0);
+    });
+
+    it('excludes inactive coupons', async () => {
+      const { event } = await seedEventFixture(prisma, hostUser.id);
+      await seedCoupon(prisma, superAdminUser.id, { code: 'INACTV', eventId: event.id, isActive: false });
+
+      const res = await request(app.getHttpServer())
+        .get(`/events/${event.id}/available-offers`)
+        .set(authHeader(TEST_UIDS.user));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(0);
+    });
+
+    it('excludes expired coupons', async () => {
+      const { event } = await seedEventFixture(prisma, hostUser.id);
+      await seedCoupon(prisma, superAdminUser.id, {
+        code: 'EXPIRD',
+        eventId: event.id,
+        validUntil: new Date('2020-01-01'),
+      });
+
+      const res = await request(app.getHttpServer())
+        .get(`/events/${event.id}/available-offers`)
+        .set(authHeader(TEST_UIDS.user));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(0);
+    });
+
+    it('excludes not-yet-active coupons', async () => {
+      const { event } = await seedEventFixture(prisma, hostUser.id);
+      await seedCoupon(prisma, superAdminUser.id, {
+        code: 'FUTUREV',
+        eventId: event.id,
+        validFrom: new Date('2099-01-01'),
+      });
+
+      const res = await request(app.getHttpServer())
+        .get(`/events/${event.id}/available-offers`)
+        .set(authHeader(TEST_UIDS.user));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(0);
+    });
+
+    it('excludes globally exhausted coupons', async () => {
+      const { event } = await seedEventFixture(prisma, hostUser.id);
+      await seedCoupon(prisma, superAdminUser.id, {
+        code: 'EXHAUST',
+        eventId: event.id,
+        maxUsages: 5,
+        usageCount: 5, // already at cap
+      });
+
+      const res = await request(app.getHttpServer())
+        .get(`/events/${event.id}/available-offers`)
+        .set(authHeader(TEST_UIDS.user));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(0);
+    });
+
+    it('excludes coupons this user has personally exhausted', async () => {
+      const { event } = await seedEventFixture(prisma, hostUser.id);
+      const coupon = await seedCoupon(prisma, superAdminUser.id, {
+        code: 'USRUSED',
+        eventId: event.id,
+        maxUsagesPerUser: 1,
+      });
+
+      // Seed a prior confirmed order for attendeeUser with this coupon
+      await prisma.order.create({
+        data: {
+          bookingId: 'MDAY-PRIOR-U01',
+          userId: attendeeUser.id,
+          eventId: event.id,
+          couponId: coupon.id,
+          status: 'CONFIRMED',
+          subtotal: 500,
+          platformFee: 0,
+          taxAmount: 0,
+          totalAmount: 400,
+          discountAmount: 100,
+        },
+      });
+
+      const res = await request(app.getHttpServer())
+        .get(`/events/${event.id}/available-offers`)
+        .set(authHeader(TEST_UIDS.user));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(0);
+    });
+
+    it('shows a coupon to a second user even if the first user has exhausted their limit', async () => {
+      const { event } = await seedEventFixture(prisma, hostUser.id);
+      const coupon = await seedCoupon(prisma, superAdminUser.id, {
+        code: 'PERUSER',
+        eventId: event.id,
+        maxUsagesPerUser: 1,
+      });
+
+      const secondUser = await createTestUser(prisma, { uid: 'test-uid-user2', roleName: 'USER' });
+
+      // attendeeUser has used it
+      await prisma.order.create({
+        data: {
+          bookingId: 'MDAY-PRIOR-U02',
+          userId: attendeeUser.id,
+          eventId: event.id,
+          couponId: coupon.id,
+          status: 'CONFIRMED',
+          subtotal: 500,
+          platformFee: 0,
+          taxAmount: 0,
+          totalAmount: 400,
+          discountAmount: 100,
+        },
+      });
+
+      // secondUser has not used it — should still see the offer
+      const res = await request(app.getHttpServer())
+        .get(`/events/${event.id}/available-offers`)
+        .set(authHeader(secondUser.firebaseUid));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(1);
+      expect(res.body.data[0].code).toBe('PERUSER');
+    });
+
+    it('returns 404 for a non-existent event', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/events/00000000-0000-0000-0000-000000000000/available-offers')
+        .set(authHeader(TEST_UIDS.user));
+
+      expect(res.status).toBe(404);
+    });
+
+    it('returns 401 for unauthenticated requests', async () => {
+      const { event } = await seedEventFixture(prisma, hostUser.id);
+
+      const res = await request(app.getHttpServer())
+        .get(`/events/${event.id}/available-offers`);
+
+      expect([401, 403]).toContain(res.status);
+    });
+
+    it('serves from Redis cache — stale DB state does not affect cached response', async () => {
+      const { event } = await seedEventFixture(prisma, hostUser.id);
+      await seedCoupon(prisma, superAdminUser.id, { code: 'CACHED1', eventId: event.id });
+
+      // First call — populates cache
+      const first = await request(app.getHttpServer())
+        .get(`/events/${event.id}/available-offers`)
+        .set(authHeader(TEST_UIDS.user));
+      expect(first.status).toBe(200);
+      expect(first.body.data).toHaveLength(1);
+
+      // Disable the coupon directly in DB (bypasses any cache invalidation)
+      await prisma.coupon.update({ where: { code: 'CACHED1' }, data: { isActive: false } });
+
+      // Second call within TTL — should still return the cached coupon
+      const second = await request(app.getHttpServer())
+        .get(`/events/${event.id}/available-offers`)
+        .set(authHeader(TEST_UIDS.user));
+      expect(second.status).toBe(200);
+      expect(second.body.data).toHaveLength(1);
+    });
+  });
+
+  // ── Admin notification on event-scoped coupon creation ───────────────────
+
+  describe('POST /admin/coupons — notifications to saved-event users', () => {
+    it('notifies users who have saved the event', async () => {
+      const { event } = await seedEventFixture(prisma, hostUser.id);
+
+      // attendeeUser saves the event
+      await prisma.savedEvent.create({ data: { userId: attendeeUser.id, eventId: event.id } });
+
+      await request(app.getHttpServer())
+        .post('/admin/coupons')
+        .set(authHeader(TEST_UIDS.superAdmin))
+        .send({
+          code: 'NOTIFY10',
+          target: 'ATTENDEE',
+          discountType: 'FLAT',
+          discountValue: 10,
+          description: 'Special offer just for you!',
+          eventId: event.id,
+        })
+        .expect(201);
+
+      // Notification is fire-and-forget — give the event loop a tick to complete it
+      await new Promise((r) => setTimeout(r, 80));
+
+      const notifications = await prisma.notification.findMany({
+        where: { userId: attendeeUser.id, type: 'event_promo' },
+      });
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].body).toContain('Special offer just for you!');
+    });
+
+    it('does not notify users who have not saved the event', async () => {
+      const { event } = await seedEventFixture(prisma, hostUser.id);
+      // attendeeUser has NOT saved the event
+
+      await request(app.getHttpServer())
+        .post('/admin/coupons')
+        .set(authHeader(TEST_UIDS.superAdmin))
+        .send({
+          code: 'NONOTIFY',
+          target: 'ATTENDEE',
+          discountType: 'FLAT',
+          discountValue: 10,
+          eventId: event.id,
+        })
+        .expect(201);
+
+      await new Promise((r) => setTimeout(r, 80));
+
+      const count = await prisma.notification.count({ where: { type: 'event_promo' } });
+      expect(count).toBe(0);
+    });
+
+    it('notifies only users who saved the event, not all users', async () => {
+      const { event } = await seedEventFixture(prisma, hostUser.id);
+      const otherUser = await createTestUser(prisma, { uid: 'test-uid-other', roleName: 'USER' });
+
+      // Only attendeeUser saves the event — otherUser does not
+      await prisma.savedEvent.create({ data: { userId: attendeeUser.id, eventId: event.id } });
+
+      await request(app.getHttpServer())
+        .post('/admin/coupons')
+        .set(authHeader(TEST_UIDS.superAdmin))
+        .send({
+          code: 'SELECTIVE',
+          target: 'ATTENDEE',
+          discountType: 'FLAT',
+          discountValue: 10,
+          eventId: event.id,
+        })
+        .expect(201);
+
+      await new Promise((r) => setTimeout(r, 80));
+
+      expect(await prisma.notification.count({ where: { userId: attendeeUser.id, type: 'event_promo' } })).toBe(1);
+      expect(await prisma.notification.count({ where: { userId: otherUser.id, type: 'event_promo' } })).toBe(0);
+    });
+
+    it('does not notify for platform-wide coupons (no eventId)', async () => {
+      await createTestUser(prisma, { uid: 'test-uid-other2', roleName: 'USER' });
+
+      await request(app.getHttpServer())
+        .post('/admin/coupons')
+        .set(authHeader(TEST_UIDS.superAdmin))
+        .send({
+          code: 'GLOBAL50',
+          target: 'ATTENDEE',
+          discountType: 'PERCENTAGE',
+          discountValue: 50,
+          // no eventId
+        })
+        .expect(201);
+
+      await new Promise((r) => setTimeout(r, 80));
+
+      const count = await prisma.notification.count({ where: { type: 'event_promo' } });
+      expect(count).toBe(0);
+    });
+
+    it('does not notify for HOST-targeted coupons even with an eventId', async () => {
+      const { event } = await seedEventFixture(prisma, hostUser.id);
+      await prisma.savedEvent.create({ data: { userId: attendeeUser.id, eventId: event.id } });
+
+      // HOST coupon — should NOT notify even though it has an eventId
+      // Note: eventId on HOST coupon is rejected by DTO validation, so this tests that boundary holds
+      const res = await request(app.getHttpServer())
+        .post('/admin/coupons')
+        .set(authHeader(TEST_UIDS.superAdmin))
+        .send({
+          code: 'HOSTEV',
+          target: 'HOST',
+          discountType: 'PERCENTAGE',
+          discountValue: 10,
+          eventId: event.id, // invalid cross-field combo — DTO rejects this
+        });
+
+      expect(res.status).toBe(400); // DTO validator blocks it
+
+      const count = await prisma.notification.count({ where: { type: 'event_promo' } });
+      expect(count).toBe(0);
+    });
+
+    it('succeeds even if no users have saved the event', async () => {
+      const { event } = await seedEventFixture(prisma, hostUser.id);
+      // Nobody has saved this event
+
+      const res = await request(app.getHttpServer())
+        .post('/admin/coupons')
+        .set(authHeader(TEST_UIDS.superAdmin))
+        .send({
+          code: 'NOSAVED',
+          target: 'ATTENDEE',
+          discountType: 'FLAT',
+          discountValue: 10,
+          eventId: event.id,
+        });
+
+      // Coupon creation must succeed regardless of zero saved users
+      expect(res.status).toBe(201);
     });
   });
 });

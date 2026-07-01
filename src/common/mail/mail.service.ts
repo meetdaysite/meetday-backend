@@ -10,6 +10,10 @@ import { adminInviteTemplate } from './templates/admin-invite.template';
 import { eventApprovedTemplate } from './templates/event-approved.template';
 import { eventRejectedTemplate } from './templates/event-rejected.template';
 import { scannerInviteTemplate } from './templates/scanner-invite.template';
+import { refundInitiatedTemplate } from './templates/refund-initiated.template';
+import { refundCompletedTemplate } from './templates/refund-completed.template';
+import { refundFailedTemplate } from './templates/refund-failed.template';
+import { eventCancelledAttendeeTemplate } from './templates/event-cancelled-attendee.template';
 
 @Injectable()
 export class MailService {
@@ -112,6 +116,32 @@ export class MailService {
       to,
       `You've been assigned as a ticket scanner for ${eventTitle} — Meetday`,
       scannerInviteTemplate(staffName, eventTitle, scannerUrl, expiresAt),
+    );
+  }
+
+  async sendRefundInitiated(to: string, firstName: string, amountRupees: number, eventTitle: string): Promise<void> {
+    await this.sendMail(to, `Refund initiated for ${eventTitle} — Meetday`, refundInitiatedTemplate(firstName, amountRupees, eventTitle));
+  }
+
+  async sendRefundCompleted(to: string, firstName: string, amountRupees: number, eventTitle: string): Promise<void> {
+    await this.sendMail(to, `Refund processed for ${eventTitle} — Meetday`, refundCompletedTemplate(firstName, amountRupees, eventTitle));
+  }
+
+  async sendRefundFailed(to: string, firstName: string, amountRupees: number): Promise<void> {
+    await this.sendMail(to, 'Action required: refund issue — Meetday', refundFailedTemplate(firstName, amountRupees));
+  }
+
+  async sendEventCancelledAttendee(
+    to: string,
+    firstName: string,
+    eventTitle: string,
+    cancellationReason: string,
+    refundAmountRupees: number,
+  ): Promise<void> {
+    await this.sendMail(
+      to,
+      `Event cancelled: ${eventTitle} — Meetday`,
+      eventCancelledAttendeeTemplate(firstName, eventTitle, cancellationReason, refundAmountRupees),
     );
   }
 }

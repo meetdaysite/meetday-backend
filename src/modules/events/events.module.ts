@@ -8,9 +8,10 @@ import { ReviewsModule } from '../reviews/reviews.module';
 import { CheckInModule } from '../check-in/check-in.module';
 import { GraphModule } from '../graph/graph.module';
 import { StorageModule } from '../../common/storage/storage.module';
+import { RefundsModule } from '../refunds/refunds.module';
 
 @Module({
-  imports: [NotificationsModule, ReviewsModule, CheckInModule, GraphModule, StorageModule],
+  imports: [NotificationsModule, ReviewsModule, CheckInModule, GraphModule, StorageModule, RefundsModule],
   controllers: [EventsController],
   providers: [EventsService, EventsVibeService, CopilotService],
   exports: [EventsService, EventsVibeService],

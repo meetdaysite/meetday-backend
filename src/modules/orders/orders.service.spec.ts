@@ -12,6 +12,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { EventsVibeService } from '../events/events-vibe.service';
+import { CommunityMembersService } from '../communities/community-members.service';
+import { RedisService } from '../../common/redis/redis.service';
+import { RefundsService } from '../refunds/refunds.service';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -26,10 +29,14 @@ function makePrisma() {
       findUnique: jest.fn(),
       findMany: jest.fn(),
       count: jest.fn(),
+      create: jest.fn(),
       update: jest.fn(),
       updateMany: jest.fn(),
     },
     subscriptionPlan: { findUnique: jest.fn() },
+    platformConfig: { findUnique: jest.fn().mockResolvedValue(null) },
+    hostFeePromoUsage: { findFirst: jest.fn().mockResolvedValue(null) },
+    hostFeePromo: { findFirst: jest.fn().mockResolvedValue(null) },
   };
   prisma.$executeRaw = jest.fn().mockResolvedValue(1);
   prisma.$transaction = jest.fn().mockImplementation(async (fn: any) => fn(prisma));
@@ -41,6 +48,9 @@ const mockMailQueue = { add: jest.fn().mockResolvedValue(undefined) };
 const mockAuditLog = { log: jest.fn() };
 const mockVibeService = { recomputeCrowdPulse: jest.fn().mockResolvedValue(undefined) };
 const mockConfig = { get: jest.fn().mockReturnValue('development') };
+const mockCommunityMembers = { recomputeForEvent: jest.fn().mockResolvedValue(undefined) };
+const mockRedis = { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(undefined) };
+const mockRefunds = { initiateCancellation: jest.fn() };
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -77,10 +87,19 @@ const ticket = {
 const confirmedOrder = {
   id: orderId,
   userId,
+  eventId,
   status: 'CONFIRMED',
   totalAmount: '590',
   couponId: null,
-  items: [{ ticketId, quantity: 1 }],
+  items: [
+    {
+      id: 'item-uuid',
+      ticketId,
+      quantity: 1,
+      cancelledCount: 0,
+      attendees: [{ id: 'attendee-uuid' }],
+    },
+  ],
   event: {
     eventDate: new Date(Date.now() + 86400_000 * 7), // 7 days away — well inside any cutoff window
     refundPolicy: { type: 'FULL', cutoffHours: 24, refundPercent: null },
@@ -105,6 +124,9 @@ describe('OrdersService', () => {
         { provide: getQueueToken('mail'), useValue: mockMailQueue },
         { provide: AuditLogService, useValue: mockAuditLog },
         { provide: EventsVibeService, useValue: mockVibeService },
+        { provide: CommunityMembersService, useValue: mockCommunityMembers },
+        { provide: RedisService, useValue: mockRedis },
+        { provide: RefundsService, useValue: mockRefunds },
       ],
     }).compile();
 
@@ -256,7 +278,7 @@ describe('OrdersService', () => {
       const coupon = {
         id: 'c1', target: 'ATTENDEE', discountType: 'PERCENTAGE', discountValue: 10,
         isActive: true, validFrom: null, validUntil: null, maxUsages: null,
-        usageCount: 0, maxUsagesPerUser: null, eventId: null,
+        usageCount: 0, maxUsagesPerUser: null, maxDiscountAmount: null, minOrderValue: null, eventId: null,
       };
       prisma.coupon.findUnique.mockResolvedValue(coupon);
       prisma.$executeRaw.mockResolvedValue(1);
@@ -275,7 +297,7 @@ describe('OrdersService', () => {
       const coupon = {
         id: 'c2', target: 'ATTENDEE', discountType: 'FLAT', discountValue: 9999,
         isActive: true, validFrom: null, validUntil: null, maxUsages: null,
-        usageCount: 0, maxUsagesPerUser: null, eventId: null,
+        usageCount: 0, maxUsagesPerUser: null, maxDiscountAmount: null, minOrderValue: null, eventId: null,
       };
       prisma.coupon.findUnique.mockResolvedValue(coupon);
       prisma.$executeRaw.mockResolvedValue(1);
@@ -386,12 +408,18 @@ describe('OrdersService', () => {
   describe('cancelOrder()', () => {
     beforeEach(() => {
       prisma.order.findUnique.mockResolvedValue(confirmedOrder);
+      mockRefunds.initiateCancellation.mockResolvedValue({ id: 'refund-uuid', totalAmount: 59000 });
     });
 
-    it('cancels the order and returns full refund amount', async () => {
+    it('delegates to refundsService and returns refund metadata', async () => {
       const result = await service.cancelOrder(orderId, userId);
-      expect(result).toEqual({ message: 'Order cancelled successfully', refundAmount: 590 });
-      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(mockRefunds.initiateCancellation).toHaveBeenCalledWith(
+        orderId,
+        [{ orderItemId: 'item-uuid', quantity: 1, attendeeIds: ['attendee-uuid'] }],
+        'USER_CANCELLED',
+        userId,
+      );
+      expect(result).toMatchObject({ message: 'Cancellation initiated', refundId: 'refund-uuid', refundAmountPaise: 59000 });
     });
 
     it('throws NotFoundException when order does not exist', async () => {
@@ -404,45 +432,17 @@ describe('OrdersService', () => {
       await expect(service.cancelOrder(orderId, userId)).rejects.toThrow(ForbiddenException);
     });
 
-    it('throws BadRequestException when order is not CONFIRMED', async () => {
+    it('throws BadRequestException when order is not CONFIRMED or PARTIALLY_REFUNDED', async () => {
       prisma.order.findUnique.mockResolvedValue({ ...confirmedOrder, status: 'PENDING_PAYMENT' });
       await expect(service.cancelOrder(orderId, userId)).rejects.toThrow(BadRequestException);
     });
 
-    it('throws BadRequestException when cancellation window has passed', async () => {
-      // cutoffHours: 48, event is 24h away — window passed
+    it('throws BadRequestException when no active tickets remain', async () => {
       prisma.order.findUnique.mockResolvedValue({
         ...confirmedOrder,
-        event: {
-          eventDate: new Date(Date.now() + 3600_000 * 24), // 24h from now
-          refundPolicy: { type: 'FULL', cutoffHours: 48, refundPercent: null },
-        },
+        items: [{ id: 'item-uuid', ticketId, quantity: 1, cancelledCount: 1, attendees: [] }],
       });
       await expect(service.cancelOrder(orderId, userId)).rejects.toThrow(BadRequestException);
-    });
-
-    it('calculates PARTIAL refund correctly', async () => {
-      prisma.order.findUnique.mockResolvedValue({
-        ...confirmedOrder,
-        event: {
-          eventDate: new Date(Date.now() + 86400_000 * 7),
-          refundPolicy: { type: 'PARTIAL', cutoffHours: 24, refundPercent: 50 },
-        },
-      });
-      const result = await service.cancelOrder(orderId, userId);
-      expect(result.refundAmount).toBe(295); // 50% of 590
-    });
-
-    it('returns 0 refund for NO_REFUND policy', async () => {
-      prisma.order.findUnique.mockResolvedValue({
-        ...confirmedOrder,
-        event: {
-          eventDate: new Date(Date.now() + 86400_000 * 7),
-          refundPolicy: { type: 'NO_REFUND', cutoffHours: null, refundPercent: null },
-        },
-      });
-      const result = await service.cancelOrder(orderId, userId);
-      expect(result.refundAmount).toBe(0);
     });
   });
 });

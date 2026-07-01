@@ -899,6 +899,7 @@ model Order {
   items          OrderItem[]
   review         EventReview?
   payoutLineItem HostPayoutLineItem?
+  refunds        Refund[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -914,13 +915,15 @@ model OrderItem {
   id      String @id @default(uuid())
   orderId String
 
-  ticketId  String
-  quantity  Int
-  unitPrice Decimal // snapshot — price at time of purchase
+  ticketId       String
+  quantity       Int
+  cancelledCount Int     @default(0)
+  unitPrice      Decimal // snapshot — price at time of purchase
 
-  order     Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  ticket    EventTicket     @relation(fields: [ticketId], references: [id])
-  attendees OrderAttendee[]
+  order       Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  ticket      EventTicket     @relation(fields: [ticketId], references: [id])
+  attendees   OrderAttendee[]
+  refundItems RefundItem[]
 
   @@index([orderId])
   @@index([ticketId])
@@ -936,6 +939,7 @@ model OrderAttendee {
   isLead             Boolean   @default(false) // true = the buyer themselves
   ticketCode         String    @unique @default(uuid()) // value encoded in QR code
   checkedInAt        DateTime?
+  cancelledAt        DateTime?
   scannedBySessionId String?
 
   // Resolved platform identity — lead is always the buyer; non-leads matched by email
@@ -953,10 +957,63 @@ model OrderAttendee {
 }
 
 enum OrderStatus {
-  PENDING_PAYMENT // order created, awaiting payment (expires after 15 min)
-  CONFIRMED // payment verified
-  CANCELLED // cancelled by user or payment timeout
-  REFUNDED // refund processed
+  PENDING_PAYMENT    // order created, awaiting payment (expires after 15 min)
+  CONFIRMED          // payment verified
+  PARTIALLY_REFUNDED // some tickets cancelled and refunded; order still active
+  CANCELLED          // all tickets cancelled
+  REFUNDED           // fully cancelled and refund processed by Razorpay
+}
+
+// ─── Refunds ──────────────────────────────────────────────────────────────────
+
+model Refund {
+  id      String @id @default(uuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id])
+
+  status              RefundStatus @default(PENDING)
+  totalAmount         Int          // in paise
+  platformFeeRefunded Boolean      @default(false)
+  reason              RefundReason
+  razorpayRefundId    String?
+  failureReason       String?
+
+  initiatedAt DateTime  @default(now())
+  completedAt DateTime?
+  failedAt    DateTime?
+
+  items RefundItem[]
+
+  @@index([orderId])
+  @@index([status])
+  @@map("refunds")
+}
+
+model RefundItem {
+  id          String    @id @default(uuid())
+  refundId    String
+  refund      Refund    @relation(fields: [refundId], references: [id])
+  orderItemId String
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id])
+
+  quantity   Int
+  unitAmount Int // in paise, snapshot at time of refund
+
+  @@index([refundId])
+  @@map("refund_items")
+}
+
+enum RefundStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum RefundReason {
+  USER_CANCELLED
+  EVENT_CANCELLED
+  ADMIN_OVERRIDE
 }
 
 // ─── Reviews ──────────────────────────────────────────────────────────────────
@@ -1146,6 +1203,7 @@ enum AuditAction {
   ORDER_CANCELLED
   REFUND_INITIATED
   REFUND_COMPLETED
+  REFUND_FAILED
 
   // Payouts / settlement
   PAYOUT_CREATED
