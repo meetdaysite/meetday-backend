@@ -30,6 +30,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { ValidateCouponDto } from './dto/validate-coupon.dto';
 
 @ApiTags('Orders')
 @ApiBearerAuth('firebase-token')
@@ -59,6 +60,40 @@ export class OrdersController {
     @Body() dto: CreateOrderDto,
   ) {
     return this.ordersService.createOrder(userId, dto);
+  }
+
+  @Post('validate-coupon')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Preview coupon discount',
+    description:
+      'Validates a promo code against a basket (event + ticket items) and returns the computed discount ' +
+      'without creating an order. Use this to show the attendee their savings before checkout.',
+  })
+  @ApiOkResponse({
+    description: 'Coupon is valid. Returns discount breakdown.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-04-14T10:00:00.000Z',
+        data: {
+          valid: true,
+          couponCode: 'EARLYBIRD20',
+          discountType: 'PERCENTAGE',
+          discountValue: 20,
+          subtotal: 1000,
+          discountAmount: 200,
+          netSubtotal: 800,
+        },
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'Invalid, expired, or inapplicable promo code.' })
+  validateCoupon(
+    @GetUser('id') userId: string,
+    @Body() dto: ValidateCouponDto,
+  ) {
+    return this.ordersService.validateCoupon(userId, dto);
   }
 
   @Post(':id/mock-confirm')

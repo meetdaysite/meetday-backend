@@ -21,6 +21,7 @@ import { RejectEventDto } from './dto/reject-event.dto';
 import { ForceCancelEventDto } from './dto/force-cancel-event.dto';
 import { InviteAdminDto } from './dto/invite-admin.dto';
 import { CreateCouponDto } from './dto/create-coupon.dto';
+import { UpdateCouponDto } from './dto/update-coupon.dto';
 import { ListCouponsQueryDto } from './dto/list-coupons-query.dto';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
@@ -392,6 +393,8 @@ export class AdminService {
         discountValue: dto.discountValue,
         maxUsages: dto.maxUsages,
         maxUsagesPerUser: dto.maxUsagesPerUser,
+        minOrderValue: dto.minOrderValue ?? null,
+        maxDiscountAmount: dto.maxDiscountAmount ?? null,
         isActive: true,
         validFrom: dto.validFrom ? new Date(dto.validFrom) : undefined,
         validUntil: dto.validUntil ? new Date(dto.validUntil) : undefined,
@@ -413,7 +416,7 @@ export class AdminService {
       this.prisma.coupon.findMany({
         where,
         include: {
-          _count: { select: { redemptions: true } },
+          _count: { select: { redemptions: true, orderUsages: true } },
           createdByUser: { select: { id: true, firstName: true, lastName: true, email: true } },
         },
         orderBy: { createdAt: 'desc' },
@@ -430,12 +433,27 @@ export class AdminService {
     const coupon = await this.prisma.coupon.findUnique({
       where: { id: couponId },
       include: {
-        _count: { select: { redemptions: true } },
+        _count: { select: { redemptions: true, orderUsages: true } },
         createdByUser: { select: { id: true, firstName: true, lastName: true, email: true } },
         redemptions: {
           orderBy: { createdAt: 'desc' },
           include: {
             user: { select: { id: true, firstName: true, lastName: true, email: true } },
+          },
+        },
+        orderUsages: {
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+          select: {
+            id: true,
+            bookingId: true,
+            status: true,
+            subtotal: true,
+            discountAmount: true,
+            totalAmount: true,
+            createdAt: true,
+            user: { select: { id: true, firstName: true, lastName: true, email: true } },
+            event: { select: { id: true, title: true } },
           },
         },
       },
@@ -452,6 +470,45 @@ export class AdminService {
 
     await this.prisma.coupon.update({ where: { id: couponId }, data: { isActive: false } });
     return { message: 'Coupon disabled successfully' };
+  }
+
+  async enableCoupon(couponId: string) {
+    const coupon = await this.prisma.coupon.findUnique({ where: { id: couponId } });
+    if (!coupon) throw new NotFoundException('Coupon not found');
+    if (coupon.isActive) throw new BadRequestException('Coupon is already active');
+
+    await this.prisma.coupon.update({ where: { id: couponId }, data: { isActive: true } });
+    return { message: 'Coupon enabled successfully' };
+  }
+
+  async updateCoupon(couponId: string, dto: UpdateCouponDto) {
+    const coupon = await this.prisma.coupon.findUnique({ where: { id: couponId } });
+    if (!coupon) throw new NotFoundException('Coupon not found');
+
+    if (dto.validFrom && dto.validUntil && new Date(dto.validFrom) >= new Date(dto.validUntil)) {
+      throw new BadRequestException('validFrom must be before validUntil');
+    }
+
+    if (dto.maxUsages !== undefined && dto.maxUsages < coupon.usageCount) {
+      throw new BadRequestException(
+        `maxUsages cannot be set below the current usage count (${coupon.usageCount})`,
+      );
+    }
+
+    return this.prisma.coupon.update({
+      where: { id: couponId },
+      data: {
+        description: dto.description,
+        discountType: dto.discountType,
+        discountValue: dto.discountValue,
+        maxUsages: dto.maxUsages,
+        maxUsagesPerUser: dto.maxUsagesPerUser,
+        minOrderValue: dto.minOrderValue,
+        maxDiscountAmount: dto.maxDiscountAmount,
+        validFrom: dto.validFrom ? new Date(dto.validFrom) : undefined,
+        validUntil: dto.validUntil ? new Date(dto.validUntil) : undefined,
+      },
+    });
   }
 
   async rejectHost(hostProfileId: string, _adminId: string, dto: RejectHostDto) {

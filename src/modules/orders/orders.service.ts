@@ -15,6 +15,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EventsVibeService } from '../events/events-vibe.service';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { ValidateCouponDto } from './dto/validate-coupon.dto';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { CommunityMembersService } from '../communities/community-members.service';
 import { RedisService } from '../../common/redis/redis.service';
@@ -152,6 +153,8 @@ export class OrdersService {
           target: true,
           discountType: true,
           discountValue: true,
+          minOrderValue: true,
+          maxDiscountAmount: true,
           isActive: true,
           validFrom: true,
           validUntil: true,
@@ -192,10 +195,19 @@ export class OrdersService {
 
     let discountAmount = 0;
     if (coupon) {
+      if (coupon.minOrderValue !== null && subtotal < coupon.minOrderValue)
+        throw new BadRequestException(
+          `A minimum order value of ₹${coupon.minOrderValue} is required to use this promo code`,
+        );
+
       discountAmount =
         coupon.discountType === 'PERCENTAGE'
           ? subtotal * (coupon.discountValue / 100)
           : Math.min(coupon.discountValue, subtotal);
+
+      if (coupon.maxDiscountAmount !== null)
+        discountAmount = Math.min(discountAmount, coupon.maxDiscountAmount);
+
       discountAmount = Math.round(discountAmount * 100) / 100;
     }
 
@@ -281,6 +293,18 @@ export class OrdersService {
             AND (max_usages IS NULL OR usage_count + 1 <= max_usages)
         `;
         if (couponUpdated === 0) throw new ConflictException('Promo code usage limit reached');
+
+        // Re-check per-user limit inside the transaction. The UPDATE above acquires an
+        // exclusive row lock on the coupon row, forcing concurrent transactions to serialize
+        // here — so by this point any competing order from the same user is already committed
+        // and visible to this count.
+        if (coupon.maxUsagesPerUser) {
+          const userUsage = await tx.order.count({
+            where: { userId, couponId: coupon.id, status: { in: ['CONFIRMED', 'PENDING_PAYMENT'] } },
+          });
+          if (userUsage >= coupon.maxUsagesPerUser)
+            throw new ConflictException('You have already used this promo code the maximum number of times');
+        }
       }
 
       // Resolve host fee promo and compute final financials (inside tx for atomicity)
@@ -354,6 +378,87 @@ export class OrdersService {
     });
 
     return order;
+  }
+
+  async validateCoupon(userId: string, dto: ValidateCouponDto) {
+    const now = new Date();
+
+    const coupon = await this.prisma.coupon.findUnique({
+      where: { code: dto.couponCode },
+      select: {
+        id: true,
+        target: true,
+        discountType: true,
+        discountValue: true,
+        minOrderValue: true,
+        maxDiscountAmount: true,
+        isActive: true,
+        validFrom: true,
+        validUntil: true,
+        maxUsages: true,
+        usageCount: true,
+        maxUsagesPerUser: true,
+        eventId: true,
+      },
+    });
+
+    if (!coupon || !coupon.isActive) throw new BadRequestException('Invalid or inactive promo code');
+    if (coupon.target !== 'ATTENDEE') throw new BadRequestException('This promo code is not valid for ticket purchases');
+    if (coupon.validFrom && coupon.validFrom > now) throw new BadRequestException('Promo code is not yet active');
+    if (coupon.validUntil && coupon.validUntil < now) throw new BadRequestException('Promo code has expired');
+    if (coupon.maxUsages !== null && coupon.usageCount >= coupon.maxUsages)
+      throw new BadRequestException('Promo code usage limit reached');
+    if (coupon.eventId && coupon.eventId !== dto.eventId)
+      throw new BadRequestException('Promo code is not valid for this event');
+
+    if (coupon.maxUsagesPerUser) {
+      const userUsage = await this.prisma.order.count({
+        where: { userId, couponId: coupon.id, status: { in: ['CONFIRMED', 'PENDING_PAYMENT'] } },
+      });
+      if (userUsage >= coupon.maxUsagesPerUser)
+        throw new BadRequestException('You have already used this promo code the maximum number of times');
+    }
+
+    const ticketIds = dto.items.map((i) => i.ticketId);
+    const tickets = await this.prisma.eventTicket.findMany({
+      where: { id: { in: ticketIds }, eventId: dto.eventId },
+      select: { id: true, price: true, isFree: true },
+    });
+    const ticketMap = new Map(tickets.map((t) => [t.id, t]));
+    for (const item of dto.items) {
+      if (!ticketMap.has(item.ticketId))
+        throw new BadRequestException(`Ticket ${item.ticketId} not found for this event`);
+    }
+
+    let subtotal = 0;
+    for (const item of dto.items) {
+      subtotal += Number(ticketMap.get(item.ticketId)!.price) * item.quantity;
+    }
+
+    if (coupon.minOrderValue !== null && subtotal < coupon.minOrderValue)
+      throw new BadRequestException(
+        `A minimum order value of ₹${coupon.minOrderValue} is required to use this promo code`,
+      );
+
+    let discountAmount =
+      coupon.discountType === 'PERCENTAGE'
+        ? subtotal * (coupon.discountValue / 100)
+        : Math.min(coupon.discountValue, subtotal);
+
+    if (coupon.maxDiscountAmount !== null)
+      discountAmount = Math.min(discountAmount, coupon.maxDiscountAmount);
+
+    discountAmount = Math.round(discountAmount * 100) / 100;
+
+    return {
+      valid: true,
+      couponCode: dto.couponCode,
+      discountType: coupon.discountType,
+      discountValue: coupon.discountValue,
+      subtotal,
+      discountAmount,
+      netSubtotal: Math.round((subtotal - discountAmount) * 100) / 100,
+    };
   }
 
   async confirmOrder(orderId: string, userId: string, razorpayPaymentId: string | null) {

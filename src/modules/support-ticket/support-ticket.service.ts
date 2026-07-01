@@ -1,10 +1,15 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { SupportTicketStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateSupportTicketDto } from './dto/create-support-ticket.dto';
 import { ListSupportTicketsQueryDto } from './dto/list-support-tickets-query.dto';
 import { AssignSupportTicketDto } from './dto/assign-support-ticket.dto';
 import { ResolveSupportTicketDto } from './dto/resolve-support-ticket.dto';
+import { EscalateTicketDto } from './dto/escalate-support-ticket.dto';
+
+const ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN', 'SUPPORT'];
 
 function generateTicketNumber(): string {
   const date = new Date();
@@ -37,9 +42,10 @@ export class SupportTicketService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLog: AuditLogService,
+    private readonly notifications: NotificationsService,
   ) {}
 
-  async create(reporterId: string, dto: CreateSupportTicketDto) {
+  async create(reporterId: string, reporterRole: string, dto: CreateSupportTicketDto) {
     const ticket = await this.prisma.supportTicket.create({
       data: {
         ticketNumber: generateTicketNumber(),
@@ -56,13 +62,49 @@ export class SupportTicketService {
 
     this.auditLog.log({
       actorId: reporterId,
-      actorRole: 'ATTENDEE',
+      actorRole: reporterRole,
       action: 'SUPPORT_TICKET_CREATED',
       entityType: 'SUPPORT_TICKET',
       entityId: ticket.id,
       metadata: { ticketNumber: ticket.ticketNumber, category: ticket.category },
     });
 
+    void this.notifications.create(
+      reporterId,
+      'support_ticket_received',
+      'Support Ticket Received',
+      `Your ticket ${ticket.ticketNumber} has been received. We'll get back to you shortly.`,
+      { ticketId: ticket.id, ticketNumber: ticket.ticketNumber },
+    );
+
+    return ticket;
+  }
+
+  async listMine(reporterId: string, page: number, limit: number, status?: SupportTicketStatus) {
+    const safeLimit = Math.min(limit, 100);
+    const skip = (page - 1) * safeLimit;
+    const where = { reporterId, ...(status ? { status } : {}) };
+
+    const [total, items] = await this.prisma.$transaction([
+      this.prisma.supportTicket.count({ where }),
+      this.prisma.supportTicket.findMany({
+        where,
+        select: TICKET_SELECT,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: safeLimit,
+      }),
+    ]);
+
+    return { total, page, limit: safeLimit, items };
+  }
+
+  async getMyById(id: string, reporterId: string) {
+    const ticket = await this.prisma.supportTicket.findFirst({
+      where: { id, reporterId },
+      select: TICKET_SELECT,
+    });
+    if (!ticket) throw new NotFoundException('Support ticket not found');
     return ticket;
   }
 
@@ -106,7 +148,18 @@ export class SupportTicketService {
   }
 
   async assign(id: string, adminId: string, dto: AssignSupportTicketDto) {
-    const ticket = await this.prisma.supportTicket.findUnique({ where: { id }, select: { id: true, status: true } });
+    const targetAdmin = await this.prisma.user.findUnique({
+      where: { id: dto.adminUserId },
+      include: { role: true },
+    });
+    if (!targetAdmin || !ADMIN_ROLES.includes(targetAdmin.role.name)) {
+      throw new BadRequestException('Assigned user is not a support admin');
+    }
+
+    const ticket = await this.prisma.supportTicket.findUnique({
+      where: { id },
+      select: { id: true, status: true, ticketNumber: true, subject: true, reporterId: true },
+    });
     if (!ticket) throw new NotFoundException('Support ticket not found');
     if (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED') {
       throw new BadRequestException('Cannot assign a resolved or closed ticket');
@@ -127,11 +180,30 @@ export class SupportTicketService {
       metadata: { assignedTo: dto.adminUserId },
     });
 
+    void this.notifications.create(
+      ticket.reporterId,
+      'support_ticket_in_progress',
+      'Support Is On It',
+      `Your ticket ${ticket.ticketNumber} is now being reviewed by our support team.`,
+      { ticketId: ticket.id, ticketNumber: ticket.ticketNumber },
+    );
+
+    void this.notifications.create(
+      dto.adminUserId,
+      'support_ticket_assigned_to_you',
+      'Ticket Assigned to You',
+      `You have been assigned ticket ${ticket.ticketNumber}: "${ticket.subject}".`,
+      { ticketId: ticket.id, ticketNumber: ticket.ticketNumber },
+    );
+
     return updated;
   }
 
   async resolve(id: string, adminId: string, dto: ResolveSupportTicketDto) {
-    const ticket = await this.prisma.supportTicket.findUnique({ where: { id }, select: { id: true, status: true } });
+    const ticket = await this.prisma.supportTicket.findUnique({
+      where: { id },
+      select: { id: true, status: true, ticketNumber: true, reporterId: true },
+    });
     if (!ticket) throw new NotFoundException('Support ticket not found');
     if (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED') {
       throw new BadRequestException('Ticket is already resolved or closed');
@@ -151,11 +223,22 @@ export class SupportTicketService {
       entityId: id,
     });
 
+    void this.notifications.create(
+      ticket.reporterId,
+      'support_ticket_resolved',
+      'Your Ticket Has Been Resolved',
+      `Ticket ${ticket.ticketNumber} has been resolved. Tap to view the resolution.`,
+      { ticketId: ticket.id, ticketNumber: ticket.ticketNumber, resolution: dto.resolution },
+    );
+
     return updated;
   }
 
   async close(id: string, adminId: string) {
-    const ticket = await this.prisma.supportTicket.findUnique({ where: { id }, select: { id: true, status: true } });
+    const ticket = await this.prisma.supportTicket.findUnique({
+      where: { id },
+      select: { id: true, status: true, ticketNumber: true, reporterId: true },
+    });
     if (!ticket) throw new NotFoundException('Support ticket not found');
     if (ticket.status === 'CLOSED') throw new BadRequestException('Ticket is already closed');
 
@@ -171,6 +254,45 @@ export class SupportTicketService {
       action: 'SUPPORT_TICKET_CLOSED',
       entityType: 'SUPPORT_TICKET',
       entityId: id,
+    });
+
+    void this.notifications.create(
+      ticket.reporterId,
+      'support_ticket_closed',
+      'Support Ticket Closed',
+      `Your ticket ${ticket.ticketNumber} has been closed.`,
+      { ticketId: ticket.id, ticketNumber: ticket.ticketNumber },
+    );
+
+    return updated;
+  }
+
+  async escalate(id: string, adminId: string, dto: EscalateTicketDto) {
+    const ticket = await this.prisma.supportTicket.findUnique({
+      where: { id },
+      select: { id: true, status: true, ticketNumber: true, priority: true },
+    });
+    if (!ticket) throw new NotFoundException('Support ticket not found');
+    if (ticket.status === 'CLOSED') {
+      throw new BadRequestException('Cannot change the priority of a closed ticket');
+    }
+    if (ticket.priority === dto.priority) {
+      throw new BadRequestException(`Ticket is already at ${dto.priority} priority`);
+    }
+
+    const updated = await this.prisma.supportTicket.update({
+      where: { id },
+      data: { priority: dto.priority },
+      select: TICKET_SELECT,
+    });
+
+    this.auditLog.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'SUPPORT_TICKET_PRIORITY_CHANGED',
+      entityType: 'SUPPORT_TICKET',
+      entityId: id,
+      metadata: { from: ticket.priority, to: dto.priority },
     });
 
     return updated;
