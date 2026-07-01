@@ -880,6 +880,7 @@ model Order {
   // Promo
   couponId       String?
   discountAmount Decimal @default(0)
+  netSubtotal    Decimal @default(0) // subtotal - discountAmount; the base on which platformFee and taxAmount are calculated
 
   // Host fee promo applied at order creation
   hostFeePromoId String?

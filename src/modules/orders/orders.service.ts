@@ -291,9 +291,9 @@ export class OrdersService {
       if (coupon) {
         const couponUpdated = await tx.$executeRaw`
           UPDATE coupons
-          SET usage_count = usage_count + 1
+          SET "usageCount" = "usageCount" + 1
           WHERE id = ${coupon.id}
-            AND (max_usages IS NULL OR usage_count + 1 <= max_usages)
+            AND ("maxUsages" IS NULL OR "usageCount" + 1 <= "maxUsages")
         `;
         if (couponUpdated === 0) throw new ConflictException('Promo code usage limit reached');
 
@@ -332,10 +332,11 @@ export class OrdersService {
           userId,
           eventId: dto.eventId,
           subtotal,
+          discountAmount,
+          netSubtotal,
           platformFee,
           taxAmount,
           totalAmount,
-          discountAmount,
           couponId: coupon?.id ?? null,
           hostFeePromoId: promo?.id ?? null,
           items: {
@@ -712,7 +713,7 @@ export class OrdersService {
           if (order.couponId) {
             await tx.$executeRaw`
               UPDATE coupons
-              SET usage_count = GREATEST(usage_count - 1, 0)
+              SET "usageCount" = GREATEST("usageCount" - 1, 0)
               WHERE id = ${order.couponId}
             `;
           }
