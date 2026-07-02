@@ -18,12 +18,14 @@ function makePrisma() {
     community: { create: jest.fn(), update: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn() },
     communitySettings: { upsert: jest.fn() },
     communityInterest: { deleteMany: jest.fn(), createMany: jest.fn(), findMany: jest.fn() },
-    communityMember: { upsert: jest.fn(), count: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn(), delete: jest.fn() },
+    communityMember: { upsert: jest.fn(), count: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]), delete: jest.fn() },
+    communityChannel: { upsert: jest.fn().mockResolvedValue({}) },
     communityEvent: { upsert: jest.fn(), deleteMany: jest.fn(), createMany: jest.fn(), findMany: jest.fn(), count: jest.fn() },
     interest: { count: jest.fn() },
     interestCategory: { findMany: jest.fn() },
     event: { findUnique: jest.fn(), findMany: jest.fn() },
     user: { findUnique: jest.fn() },
+    savedCommunity: { findMany: jest.fn().mockResolvedValue([]) },
   };
   // $transaction supports the array form used by the service.
   prisma.$transaction = jest.fn().mockImplementation((ops: any[]) => Promise.all(ops));
@@ -32,7 +34,7 @@ function makePrisma() {
 
 const mockStorage = { getPresignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/img') };
 const mockAuditLog = { log: jest.fn() };
-const mockConsent = { assertConsent: jest.fn().mockResolvedValue(undefined) };
+const mockConsent = { assertConsent: jest.fn().mockResolvedValue(undefined), grantConsent: jest.fn().mockResolvedValue(undefined) };
 
 const joinDto = { profileVisibility: MemberProfileVisibility.EVENT_ATTENDEES_ONLY, guidelinesAccepted: true as const };
 
@@ -157,9 +159,9 @@ describe('CommunitiesService', () => {
   describe('recommendForUser', () => {
     it('returns empty when the user has no LIKED/OPEN_TO interests', async () => {
       prisma.user.findUnique.mockResolvedValue({ id: 'u1', attendeeProfile: null, interestAffinities: [] });
+      prisma.community.findMany.mockResolvedValue([]);
       const res = await service.recommendForUser('fuid', {} as any);
       expect(res).toEqual({ data: [], total: 0, page: 1, limit: 20 });
-      expect(prisma.community.findMany).not.toHaveBeenCalled();
     });
 
     it('ranks candidates by interest overlap, then city match', async () => {
@@ -209,25 +211,28 @@ describe('CommunitiesService', () => {
   });
 
   describe('join', () => {
+    const communityDetail = { id: 'c1', name: 'Test Community', slug: 'test-community', memberCount: 1, experienceCount: 0, primaryCity: 'Mumbai', iconKey: null };
+
     beforeEach(() => {
       prisma.user.findUnique.mockResolvedValue({ id: 'u1' });
       prisma.communityMember.findUnique.mockResolvedValue(null);
       prisma.community.update.mockResolvedValue({});
+      prisma.community.findUnique.mockResolvedValue(communityDetail);
       prisma.communityMember.count.mockResolvedValue(1);
     });
 
     it('joins a PUBLIC community as ACTIVE', async () => {
       prisma.community.findFirst.mockResolvedValue({ id: 'c1', access: CommunityAccess.PUBLIC });
-      prisma.communityMember.upsert.mockResolvedValue({ status: CommunityMemberStatus.ACTIVE });
+      prisma.communityMember.upsert.mockResolvedValue({ status: CommunityMemberStatus.ACTIVE, profileVisibility: joinDto.profileVisibility });
       const res = await service.join('c1', 'firebase-uid', joinDto);
-      expect(res).toEqual({ status: CommunityMemberStatus.ACTIVE });
+      expect(res).toMatchObject({ status: CommunityMemberStatus.ACTIVE });
     });
 
     it('creates a PENDING request for APPROVAL_REQUIRED communities', async () => {
       prisma.community.findFirst.mockResolvedValue({ id: 'c1', access: CommunityAccess.APPROVAL_REQUIRED });
-      prisma.communityMember.upsert.mockResolvedValue({ status: CommunityMemberStatus.PENDING });
+      prisma.communityMember.upsert.mockResolvedValue({ status: CommunityMemberStatus.PENDING, profileVisibility: joinDto.profileVisibility });
       const res = await service.join('c1', 'firebase-uid', joinDto);
-      expect(res).toEqual({ status: CommunityMemberStatus.PENDING });
+      expect(res).toMatchObject({ status: CommunityMemberStatus.PENDING });
     });
 
     it('rejects joining an INVITE_ONLY community', async () => {

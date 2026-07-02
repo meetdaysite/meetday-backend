@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import { kycFailedTemplate } from './templates/kyc-failed.template';
 import { hostApprovedTemplate } from './templates/host-approved.template';
 import { hostRejectedTemplate } from './templates/host-rejected.template';
@@ -18,49 +18,40 @@ import { eventCancelledAttendeeTemplate } from './templates/event-cancelled-atte
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
-  private readonly transporter: nodemailer.Transporter;
+  private readonly resend: Resend;
   private readonly from: string;
 
   constructor(private readonly configService: ConfigService) {
     this.from = this.configService.get<string>('mail.from');
-    this.transporter = nodemailer.createTransport({
-      host: this.configService.get<string>('mail.host'),
-      port: this.configService.get<number>('mail.port'),
-      secure: this.configService.get<number>('mail.port') === 465,
-      auth: {
-        user: this.configService.get<string>('mail.user'),
-        pass: this.configService.get<string>('mail.pass'),
-      },
-    });
+    this.resend = new Resend(this.configService.get<string>('mail.apiKey'));
   }
 
   private async sendMail(to: string, subject: string, html: string): Promise<void> {
-    try {
-      await this.transporter.sendMail({ from: this.from, to, subject, html });
+    const { error } = await this.resend.emails.send({ from: this.from, to, subject, html });
+    if (error) {
+      this.logger.error(`Failed to send email to ${to}: ${error.message}`);
+    } else {
       this.logger.log(`Email sent to ${to}: ${subject}`);
-    } catch (error) {
-      this.logger.error(`Failed to send email to ${to}: ${(error as Error).message}`);
     }
   }
 
   async sendTicketConfirmation(to: string, eventTitle: string, pdfBuffer: Buffer): Promise<void> {
-    try {
-      await this.transporter.sendMail({
-        from: this.from,
-        to,
-        subject: `Your tickets for ${eventTitle} — Meetday`,
-        html: `<p>Hi there,</p><p>Your booking is confirmed! Find your tickets attached as a PDF.</p><p>See you at the event!</p><p>— The Meetday Team</p>`,
-        attachments: [
-          {
-            filename: 'tickets.pdf',
-            content: pdfBuffer,
-            contentType: 'application/pdf',
-          },
-        ],
-      });
+    const { error } = await this.resend.emails.send({
+      from: this.from,
+      to,
+      subject: `Your tickets for ${eventTitle} — Meetday`,
+      html: `<p>Hi there,</p><p>Your booking is confirmed! Find your tickets attached as a PDF.</p><p>See you at the event!</p><p>— The Meetday Team</p>`,
+      attachments: [
+        {
+          filename: 'tickets.pdf',
+          content: pdfBuffer,
+        },
+      ],
+    });
+    if (error) {
+      this.logger.error(`Failed to send ticket confirmation to ${to}: ${error.message}`);
+    } else {
       this.logger.log(`Ticket confirmation email sent to ${to}`);
-    } catch (error) {
-      this.logger.error(`Failed to send ticket confirmation to ${to}: ${(error as Error).message}`);
     }
   }
 

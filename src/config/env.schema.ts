@@ -13,10 +13,7 @@ export const envSchema = z.object({
   FIREBASE_CLIENT_EMAIL: z.string().email('FIREBASE_CLIENT_EMAIL must be a valid email'),
   FIREBASE_PRIVATE_KEY: z.string().min(1, 'FIREBASE_PRIVATE_KEY is required'),
 
-  MAIL_HOST: z.string().min(1, 'MAIL_HOST is required'),
-  MAIL_PORT: z.coerce.number().int().positive().default(587),
-  MAIL_USER: z.string().min(1, 'MAIL_USER is required'),
-  MAIL_PASS: z.string().min(1, 'MAIL_PASS is required'),
+  RESEND_API_KEY: z.string().min(1, 'RESEND_API_KEY is required'),
   MAIL_FROM: z.string().email('MAIL_FROM must be a valid email'),
 
   RAZORPAY_KEY_ID: z.string().min(1, 'RAZORPAY_KEY_ID is required'),

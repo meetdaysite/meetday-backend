@@ -321,9 +321,118 @@ export class EventsController {
   @Roles('HOST')
   @ApiOperation({
     summary: 'Get own event detail',
-    description: 'Returns full detail of one of the host\'s own events regardless of status.',
+    description: "Returns full detail of one of the host's own events regardless of status.",
   })
-  @ApiOkResponse({ description: 'Full event detail.' })
+  @ApiOkResponse({
+    description: 'Full event detail.',
+    schema: {
+      example: {
+        id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        hostProfileId: 'b2c3d4e5-f6a7-8901-bcde-f01234567891',
+        categoryId: 'c3d4e5f6-a7b8-9012-cdef-012345678902',
+        title: 'Morning Yoga by the Lake',
+        description: 'A rejuvenating outdoor yoga session for all skill levels.',
+        eventType: 'IN_PERSON',
+        languages: ['English', 'Hindi'],
+        tags: ['yoga', 'wellness', 'outdoor'],
+        eventDate: '2026-08-15T00:00:00.000Z',
+        startTime: '07:00',
+        endTime: '08:30',
+        venueName: 'Lodhi Garden',
+        fullAddress: 'Lodhi Road, New Delhi, Delhi 110003',
+        city: 'New Delhi',
+        latitude: '28.5933',
+        longitude: '77.2198',
+        whatToExpect: ['Guided breathing exercises', 'Asana flow', 'Meditation cool-down'],
+        whoShouldAttend: ['Beginners welcome', 'Bring your own mat'],
+        visibility: 'PUBLIC',
+        ageRestriction: '18+',
+        specialInstructions: 'Wear comfortable clothing. Arrive 10 minutes early.',
+        vibeSummary: null,
+        crowdPulse: null,
+        isFree: false,
+        platformFeeWaived: false,
+        adminRejectionRemark: null,
+        reviewedBy: null,
+        reviewedAt: null,
+        cancelledAt: null,
+        cancellationReason: null,
+        submittedAt: null,
+        graphProcessedAt: null,
+        status: 'DRAFT',
+        createdAt: '2026-07-01T10:00:00.000Z',
+        updatedAt: '2026-07-01T10:00:00.000Z',
+        tickets: [
+          {
+            id: 'd4e5f6a7-b8c9-0123-defa-123456789003',
+            eventId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+            name: 'General Admission',
+            price: '499.00',
+            isFree: false,
+            totalCapacity: 30,
+            soldCount: 0,
+            maxPerPerson: 2,
+            description: 'Standard entry ticket.',
+            saleStartDate: '2026-07-10T00:00:00.000Z',
+            saleEndDate: '2026-08-14T23:59:59.000Z',
+            createdAt: '2026-07-01T10:00:00.000Z',
+            updatedAt: '2026-07-01T10:00:00.000Z',
+          },
+        ],
+        refundPolicy: {
+          id: 'e5f6a7b8-c9d0-1234-efab-234567890104',
+          eventId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+          type: 'PARTIAL',
+          cutoffHours: 24,
+          refundPercent: 80,
+          refundTo: 'ORIGINAL_PAYMENT',
+        },
+        category: {
+          id: 'c3d4e5f6-a7b8-9012-cdef-012345678902',
+          name: 'Wellness',
+        },
+        hostProfile: {
+          id: 'b2c3d4e5-f6a7-8901-bcde-f01234567891',
+          displayName: 'Priya Wellness Co.',
+          userId: 'f6a7b8c9-d0e1-2345-fabc-345678901205',
+        },
+        media: [
+          {
+            id: 'a7b8c9d0-e1f2-3456-abcd-456789012306',
+            eventId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+            url: 'https://cdn.example.com/media/cover.jpg?X-Amz-Expires=3600&...',
+            type: 'COVER',
+            order: 0,
+            createdAt: '2026-07-01T10:00:00.000Z',
+          },
+          {
+            id: 'b8c9d0e1-f2a3-4567-bcde-567890123407',
+            eventId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+            url: 'https://cdn.example.com/media/gallery1.jpg?X-Amz-Expires=3600&...',
+            type: 'GALLERY',
+            order: 1,
+            createdAt: '2026-07-01T10:00:00.000Z',
+          },
+        ],
+        communities: [
+          {
+            id: 'c9d0e1f2-a3b4-5678-cdef-678901234508',
+            slug: 'delhi-wellness-collective',
+            name: 'Delhi Wellness Collective',
+            description: 'A community for wellness enthusiasts in Delhi.',
+            type: 'PUBLIC',
+            access: 'OPEN',
+            city: 'New Delhi',
+            memberCount: 342,
+            upcomingExperiencesCount: 5,
+            source: 'MANUAL',
+            coverImageUrl: 'https://cdn.example.com/communities/cover.jpg?X-Amz-Expires=3600&...',
+            iconUrl: 'https://cdn.example.com/communities/icon.png?X-Amz-Expires=3600&...',
+          },
+        ],
+      },
+    },
+  })
   @ApiNotFoundResponse({ description: 'Event not found.' })
   @ApiForbiddenResponse({ description: 'Event belongs to a different host.' })
   getMyEventById(
@@ -338,9 +447,42 @@ export class EventsController {
   @Roles('HOST')
   @ApiOperation({
     summary: 'List attendees for own event',
-    description: 'Returns a paginated list of all confirmed attendees for the host\'s event.',
+    description:
+      "Returns a paginated list of all confirmed attendees for the host's event. " +
+      'Defaults to page 1, limit 50.',
   })
-  @ApiOkResponse({ description: 'Paginated attendee list.' })
+  @ApiOkResponse({
+    description: 'Paginated attendee list.',
+    schema: {
+      example: {
+        attendees: [
+          {
+            firstName: 'Rohan',
+            lastName: 'Mehta',
+            ticketType: 'General Admission',
+            bookingDate: '2026-07-20T14:32:00.000Z',
+            bookingId: 'BK-20260720-0001',
+            amountPaid: '499.00',
+            isCheckedIn: true,
+            checkedInAt: '2026-08-15T06:58:00.000Z',
+          },
+          {
+            firstName: 'Ananya',
+            lastName: 'Sharma',
+            ticketType: 'General Admission',
+            bookingDate: '2026-07-22T09:10:00.000Z',
+            bookingId: 'BK-20260722-0003',
+            amountPaid: '499.00',
+            isCheckedIn: false,
+            checkedInAt: null,
+          },
+        ],
+        total: 24,
+        page: 1,
+        limit: 50,
+      },
+    },
+  })
   @ApiNotFoundResponse({ description: 'Event not found.' })
   @ApiForbiddenResponse({ description: 'Event belongs to a different host.' })
   getEventAttendees(

@@ -8,6 +8,7 @@ import {
 import { ReviewsService } from './reviews.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -57,6 +58,7 @@ describe('ReviewsService', () => {
         ReviewsService,
         { provide: PrismaService, useValue: prisma },
         { provide: StorageService, useValue: mockStorage },
+        { provide: NotificationsService, useValue: { create: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 

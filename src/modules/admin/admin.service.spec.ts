@@ -29,6 +29,7 @@ import { StorageService } from '../../common/storage/storage.service';
 import { RedisService } from '../../common/redis/redis.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { InterestsService } from '../interests/interests.service';
+import { RefundsService } from '../refunds/refunds.service';
 
 // ── Mock factories ───────────────────────────────────────────────────────────
 
@@ -112,6 +113,7 @@ describe('AdminService', () => {
         { provide: RedisService, useValue: { get: jest.fn().mockResolvedValue(null), set: jest.fn(), del: jest.fn() } },
         { provide: AuditLogService, useValue: { log: jest.fn() } },
         { provide: InterestsService, useValue: { invalidateCache: jest.fn().mockResolvedValue(undefined) } },
+        { provide: RefundsService, useValue: { cancelEventOrders: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 
@@ -856,7 +858,7 @@ describe('AdminService', () => {
       prisma.order.findMany.mockResolvedValue([{
         id: 'order-uuid',
         couponId: null,
-        items: [{ ticketId: 'ticket-uuid', quantity: 1 }],
+        items: [{ id: 'item-uuid', ticketId: 'ticket-uuid', quantity: 1, cancelledCount: 0, attendees: [] }],
       }]);
       prisma.order.updateMany.mockResolvedValue({});
 

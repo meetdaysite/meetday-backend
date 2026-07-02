@@ -9,6 +9,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { RedisService } from '../../common/redis/redis.service';
+import { RefundsService } from '../refunds/refunds.service';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -53,6 +55,7 @@ const draftEvent = {
   status: 'DRAFT',
   isFree: false,
   hostProfile: { id: 'hp-uuid', displayName: 'Test Host', userId },
+  communities: [],
 };
 
 const fullDraftEvent = {
@@ -90,6 +93,8 @@ describe('EventsService', () => {
         { provide: StorageService, useValue: mockStorage },
         { provide: NotificationsService, useValue: mockNotifications },
         { provide: AuditLogService, useValue: mockAuditLog },
+        { provide: RedisService, useValue: { get: jest.fn().mockResolvedValue(null), set: jest.fn(), del: jest.fn() } },
+        { provide: RefundsService, useValue: { cancelEventOrders: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 
@@ -485,7 +490,7 @@ describe('EventsService', () => {
       prisma.order.findMany.mockResolvedValue([{
         id: 'order-uuid',
         couponId: null,
-        items: [{ ticketId: 'ticket-uuid', quantity: 2 }],
+        items: [{ id: 'item-uuid', ticketId: 'ticket-uuid', quantity: 2, cancelledCount: 0, attendees: [] }],
       }]);
 
       await service.cancelEvent(userId, eventId, { cancellationReason: 'Venue issue' });
@@ -502,7 +507,7 @@ describe('EventsService', () => {
       prisma.order.findMany.mockResolvedValue([{
         id: 'order-uuid',
         couponId: 'coupon-uuid',
-        items: [{ ticketId: 'ticket-uuid', quantity: 1 }],
+        items: [{ id: 'item-uuid', ticketId: 'ticket-uuid', quantity: 1, cancelledCount: 0, attendees: [] }],
       }]);
 
       await service.cancelEvent(userId, eventId, { cancellationReason: 'Venue issue' });
@@ -606,6 +611,7 @@ describe('EventsService', () => {
       tickets: [{ id: 't1', name: 'GA', price: '500', totalCapacity: 100, maxPerPerson: 4, description: null, saleStartDate: null, saleEndDate: null }],
       refundPolicy: { id: 'rp1', type: 'NO_REFUND', cutoffHours: null, refundPercent: null, refundTo: 'ORIGINAL_PAYMENT_METHOD' },
       media: [{ url: 'covers/photo.jpg', type: 'COVER', order: 0 }],
+      communities: [],
     };
 
     beforeEach(() => {
