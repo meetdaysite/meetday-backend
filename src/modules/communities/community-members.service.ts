@@ -324,7 +324,8 @@ export class CommunityMembersService {
         avatarUrl: avatarMap.get(m.user.id) ?? null,
         role: m.role,
         badge: this.computeBadge(m),
-        isOnline: onlineSet.has(m.user.id),
+        isOnline: isSelf || onlineSet.has(m.user.id),
+        isMe: isSelf,
         joinedAt: m.joinedAt,
         // Redacted for PRIVATE members (unless viewing self)
         city: isPrivate ? null : m.user.attendeeProfile?.city ?? null,
