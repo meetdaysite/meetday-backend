@@ -996,7 +996,7 @@ export class HostsService {
         ...(periodFilter && { confirmedAt: periodFilter }),
         event: { hostProfileId },
       },
-      _sum: { totalAmount: true },
+      _sum: { subtotal: true, platformFee: true },
     });
 
     const satisfactionCurrentQuery = this.prisma.eventReview.aggregate({
@@ -1037,9 +1037,9 @@ export class HostsService {
             confirmedAt: prevPeriodFilter,
             event: { hostProfileId },
           },
-          _sum: { totalAmount: true },
+          _sum: { subtotal: true, platformFee: true },
         })
-      : Promise.resolve({ _sum: { totalAmount: null } });
+      : Promise.resolve({ _sum: { subtotal: null, platformFee: null } });
 
     const satisfactionPrevQuery = prevPeriodFilter
       ? this.prisma.eventReview.aggregate({
@@ -1162,8 +1162,8 @@ export class HostsService {
     };
 
     // ── Build overview ──
-    const revCurrentNum = Number(revenueCurrent._sum.totalAmount ?? 0);
-    const revPrevNum = Number(revenuePrev._sum.totalAmount ?? 0);
+    const revCurrentNum = Number(revenueCurrent._sum.subtotal ?? 0) - Number(revenueCurrent._sum.platformFee ?? 0);
+    const revPrevNum = Number(revenuePrev._sum.subtotal ?? 0) - Number(revenuePrev._sum.platformFee ?? 0);
     const satCurrent = satisfactionCurrent._avg.rating
       ? Math.round(satisfactionCurrent._avg.rating * 10) / 10
       : null;
@@ -1198,13 +1198,16 @@ export class HostsService {
         ? this.prisma.order.groupBy({
             by: ['eventId'],
             where: { eventId: { in: eventIds }, status: 'CONFIRMED' },
-            _sum: { totalAmount: true },
+            _sum: { subtotal: true, platformFee: true },
           })
         : Promise.resolve([]),
     ]);
 
     const revenueByEventId = new Map(
-      revenuePerEvent.map((r) => [r.eventId, Number(r._sum.totalAmount ?? 0)]),
+      revenuePerEvent.map((r) => [
+        r.eventId,
+        Number(r._sum.subtotal ?? 0) - Number(r._sum.platformFee ?? 0),
+      ]),
     );
 
     const recentEvents = await Promise.all(
