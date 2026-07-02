@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -20,10 +21,12 @@ import {
 import { NotificationsService } from './notifications.service';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { ListNotificationsQueryDto } from './dto/list-notifications-query.dto';
+import { RolesGuard } from '../../common/guards/roles.guard';
 
 @ApiTags('Notifications')
 @ApiBearerAuth('firebase-token')
 @ApiUnauthorizedResponse({ description: 'Missing or invalid Firebase JWT' })
+@UseGuards(RolesGuard)
 @Controller('notifications')
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}

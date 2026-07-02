@@ -44,6 +44,7 @@ import { ListAdminsQueryDto } from './dto/list-admins-query.dto';
 import { ListRolesQueryDto } from './dto/list-roles-query.dto';
 import { InviteAdminDto } from './dto/invite-admin.dto';
 import { CreateCouponDto } from './dto/create-coupon.dto';
+import { UpdateCouponDto } from './dto/update-coupon.dto';
 import { ListCouponsQueryDto } from './dto/list-coupons-query.dto';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
@@ -741,6 +742,38 @@ export class AdminController {
   @ApiBadRequestResponse({ description: 'Coupon is already inactive.' })
   disableCoupon(@Param('id', ParseUUIDPipe) id: string) {
     return this.adminService.disableCoupon(id);
+  }
+
+  @Patch('coupons/:id/enable')
+  @Roles('SUPER_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Enable a coupon', description: 'Sets the coupon isActive to true.' })
+  @ApiParam({ name: 'id', description: 'Coupon UUID', example: 'coupon-uuid-1234' })
+  @ApiOkResponse({
+    description: 'Coupon enabled.',
+    schema: { example: { success: true, timestamp: '2026-04-14T10:00:00.000Z', data: { message: 'Coupon enabled successfully' } } },
+  })
+  @ApiNotFoundResponse({ description: 'Coupon not found.' })
+  @ApiBadRequestResponse({ description: 'Coupon is already active.' })
+  enableCoupon(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.enableCoupon(id);
+  }
+
+  @Patch('coupons/:id')
+  @Roles('SUPER_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Update a coupon',
+    description:
+      'Update mutable coupon fields: description, discount, limits, validity window. ' +
+      'code, target, and eventId cannot be changed after creation.',
+  })
+  @ApiParam({ name: 'id', description: 'Coupon UUID', example: 'coupon-uuid-1234' })
+  @ApiOkResponse({ description: 'Updated coupon.' })
+  @ApiNotFoundResponse({ description: 'Coupon not found.' })
+  @ApiBadRequestResponse({ description: 'validFrom must be before validUntil, or maxUsages below current count.' })
+  updateCoupon(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateCouponDto) {
+    return this.adminService.updateCoupon(id, dto);
   }
 
   // ─── Category endpoints ──────────────────────────────────────────────────────

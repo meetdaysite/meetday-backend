@@ -6,6 +6,7 @@ import { MailModule } from '../../common/mail/mail.module';
 import { StorageModule } from '../../common/storage/storage.module';
 import { EventsModule } from '../events/events.module';
 import { CommunitiesModule } from '../communities/communities.module';
+import { RefundsModule } from '../refunds/refunds.module';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { TicketPdfService } from './ticket-pdf.service';
@@ -20,6 +21,7 @@ import { OrderMailProcessor } from './processors/order-mail.processor';
     StorageModule,
     EventsModule,
     CommunitiesModule,
+    RefundsModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService, TicketPdfService, OrderMailProcessor],

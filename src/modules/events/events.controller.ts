@@ -221,6 +221,44 @@ export class EventsController {
     return this.eventsService.getEventPricingConfig(id);
   }
 
+  @Get(':id/available-offers')
+  @UseGuards(RolesGuard)
+  @Roles('USER')
+  @ApiOperation({
+    summary: 'List available promo codes for an event',
+    description:
+      'Returns active, event-specific ATTENDEE promo codes that the authenticated user can still redeem. ' +
+      'Codes the user has already exhausted their per-user limit on are excluded. ' +
+      'Platform-wide codes (not tied to a specific event) are not surfaced here — those are communicated via push/email.',
+  })
+  @ApiOkResponse({
+    description: 'List of applicable promo offers.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-07-01T10:00:00.000Z',
+        data: [
+          {
+            code: 'EARLYBIRD',
+            description: 'Early bird — 30% off tickets',
+            discountType: 'PERCENTAGE',
+            discountValue: 30,
+            maxDiscountAmount: 300,
+            minOrderValue: null,
+            validUntil: '2026-08-01T23:59:59.000Z',
+          },
+        ],
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Event not found or not published.' })
+  getAvailableOffers(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') userId: string,
+  ) {
+    return this.eventsService.getAvailableOffers(id, userId);
+  }
+
   // ─── Host endpoints ────────────────────────────────────────────────────────
 
   @Post('copilot/generate-draft')

@@ -21,10 +21,6 @@ export class RolesGuard implements CanActivate {
       context.getClass(),
     ]);
 
-    if (!requiredRoles || requiredRoles.length === 0) {
-      return true;
-    }
-
     const request = context.switchToHttp().getRequest();
     const { uid } = request.user;
 
@@ -37,19 +33,20 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('Access denied');
     }
 
-    if (!requiredRoles.includes(user.role.name)) {
-      throw new ForbiddenException(
-        'You do not have permission to access this resource.',
-      );
-    }
-
-    // Enrich request.user with DB profile for downstream use
+    // Always enrich request.user with DB profile so @GetUser('id') works
+    // regardless of whether @Roles() is applied on the route.
     request.user = {
       ...request.user,
       id: user.id,
       role: user.role.name,
       isActive: user.isActive,
     };
+
+    if (requiredRoles?.length && !requiredRoles.includes(user.role.name)) {
+      throw new ForbiddenException(
+        'You do not have permission to access this resource.',
+      );
+    }
 
     return true;
   }

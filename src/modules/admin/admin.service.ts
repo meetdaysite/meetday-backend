@@ -21,6 +21,7 @@ import { RejectEventDto } from './dto/reject-event.dto';
 import { ForceCancelEventDto } from './dto/force-cancel-event.dto';
 import { InviteAdminDto } from './dto/invite-admin.dto';
 import { CreateCouponDto } from './dto/create-coupon.dto';
+import { UpdateCouponDto } from './dto/update-coupon.dto';
 import { ListCouponsQueryDto } from './dto/list-coupons-query.dto';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
@@ -37,6 +38,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { RedisService } from '../../common/redis/redis.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { InterestsService } from '../interests/interests.service';
+import { RefundsService } from '../refunds/refunds.service';
 
 @Injectable()
 export class AdminService {
@@ -51,6 +53,7 @@ export class AdminService {
     private readonly redis: RedisService,
     private readonly auditLogService: AuditLogService,
     private readonly interestsService: InterestsService,
+    private readonly refundsService: RefundsService,
   ) {}
 
   async listAdmins(query: ListAdminsQueryDto) {
@@ -383,7 +386,7 @@ export class AdminService {
       throw new BadRequestException('validFrom must be before validUntil');
     }
 
-    return this.prisma.coupon.create({
+    const coupon = await this.prisma.coupon.create({
       data: {
         code: dto.code,
         description: dto.description,
@@ -392,6 +395,8 @@ export class AdminService {
         discountValue: dto.discountValue,
         maxUsages: dto.maxUsages,
         maxUsagesPerUser: dto.maxUsagesPerUser,
+        minOrderValue: dto.minOrderValue ?? null,
+        maxDiscountAmount: dto.maxDiscountAmount ?? null,
         isActive: true,
         validFrom: dto.validFrom ? new Date(dto.validFrom) : undefined,
         validUntil: dto.validUntil ? new Date(dto.validUntil) : undefined,
@@ -399,6 +404,41 @@ export class AdminService {
         createdBy: creatingAdminId,
       },
     });
+
+    // Notify users who saved this event when an event-scoped attendee offer is created
+    if (dto.target === 'ATTENDEE' && dto.eventId) {
+      void this.notifySavedEventUsers(dto.eventId, coupon.code, dto.description);
+    }
+
+    return coupon;
+  }
+
+  private async notifySavedEventUsers(eventId: string, code: string, description?: string) {
+    try {
+      const event = await this.prisma.event.findUnique({
+        where: { id: eventId },
+        select: { title: true },
+      });
+      if (!event) return;
+
+      const saved = await this.prisma.savedEvent.findMany({
+        where: { eventId },
+        select: { userId: true },
+      });
+      if (!saved.length) return;
+
+      const body = description ?? `Use code ${code} to save on your ticket.`;
+
+      await Promise.all(
+        saved.map((s) =>
+          this.notificationsService
+            .create(s.userId, 'event_promo', `New offer for "${event.title}"`, body, { eventId, code })
+            .catch((err) => this.logger.error(`Failed to notify user ${s.userId} of promo`, err)),
+        ),
+      );
+    } catch (err) {
+      this.logger.error('notifySavedEventUsers failed', err);
+    }
   }
 
   async listCoupons(query: ListCouponsQueryDto) {
@@ -413,7 +453,7 @@ export class AdminService {
       this.prisma.coupon.findMany({
         where,
         include: {
-          _count: { select: { redemptions: true } },
+          _count: { select: { redemptions: true, orderUsages: true } },
           createdByUser: { select: { id: true, firstName: true, lastName: true, email: true } },
         },
         orderBy: { createdAt: 'desc' },
@@ -430,12 +470,27 @@ export class AdminService {
     const coupon = await this.prisma.coupon.findUnique({
       where: { id: couponId },
       include: {
-        _count: { select: { redemptions: true } },
+        _count: { select: { redemptions: true, orderUsages: true } },
         createdByUser: { select: { id: true, firstName: true, lastName: true, email: true } },
         redemptions: {
           orderBy: { createdAt: 'desc' },
           include: {
             user: { select: { id: true, firstName: true, lastName: true, email: true } },
+          },
+        },
+        orderUsages: {
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+          select: {
+            id: true,
+            bookingId: true,
+            status: true,
+            subtotal: true,
+            discountAmount: true,
+            totalAmount: true,
+            createdAt: true,
+            user: { select: { id: true, firstName: true, lastName: true, email: true } },
+            event: { select: { id: true, title: true } },
           },
         },
       },
@@ -452,6 +507,45 @@ export class AdminService {
 
     await this.prisma.coupon.update({ where: { id: couponId }, data: { isActive: false } });
     return { message: 'Coupon disabled successfully' };
+  }
+
+  async enableCoupon(couponId: string) {
+    const coupon = await this.prisma.coupon.findUnique({ where: { id: couponId } });
+    if (!coupon) throw new NotFoundException('Coupon not found');
+    if (coupon.isActive) throw new BadRequestException('Coupon is already active');
+
+    await this.prisma.coupon.update({ where: { id: couponId }, data: { isActive: true } });
+    return { message: 'Coupon enabled successfully' };
+  }
+
+  async updateCoupon(couponId: string, dto: UpdateCouponDto) {
+    const coupon = await this.prisma.coupon.findUnique({ where: { id: couponId } });
+    if (!coupon) throw new NotFoundException('Coupon not found');
+
+    if (dto.validFrom && dto.validUntil && new Date(dto.validFrom) >= new Date(dto.validUntil)) {
+      throw new BadRequestException('validFrom must be before validUntil');
+    }
+
+    if (dto.maxUsages !== undefined && dto.maxUsages < coupon.usageCount) {
+      throw new BadRequestException(
+        `maxUsages cannot be set below the current usage count (${coupon.usageCount})`,
+      );
+    }
+
+    return this.prisma.coupon.update({
+      where: { id: couponId },
+      data: {
+        description: dto.description,
+        discountType: dto.discountType,
+        discountValue: dto.discountValue,
+        maxUsages: dto.maxUsages,
+        maxUsagesPerUser: dto.maxUsagesPerUser,
+        minOrderValue: dto.minOrderValue,
+        maxDiscountAmount: dto.maxDiscountAmount,
+        validFrom: dto.validFrom ? new Date(dto.validFrom) : undefined,
+        validUntil: dto.validUntil ? new Date(dto.validUntil) : undefined,
+      },
+    });
   }
 
   async rejectHost(hostProfileId: string, _adminId: string, dto: RejectHostDto) {
@@ -931,10 +1025,43 @@ export class AdminService {
       )
       .catch((err) => this.logger.error('Failed to create event_force_cancelled notification', err));
 
+    // Fan out refunds for all paid confirmed orders
+    void this.fanOutEventCancellationRefunds(eventId, adminId);
+
     return {
       message: 'Event force-cancelled successfully',
       pendingOrdersCancelled: pendingOrders.length,
     };
+  }
+
+  private async fanOutEventCancellationRefunds(eventId: string, actorId: string) {
+    const confirmedOrders = await this.prisma.order.findMany({
+      where: { eventId, status: { in: ['CONFIRMED', 'PARTIALLY_REFUNDED'] } },
+      include: {
+        items: {
+          include: { attendees: { where: { cancelledAt: null }, select: { id: true } } },
+        },
+      },
+    });
+
+    for (const order of confirmedOrders) {
+      const items = order.items
+        .map((item) => ({
+          orderItemId: item.id,
+          quantity: item.quantity - item.cancelledCount,
+          attendeeIds: item.attendees.map((a) => a.id),
+        }))
+        .filter((i) => i.quantity > 0 && i.attendeeIds.length > 0);
+
+      if (items.length === 0) continue;
+
+      await this.refundsService
+        .initiateCancellation(order.id, items, 'ADMIN_OVERRIDE', actorId)
+        .catch((err) => this.logger.error(`Failed to initiate refund for order ${order.id}`, err));
+    }
+
+    if (confirmedOrders.length > 0)
+      this.logger.log(`Initiated refunds for ${confirmedOrders.length} confirmed order(s) on event ${eventId}`);
   }
 
   // ─── Order management ────────────────────────────────────────────────────────

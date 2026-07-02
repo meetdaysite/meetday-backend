@@ -10,9 +10,10 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { ReviewsModule } from '../reviews/reviews.module';
 import { InterestsModule } from '../interests/interests.module';
 import { RedisModule } from '../../common/redis/redis.module';
+import { RefundsModule } from '../refunds/refunds.module';
 
 @Module({
-  imports: [BullModule.registerQueue({ name: 'mail' }), ConfigModule, NotificationsModule, ReviewsModule, InterestsModule, RedisModule],
+  imports: [BullModule.registerQueue({ name: 'mail' }), ConfigModule, NotificationsModule, ReviewsModule, InterestsModule, RedisModule, RefundsModule],
   controllers: [AdminController, AdminDashboardController],
   providers: [AdminService, AdminDashboardService, RolesGuard],
   exports: [AdminService],

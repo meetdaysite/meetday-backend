@@ -40,6 +40,27 @@ function MaxIfPercentage(validationOptions?: ValidationOptions) {
   };
 }
 
+function EventIdRequiresAttendeeTarget(validationOptions?: ValidationOptions) {
+  return (object: object, propertyName: string) => {
+    registerDecorator({
+      name: 'eventIdRequiresAttendeeTarget',
+      target: (object as any).constructor,
+      propertyName,
+      options: {
+        message: 'eventId can only be set when target is ATTENDEE',
+        ...validationOptions,
+      },
+      validator: {
+        validate(value: unknown, args: ValidationArguments) {
+          if (value === undefined || value === null) return true;
+          const obj = args.object as { target?: CouponTarget };
+          return obj.target === CouponTarget.ATTENDEE;
+        },
+      },
+    });
+  };
+}
+
 export class CreateCouponDto {
   @ApiProperty({
     description: 'Uppercase alphanumeric code (A-Z, 0-9, _ -). 3–30 chars.',
@@ -51,7 +72,7 @@ export class CreateCouponDto {
   @Matches(/^[A-Z0-9_-]+$/, { message: 'code must be uppercase alphanumeric (A-Z, 0-9, _ -)' })
   code: string;
 
-  @ApiPropertyOptional({ example: '50% off platform fee for founding hosts' })
+  @ApiPropertyOptional({ example: '50% off for founding hosts' })
   @IsOptional()
   @IsString()
   description?: string;
@@ -62,14 +83,12 @@ export class CreateCouponDto {
 
   @ApiProperty({
     enum: DiscountType,
-    description:
-      'PERCENTAGE: reduce fee rate by X% of its value (e.g. 50% off 15% → 7.5%). ' +
-      'FLAT: reduce fee rate by X percentage points (e.g. 10 off 15% → 5%).',
+    description: 'PERCENTAGE: discount is X% of the order subtotal. FLAT: discount is a fixed rupee amount.',
   })
   @IsEnum(DiscountType)
   discountType: DiscountType;
 
-  @ApiProperty({ example: 50, description: 'Discount magnitude — percentage (0–100) or flat points (no upper limit)' })
+  @ApiProperty({ example: 50, description: 'Discount magnitude — percentage (0–100) or flat rupee amount' })
   @IsNumber()
   @Min(0.01)
   @MaxIfPercentage()
@@ -86,6 +105,21 @@ export class CreateCouponDto {
   @IsInt()
   @Min(1)
   maxUsagesPerUser?: number;
+
+  @ApiPropertyOptional({ example: 500, description: 'Minimum order subtotal (₹) required to apply this coupon.' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  minOrderValue?: number;
+
+  @ApiPropertyOptional({
+    example: 200,
+    description: 'Absolute cap on the discount amount (₹). Useful to limit PERCENTAGE coupons on large orders.',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0.01)
+  maxDiscountAmount?: number;
 
   @ApiPropertyOptional({ example: '2026-04-14T00:00:00.000Z', description: 'Coupon becomes valid from this date.' })
   @IsOptional()
@@ -105,5 +139,6 @@ export class CreateCouponDto {
   })
   @IsOptional()
   @IsUUID('4')
+  @EventIdRequiresAttendeeTarget()
   eventId?: string;
 }
