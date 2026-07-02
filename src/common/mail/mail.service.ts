@@ -14,6 +14,7 @@ import { refundInitiatedTemplate } from './templates/refund-initiated.template';
 import { refundCompletedTemplate } from './templates/refund-completed.template';
 import { refundFailedTemplate } from './templates/refund-failed.template';
 import { eventCancelledAttendeeTemplate } from './templates/event-cancelled-attendee.template';
+import { ticketConfirmationTemplate } from './templates/ticket-confirmation.template';
 
 @Injectable()
 export class MailService {
@@ -40,7 +41,7 @@ export class MailService {
       from: this.from,
       to,
       subject: `Your tickets for ${eventTitle} — Meetday`,
-      html: `<p>Hi there,</p><p>Your booking is confirmed! Find your tickets attached as a PDF.</p><p>See you at the event!</p><p>— The Meetday Team</p>`,
+      html: ticketConfirmationTemplate(eventTitle),
       attachments: [
         {
           filename: 'tickets.pdf',
