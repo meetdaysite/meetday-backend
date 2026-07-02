@@ -993,26 +993,39 @@ export class CommunitiesService {
     });
     if (!community) throw new NotFoundException('Community not found');
 
-    const hostMembers = await this.prisma.communityMember.findMany({
-      where: { communityId: community.id, role: CommunityRole.HOST, status: CommunityMemberStatus.ACTIVE },
+    const communityEvents = await this.prisma.communityEvent.findMany({
+      where: { communityId: community.id },
       select: {
-        user: {
+        event: {
           select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            avatarUrl: true,
-            hostProfile: { select: { id: true, displayName: true } },
+            hostProfile: {
+              select: {
+                userId: true,
+                displayName: true,
+                user: {
+                  select: { id: true, firstName: true, lastName: true, avatarUrl: true },
+                },
+              },
+            },
           },
         },
       },
     });
 
+    const hostMap = new Map<string, { user: typeof communityEvents[0]['event']['hostProfile']['user']; displayName: string | null; eventCount: number }>();
+    for (const { event } of communityEvents) {
+      const hp = event.hostProfile;
+      if (!hp) continue;
+      const existing = hostMap.get(hp.userId);
+      if (existing) {
+        existing.eventCount += 1;
+      } else {
+        hostMap.set(hp.userId, { user: hp.user, displayName: hp.displayName, eventCount: 1 });
+      }
+    }
+
     const withCounts = await Promise.all(
-      hostMembers.map(async ({ user }) => {
-        const eventCount = await this.prisma.communityEvent.count({
-          where: { communityId: community.id, event: { hostProfile: { userId: user.id } } },
-        });
+      [...hostMap.values()].map(async ({ user, displayName, eventCount }) => {
         const avatarUrl = user.avatarUrl
           ? await this.storageService.getPresignedDownloadUrl(user.avatarUrl)
           : null;
@@ -1021,7 +1034,7 @@ export class CommunitiesService {
           firstName: user.firstName,
           lastName: user.lastName,
           avatarUrl,
-          displayName: user.hostProfile?.displayName ?? null,
+          displayName,
           eventCount,
         };
       }),
@@ -1046,8 +1059,8 @@ export class CommunitiesService {
       this.prisma.communityMember.count({
         where: { communityId: community.id, status: CommunityMemberStatus.ACTIVE, joinedAt: { gte: sevenDaysAgo } },
       }),
-      this.prisma.communityMember.count({
-        where: { communityId: community.id, role: CommunityRole.HOST, status: CommunityMemberStatus.ACTIVE },
+      this.prisma.hostProfile.count({
+        where: { events: { some: { communities: { some: { communityId: community.id } } } } },
       }),
     ]);
 
