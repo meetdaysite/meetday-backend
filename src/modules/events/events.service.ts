@@ -565,6 +565,8 @@ export class EventsService {
       return result;
     });
 
+    await this.syncTotalEventsHosted(event.hostProfileId);
+
     this.auditLogService.log({
       actorId: userId,
       actorRole: 'HOST',
@@ -578,6 +580,16 @@ export class EventsService {
     void this.fanOutEventCancellationRefunds(eventId, userId);
 
     return cancelled;
+  }
+
+  private async syncTotalEventsHosted(hostProfileId: string): Promise<void> {
+    const count = await this.prisma.event.count({
+      where: { hostProfileId, status: EventStatus.PUBLISHED },
+    });
+    await this.prisma.hostProfile.update({
+      where: { id: hostProfileId },
+      data: { totalEventsHosted: count },
+    });
   }
 
   private async fanOutEventCancellationRefunds(eventId: string, actorId: string) {

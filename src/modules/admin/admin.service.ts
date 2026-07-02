@@ -790,6 +790,8 @@ export class AdminService {
       },
     });
 
+    await this.syncTotalEventsHosted(event.hostProfileId);
+
     const hostUser = event.hostProfile.user;
     const eventTitle = event.title ?? 'Untitled';
 
@@ -996,6 +998,10 @@ export class AdminService {
       }
     });
 
+    if (event.status === 'PUBLISHED') {
+      await this.syncTotalEventsHosted(event.hostProfileId);
+    }
+
     const hostUser = event.hostProfile.user;
     const eventTitle = event.title ?? 'Untitled';
 
@@ -1032,6 +1038,16 @@ export class AdminService {
       message: 'Event force-cancelled successfully',
       pendingOrdersCancelled: pendingOrders.length,
     };
+  }
+
+  private async syncTotalEventsHosted(hostProfileId: string): Promise<void> {
+    const count = await this.prisma.event.count({
+      where: { hostProfileId, status: 'PUBLISHED' },
+    });
+    await this.prisma.hostProfile.update({
+      where: { id: hostProfileId },
+      data: { totalEventsHosted: count },
+    });
   }
 
   private async fanOutEventCancellationRefunds(eventId: string, actorId: string) {
