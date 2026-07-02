@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { getQueueToken } from '@nestjs/bull';
 import { BillingCycle, HostPlan } from '@prisma/client';
+import { ConfigService } from '@nestjs/config';
 import { HostsService } from './hosts.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
@@ -100,6 +101,7 @@ describe('HostsService', () => {
         HostsService,
         { provide: PrismaService, useValue: prisma },
         { provide: CryptoService, useValue: mockCrypto },
+        { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue(undefined) } },
         { provide: KYC_PROVIDER, useValue: mockKycProvider },
         { provide: SubscriptionService, useValue: mockSubscriptionService },
         { provide: PennyDropService, useValue: mockPennyDropService },

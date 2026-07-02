@@ -15,6 +15,9 @@ function makePrisma() {
       update: jest.fn(),
     },
   };
+  prisma.$transaction = jest.fn().mockImplementation(async (arg: any) =>
+    Array.isArray(arg) ? Promise.all(arg) : arg(prisma),
+  );
   return prisma;
 }
 
