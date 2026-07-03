@@ -15,6 +15,7 @@ import { EventsVibeService } from '../events/events-vibe.service';
 import { CommunityMembersService } from '../communities/community-members.service';
 import { RedisService } from '../../common/redis/redis.service';
 import { RefundsService } from '../refunds/refunds.service';
+import { TicketPdfService } from './ticket-pdf.service';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -51,6 +52,7 @@ const mockConfig = { get: jest.fn().mockReturnValue('development') };
 const mockCommunityMembers = { recomputeForEvent: jest.fn().mockResolvedValue(undefined) };
 const mockRedis = { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(undefined) };
 const mockRefunds = { initiateCancellation: jest.fn() };
+const mockTicketPdf = { getDownloadUrl: jest.fn() };
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -127,6 +129,7 @@ describe('OrdersService', () => {
         { provide: CommunityMembersService, useValue: mockCommunityMembers },
         { provide: RedisService, useValue: mockRedis },
         { provide: RefundsService, useValue: mockRefunds },
+        { provide: TicketPdfService, useValue: mockTicketPdf },
       ],
     }).compile();
 
@@ -388,6 +391,43 @@ describe('OrdersService', () => {
     it('throws ForbiddenException when user does not own the order', async () => {
       prisma.order.findUnique.mockResolvedValue({ id: orderId, userId: 'other-user', items: [] });
       await expect(service.getOrderById(orderId, userId)).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  // ── getTicketDownloadUrl ──────────────────────────────────────────────────
+
+  describe('getTicketDownloadUrl()', () => {
+    it('returns the presigned URL for a confirmed order owned by the user', async () => {
+      prisma.order.findUnique.mockResolvedValue({ userId, status: 'CONFIRMED' });
+      mockTicketPdf.getDownloadUrl.mockResolvedValue('https://cdn.example.com/ticket.pdf');
+
+      const result = await service.getTicketDownloadUrl(orderId, userId);
+      expect(mockTicketPdf.getDownloadUrl).toHaveBeenCalledWith(orderId);
+      expect(result).toEqual({ url: 'https://cdn.example.com/ticket.pdf' });
+    });
+
+    it('allows download for a partially-refunded order', async () => {
+      prisma.order.findUnique.mockResolvedValue({ userId, status: 'PARTIALLY_REFUNDED' });
+      mockTicketPdf.getDownloadUrl.mockResolvedValue('https://cdn.example.com/ticket.pdf');
+      await expect(service.getTicketDownloadUrl(orderId, userId)).resolves.toEqual({
+        url: 'https://cdn.example.com/ticket.pdf',
+      });
+    });
+
+    it('throws NotFoundException when order does not exist', async () => {
+      prisma.order.findUnique.mockResolvedValue(null);
+      await expect(service.getTicketDownloadUrl(orderId, userId)).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws ForbiddenException when user does not own the order', async () => {
+      prisma.order.findUnique.mockResolvedValue({ userId: 'other-user', status: 'CONFIRMED' });
+      await expect(service.getTicketDownloadUrl(orderId, userId)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('throws BadRequestException when the order is not confirmed', async () => {
+      prisma.order.findUnique.mockResolvedValue({ userId, status: 'PENDING_PAYMENT' });
+      await expect(service.getTicketDownloadUrl(orderId, userId)).rejects.toThrow(BadRequestException);
+      expect(mockTicketPdf.getDownloadUrl).not.toHaveBeenCalled();
     });
   });
 

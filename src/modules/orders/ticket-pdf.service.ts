@@ -28,6 +28,34 @@ export class TicketPdfService {
     };
   }
 
+  // Generates the ticket PDF and persists it to GCS, recording the object key on
+  // the order. Returns the buffer too so callers (e.g. the confirmation email)
+  // reuse the same render instead of generating it twice.
+  async persistForOrder(orderId: string): Promise<{ key: string; buffer: Buffer }> {
+    const buffer = await this.generateForOrder(orderId);
+    const key = `orders/${orderId}/ticket.pdf`;
+    await this.storageService.uploadBuffer(key, buffer, 'application/pdf');
+    await this.prisma.order.update({
+      where: { id: orderId },
+      data: { ticketPdfKey: key },
+    });
+    return { key, buffer };
+  }
+
+  // Returns a short-lived presigned URL for the order's ticket PDF. If the PDF
+  // has not been persisted yet (orders confirmed before this feature, or whose
+  // email job hasn't run), it is generated and persisted on first access.
+  async getDownloadUrl(orderId: string): Promise<string> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { ticketPdfKey: true },
+    });
+    if (!order) throw new Error(`Order ${orderId} not found`);
+
+    const key = order.ticketPdfKey ?? (await this.persistForOrder(orderId)).key;
+    return this.storageService.getPresignedDownloadUrl(key);
+  }
+
   async generateForOrder(orderId: string): Promise<Buffer> {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },

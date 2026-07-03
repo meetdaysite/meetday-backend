@@ -16,8 +16,10 @@ export class OrderMailProcessor {
   @Process('ticket-confirmation')
   async handleTicketConfirmation(job: Job<{ orderId: string }>) {
     try {
-      const [pdfBuffer, summary] = await Promise.all([
-        this.ticketPdfService.generateForOrder(job.data.orderId),
+      // persistForOrder both renders the PDF (reused as the email attachment) and
+      // uploads it to GCS so it can be served by the download endpoint later.
+      const [{ buffer: pdfBuffer }, summary] = await Promise.all([
+        this.ticketPdfService.persistForOrder(job.data.orderId),
         this.ticketPdfService.getOrderSummary(job.data.orderId),
       ]);
       if (!summary.email) {

@@ -550,6 +550,40 @@ Use this endpoint when **all tickets in the order are free** (\`isFree: true\`).
     return this.ordersService.getOrderById(id, userId);
   }
 
+  // ── GET /orders/:id/ticket ──────────────────────────────────────────────────
+
+  @Get(':id/ticket')
+  @ApiOperation({
+    summary: 'Get ticket PDF download URL',
+    description:
+      'Returns a short-lived presigned URL to download the ticket PDF (the same document emailed on confirmation, with per-attendee QR codes). Only the buyer may download, and only for a confirmed order. The frontend should open/download the returned URL.',
+  })
+  @ApiParam({ name: 'id', description: 'UUID of the order.', example: 'bd9c4962-7d77-4310-a64e-d0c0aa72e2a6' })
+  @ApiOkResponse({
+    description: 'Presigned download URL for the ticket PDF.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-07-01T20:00:00.000Z',
+        data: {
+          url: 'https://storage.googleapis.com/meetday/orders/bd9c4962-7d77-4310-a64e-d0c0aa72e2a6/ticket.pdf?X-Goog-Signature=...',
+        },
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    schema: { example: { statusCode: 400, message: 'Tickets are only available for confirmed orders', error: 'Bad Request' } },
+  })
+  @ApiNotFoundResponse({ schema: { example: ERROR_404_ORDER } })
+  @ApiForbiddenResponse({ schema: { example: ERROR_403_OWN } })
+  @ApiUnauthorizedResponse({ schema: { example: ERROR_401 } })
+  getTicketDownloadUrl(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') userId: string,
+  ) {
+    return this.ordersService.getTicketDownloadUrl(id, userId);
+  }
+
   // ── POST /orders/:id/cancel-tickets ─────────────────────────────────────────
 
   @Post(':id/cancel-tickets')
