@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import { Job } from 'bull';
 import { MailService } from '../../../common/mail/mail.service';
 import { TicketPdfService } from '../ticket-pdf.service';
+import { InvoicePdfService } from '../invoice-pdf.service';
 
 @Processor('mail')
 export class OrderMailProcessor {
@@ -11,22 +12,36 @@ export class OrderMailProcessor {
   constructor(
     private readonly mailService: MailService,
     private readonly ticketPdfService: TicketPdfService,
+    private readonly invoicePdfService: InvoicePdfService,
   ) {}
 
   @Process('ticket-confirmation')
   async handleTicketConfirmation(job: Job<{ orderId: string }>) {
+    const { orderId } = job.data;
     try {
-      // persistForOrder both renders the PDF (reused as the email attachment) and
-      // uploads it to GCS so it can be served by the download endpoint later.
-      const [{ buffer: pdfBuffer }, summary] = await Promise.all([
-        this.ticketPdfService.persistForOrder(job.data.orderId),
-        this.ticketPdfService.getOrderSummary(job.data.orderId),
+      // persistForOrder renders + uploads the full ticket PDF and the invoice so
+      // the download endpoints can serve them. In parallel we build one ticket PDF
+      // per email recipient: each attendee gets only their own ticket, and the
+      // booker's bucket additionally carries the invoice.
+      const [, { buffer: invoiceBuffer }, { eventTitle, recipients }] = await Promise.all([
+        this.ticketPdfService.persistForOrder(orderId),
+        this.invoicePdfService.persistForOrder(orderId),
+        this.ticketPdfService.generateRecipientTickets(orderId),
       ]);
-      if (!summary.email) {
-        this.logger.warn(`Skipping ticket confirmation email for order ${job.data.orderId}: user has no email address`);
+
+      if (recipients.length === 0) {
+        this.logger.warn(`No emailable recipients for order ${orderId}: nobody has an email address`);
         return;
       }
-      await this.mailService.sendTicketConfirmation(summary.email, summary.eventTitle, pdfBuffer);
+
+      for (const recipient of recipients) {
+        await this.mailService.sendTicketConfirmation(
+          recipient.email,
+          eventTitle,
+          recipient.buffer,
+          recipient.isBooker ? invoiceBuffer : undefined,
+        );
+      }
     } catch (error) {
       this.logger.error(`Failed to process ticket-confirmation mail job: ${(error as Error).message}`);
     }

@@ -36,18 +36,26 @@ export class MailService {
     }
   }
 
-  async sendTicketConfirmation(to: string, eventTitle: string, pdfBuffer: Buffer): Promise<void> {
+  async sendTicketConfirmation(
+    to: string,
+    eventTitle: string,
+    ticketBuffer: Buffer,
+    invoiceBuffer?: Buffer,
+  ): Promise<void> {
+    const attachments: Array<{ filename: string; content: Buffer }> = [
+      { filename: 'tickets.pdf', content: ticketBuffer },
+    ];
+    // The tax invoice goes to the booker only; plain attendees get just their ticket.
+    if (invoiceBuffer) {
+      attachments.push({ filename: 'invoice.pdf', content: invoiceBuffer });
+    }
+
     const { error } = await this.resend.emails.send({
       from: this.from,
       to,
       subject: `Your tickets for ${eventTitle} — Meetday`,
-      html: ticketConfirmationTemplate(eventTitle),
-      attachments: [
-        {
-          filename: 'tickets.pdf',
-          content: pdfBuffer,
-        },
-      ],
+      html: ticketConfirmationTemplate(eventTitle, { hasInvoice: !!invoiceBuffer }),
+      attachments,
     });
     if (error) {
       this.logger.error(`Failed to send ticket confirmation to ${to}: ${error.message}`);

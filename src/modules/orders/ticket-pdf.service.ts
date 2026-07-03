@@ -1,8 +1,36 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as QRCode from 'qrcode';
-import * as puppeteer from 'puppeteer';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
+import { escapeHtml, renderHtmlToPdf, renderHtmlsToPdfs } from './pdf-render.util';
+import { MEETDAY_LOGO_DATA_URI } from '../../common/assets/meetday-logo.base64';
+
+const TICKET_SIZE = { width: '800px', height: '360px' };
+
+interface RenderAttendee {
+  fullName: string;
+  ticketName: string;
+  ticketCode: string;
+  qrDataUrl: string;
+  email: string | null;
+  isLead: boolean;
+}
+
+interface TicketRenderData {
+  bookingId: string;
+  eventTitle: string;
+  eventDate: string;
+  startTime: string;
+  venue: string;
+  categoryTag: string;
+  coverBase64: string;
+  bookerEmail: string | null;
+  attendees: RenderAttendee[];
+}
+
+function isEmail(value: string | null | undefined): value is string {
+  return !!value && value.includes('@');
+}
 
 @Injectable()
 export class TicketPdfService {
@@ -56,10 +84,78 @@ export class TicketPdfService {
     return this.storageService.getPresignedDownloadUrl(key);
   }
 
+  // Full ticket PDF — one page per attendee. This is what gets persisted for the
+  // in-app download endpoint (the booker sees every ticket in the order).
   async generateForOrder(orderId: string): Promise<Buffer> {
+    const data = await this.loadTicketRenderData(orderId);
+    const html = this.buildTicketHtmlFor(data, data.attendees);
+    return renderHtmlToPdf(html, TICKET_SIZE);
+  }
+
+  // Splits an order's tickets into one PDF per recipient for emailing:
+  //  - the booker (lead attendee) gets their own ticket(s), plus any attendee
+  //    with no/invalid email folded in so nothing is lost;
+  //  - every other attendee with a valid email gets only their own ticket.
+  // The booker bucket is `isBooker: true` so the caller can attach the invoice.
+  async generateRecipientTickets(
+    orderId: string,
+  ): Promise<{ eventTitle: string; recipients: Array<{ email: string; isBooker: boolean; buffer: Buffer }> }> {
+    const data = await this.loadTicketRenderData(orderId);
+    const bookerKey = isEmail(data.bookerEmail) ? data.bookerEmail.toLowerCase() : null;
+
+    const buckets = new Map<string, { email: string; isBooker: boolean; attendees: RenderAttendee[] }>();
+    for (const attendee of data.attendees) {
+      const own = attendee.isLead ? data.bookerEmail : attendee.email;
+      const foldToBooker = attendee.isLead || !isEmail(own) || (bookerKey !== null && own.toLowerCase() === bookerKey);
+
+      let key: string;
+      let email: string;
+      let isBooker: boolean;
+      if (foldToBooker) {
+        // No booker email → can't email this bucket; the ticket stays in the download.
+        if (bookerKey === null) continue;
+        key = bookerKey;
+        email = data.bookerEmail as string;
+        isBooker = true;
+      } else {
+        key = (own as string).toLowerCase();
+        email = own as string;
+        isBooker = false;
+      }
+
+      const bucket = buckets.get(key) ?? { email, isBooker, attendees: [] };
+      bucket.attendees.push(attendee);
+      buckets.set(key, bucket);
+    }
+
+    const list = [...buckets.values()];
+    const htmls = list.map((b) => this.buildTicketHtmlFor(data, b.attendees));
+    const pdfs = await renderHtmlsToPdfs(htmls, TICKET_SIZE);
+
+    return {
+      eventTitle: data.eventTitle,
+      recipients: list.map((b, i) => ({ email: b.email, isBooker: b.isBooker, buffer: pdfs[i] })),
+    };
+  }
+
+  private buildTicketHtmlFor(data: TicketRenderData, attendees: RenderAttendee[]): string {
+    return buildTicketHtml({
+      bookingId: data.bookingId,
+      eventTitle: data.eventTitle,
+      eventDate: data.eventDate,
+      startTime: data.startTime,
+      venue: data.venue,
+      categoryTag: data.categoryTag,
+      coverBase64: data.coverBase64,
+      attendees,
+    });
+  }
+
+  private async loadTicketRenderData(orderId: string): Promise<TicketRenderData> {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: {
+        user: { select: { email: true } },
         event: {
           select: {
             title: true,
@@ -100,19 +196,14 @@ export class TicketPdfService {
       }
     }
 
-    type AttendeeEntry = {
-      fullName: string;
-      ticketName: string;
-      ticketCode: string;
-      qrDataUrl: string;
-    };
-
-    const attendees: AttendeeEntry[] = await Promise.all(
+    const attendees: RenderAttendee[] = await Promise.all(
       order.items.flatMap((item) =>
         item.attendees.map(async (attendee) => ({
           fullName: attendee.fullName,
           ticketName: item.ticket.name,
           ticketCode: attendee.ticketCode,
+          email: attendee.email,
+          isLead: attendee.isLead,
           qrDataUrl: await QRCode.toDataURL(attendee.ticketCode, {
             width: 200,
             margin: 1,
@@ -129,46 +220,19 @@ export class TicketPdfService {
           year: 'numeric',
         })
       : '';
-    const venue = [order.event.venueName, order.event.city].filter(Boolean).join(', ');
-    const categoryTag = order.event.category?.name?.toUpperCase() ?? '';
 
-    const html = buildTicketHtml({
+    return {
       bookingId: order.bookingId,
       eventTitle: order.event.title,
       eventDate,
       startTime: order.event.startTime ?? '',
-      venue,
-      categoryTag,
+      venue: [order.event.venueName, order.event.city].filter(Boolean).join(', '),
+      categoryTag: order.event.category?.name?.toUpperCase() ?? '',
       coverBase64,
+      bookerEmail: order.user.email ?? null,
       attendees,
-    });
-
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
-    try {
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'load' });
-      const pdf = await page.pdf({
-        width: '800px',
-        height: '360px',
-        printBackground: true,
-      });
-      return Buffer.from(pdf);
-    } finally {
-      await browser.close();
-    }
+    };
   }
-}
-
-function esc(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;');
 }
 
 function buildTicketHtml(opts: {
@@ -193,14 +257,14 @@ function buildTicketHtml(opts: {
     <div class="ticket">
       <div class="left" style="${coverBase64 ? `background-image:url('${coverBase64}');` : ''}">
         <div class="overlay">
-          ${categoryTag ? `<div class="tag">${esc(categoryTag)}</div>` : ''}
-          <h1 class="title">${esc(eventTitle)}</h1>
+          ${categoryTag ? `<div class="tag">${escapeHtml(categoryTag)}</div>` : ''}
+          <h1 class="title">${escapeHtml(eventTitle)}</h1>
           <div class="details">
-            ${eventDate ? `<div class="row"><span class="ico">&#128197;</span><span>${esc(eventDate)}${startTime ? ` &bull; ${esc(startTime)}` : ''}</span></div>` : ''}
-            ${venue ? `<div class="row"><span class="ico">&#128205;</span><span>${esc(venue)}</span></div>` : ''}
+            ${eventDate ? `<div class="row"><span class="ico">&#128197;</span><span>${escapeHtml(eventDate)}${startTime ? ` &bull; ${escapeHtml(startTime)}` : ''}</span></div>` : ''}
+            ${venue ? `<div class="row"><span class="ico">&#128205;</span><span>${escapeHtml(venue)}</span></div>` : ''}
           </div>
-          <div class="att-name">${esc(a.fullName)}</div>
-          <div class="att-type">${esc(a.ticketName)}</div>
+          <div class="att-name">${escapeHtml(a.fullName)}</div>
+          <div class="att-type">${escapeHtml(a.ticketName)}</div>
         </div>
       </div>
       <div class="divider">
@@ -209,9 +273,9 @@ function buildTicketHtml(opts: {
         <div class="sc-group bot">${scallopsBot}</div>
       </div>
       <div class="right">
-        <div class="brand">meetday</div>
+        <div class="brand-logo"></div>
         <div class="bk-label">Booking ID</div>
-        <div class="bk-id">${esc(bookingId)}</div>
+        <div class="bk-id">${escapeHtml(bookingId)}</div>
         <div class="qr-box">
           <img src="${a.qrDataUrl}" alt="QR" />
         </div>
@@ -273,7 +337,7 @@ function buildTicketHtml(opts: {
     flex:1;display:flex;flex-direction:column;align-items:center;
     justify-content:center;padding:20px 22px;gap:5px;background:#fff;
   }
-  .brand{font-size:10px;font-weight:700;letter-spacing:2px;color:#bbb;text-transform:uppercase;margin-bottom:4px}
+  .brand-logo{width:40px;height:40px;margin-bottom:4px;background:center/contain no-repeat url('${MEETDAY_LOGO_DATA_URI}')}
   .bk-label{font-size:10px;color:#999;letter-spacing:1px;text-transform:uppercase}
   .bk-id{font-family:'Courier New',monospace;font-size:18px;font-weight:800;color:#c0392b;letter-spacing:1px;margin-bottom:6px}
   .qr-box{border:2px solid #c0392b;border-radius:8px;padding:8px;background:#fff}

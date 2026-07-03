@@ -54,5 +54,11 @@ export default () => {
     },
     rateLimitEnabled: env.RATE_LIMIT_ENABLED,
     ipWhitelist: env.IP_WHITELIST.split(',').map((ip) => ip.trim()).filter(Boolean),
+    company: {
+      legalName: env.COMPANY_LEGAL_NAME,
+      gstin: env.COMPANY_GSTIN,
+      address: env.COMPANY_ADDRESS,
+      supportEmail: env.COMPANY_SUPPORT_EMAIL,
+    },
   };
 };

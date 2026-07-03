@@ -45,6 +45,13 @@ export const envSchema = z.object({
   PAYOUT_HOLD_DAYS: z.coerce.number().int().nonnegative().default(7), // days after event end before payout is eligible
   TDS_RATE: z.coerce.number().min(0).max(1).default(0.01), // Section 194-O TDS rate (1%)
   MIN_PAYOUT_AMOUNT: z.coerce.number().nonnegative().default(100), // minimum ₹ net amount to issue a payout
+
+  // Meetday's legal identity — the "supplier" printed on customer tax invoices.
+  // Fill real values in production before invoices are legally valid.
+  COMPANY_LEGAL_NAME: z.string().default('Meetday'),
+  COMPANY_GSTIN: z.string().default(''),
+  COMPANY_ADDRESS: z.string().default(''),
+  COMPANY_SUPPORT_EMAIL: z.string().default(''),
 });
 
 export type Env = z.infer<typeof envSchema>;

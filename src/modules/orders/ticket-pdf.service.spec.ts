@@ -2,6 +2,19 @@ import { Test } from '@nestjs/testing';
 import { TicketPdfService } from './ticket-pdf.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
+import { renderHtmlsToPdfs } from './pdf-render.util';
+
+// Mock only the Chromium render calls; keep escapeHtml (used by buildTicketHtml) real.
+jest.mock('./pdf-render.util', () => {
+  const actual = jest.requireActual('./pdf-render.util');
+  return {
+    ...actual,
+    renderHtmlToPdf: jest.fn().mockResolvedValue(Buffer.from('pdf')),
+    renderHtmlsToPdfs: jest.fn((htmls: string[]) =>
+      Promise.resolve(htmls.map((_, i) => Buffer.from(`pdf-${i}`))),
+    ),
+  };
+});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -120,6 +133,71 @@ describe('TicketPdfService', () => {
     it('throws when order does not exist', async () => {
       prisma.order.findUnique.mockResolvedValue(null);
       await expect(service.getDownloadUrl(orderId)).rejects.toThrow(`Order ${orderId} not found`);
+    });
+  });
+
+  // ── generateRecipientTickets ──────────────────────────────────────────────
+
+  // Order with a booker (lead) + attendees A, B (valid emails) + C (no email),
+  // all on one item. `bookerEmail` is provided by the mock.
+  function orderWith(bookerEmail: string | null) {
+    return {
+      bookingId: 'MDAY-48FE-024C',
+      user: { email: bookerEmail },
+      event: {
+        title: 'Indie Night',
+        eventDate: null,
+        startTime: null,
+        venueName: null,
+        city: null,
+        category: null,
+        media: [],
+      },
+      items: [
+        {
+          ticket: { name: 'GA' },
+          attendees: [
+            { fullName: 'Booker', email: bookerEmail, isLead: true, ticketCode: 't0' },
+            { fullName: 'Attendee A', email: 'a@x.com', isLead: false, ticketCode: 't1' },
+            { fullName: 'Attendee B', email: 'b@x.com', isLead: false, ticketCode: 't2' },
+            { fullName: 'Attendee C', email: '', isLead: false, ticketCode: 't3' },
+          ],
+        },
+      ],
+    };
+  }
+
+  describe('generateRecipientTickets()', () => {
+    it('emails each attendee their own ticket and folds no-email attendees into the booker', async () => {
+      prisma.order.findUnique.mockResolvedValue(orderWith('booker@x.com'));
+
+      const { eventTitle, recipients } = await service.generateRecipientTickets(orderId);
+
+      expect(eventTitle).toBe('Indie Night');
+      // Booker bucket (booker + C folded in) + A + B = 3 recipients.
+      expect(recipients).toHaveLength(3);
+
+      const booker = recipients.find((r) => r.isBooker);
+      expect(booker?.email).toBe('booker@x.com');
+      expect(recipients.filter((r) => !r.isBooker).map((r) => r.email).sort()).toEqual([
+        'a@x.com',
+        'b@x.com',
+      ]);
+      // One PDF per recipient, rendered in a single batch.
+      expect(recipients.every((r) => Buffer.isBuffer(r.buffer))).toBe(true);
+      expect(renderHtmlsToPdfs).toHaveBeenCalledTimes(1);
+      expect((renderHtmlsToPdfs as jest.Mock).mock.calls[0][0]).toHaveLength(3);
+    });
+
+    it('drops the booker bucket when the booker has no email, still emailing valid attendees', async () => {
+      prisma.order.findUnique.mockResolvedValue(orderWith(null));
+
+      const { recipients } = await service.generateRecipientTickets(orderId);
+
+      // No booker email → booker + C (no email) are unreachable; only A and B remain.
+      expect(recipients).toHaveLength(2);
+      expect(recipients.every((r) => !r.isBooker)).toBe(true);
+      expect(recipients.map((r) => r.email).sort()).toEqual(['a@x.com', 'b@x.com']);
     });
   });
 });

@@ -9,6 +9,7 @@ import {
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import * as crypto from 'crypto';
 import * as firebaseAdmin from 'firebase-admin';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -33,6 +34,7 @@ import { UpdateGstRateDto } from './dto/update-gst-rate.dto';
 import { UpdatePlanFeeRateDto } from './dto/update-plan-fee-rate.dto';
 import { CreateHostFeePromoDto } from './dto/create-host-fee-promo.dto';
 import { UpdateHostFeePromoDto } from './dto/update-host-fee-promo.dto';
+import { UpdateAdminProfileDto } from './dto/update-admin-profile.dto';
 import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RedisService } from '../../common/redis/redis.service';
@@ -171,28 +173,66 @@ export class AdminService {
     return { message: 'Invitation sent' };
   }
 
+  private readonly ownProfileSelect = {
+    id: true,
+    email: true,
+    phone: true,
+    firstName: true,
+    lastName: true,
+    avatarUrl: true,
+    isActive: true,
+    role: { select: { name: true } },
+    createdAt: true,
+    updatedAt: true,
+  } as const;
+
+  private async presignAvatar<T extends { avatarUrl: string | null }>(admin: T): Promise<T> {
+    return {
+      ...admin,
+      avatarUrl: admin.avatarUrl
+        ? await this.storageService.getPresignedDownloadUrl(admin.avatarUrl)
+        : null,
+    };
+  }
+
   async getOwnProfile(userId: string) {
     const admin = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: {
-        id: true,
-        email: true,
-        phone: true,
-        firstName: true,
-        lastName: true,
-        avatarUrl: true,
-        isActive: true,
-        role: { select: { name: true } },
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: this.ownProfileSelect,
     });
 
     if (!admin) {
       throw new NotFoundException('Admin not found');
     }
 
-    return admin;
+    return this.presignAvatar(admin);
+  }
+
+  async updateOwnProfile(userId: string, dto: UpdateAdminProfileDto) {
+    const data: Prisma.UserUpdateInput = {};
+    if (dto.avatarKey !== undefined) data.avatarUrl = dto.avatarKey;
+    if (dto.phone !== undefined) data.phone = dto.phone;
+    if (dto.firstName !== undefined) data.firstName = dto.firstName;
+    if (dto.lastName !== undefined) data.lastName = dto.lastName;
+
+    try {
+      const admin = await this.prisma.user.update({
+        where: { id: userId },
+        data,
+        select: this.ownProfileSelect,
+      });
+      return this.presignAvatar(admin);
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError) {
+        if (err.code === 'P2002') {
+          throw new ConflictException('Phone number already in use');
+        }
+        if (err.code === 'P2025') {
+          throw new NotFoundException('Admin not found');
+        }
+      }
+      throw err;
+    }
   }
 
   async listPendingHosts(query: ListHostsQueryDto) {
