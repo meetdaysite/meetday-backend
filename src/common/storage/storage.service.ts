@@ -70,6 +70,13 @@ export class StorageService {
     return url;
   }
 
+  // Uploads a server-generated buffer (e.g. a rendered ticket PDF) directly to
+  // GCS. Unlike requestUploadUrl, this bypasses the presigned-client-upload flow
+  // — the object bytes originate on the server, not the client.
+  async uploadBuffer(key: string, buffer: Buffer, contentType: string): Promise<void> {
+    await this.bucket.file(key).save(buffer, { contentType, resumable: false });
+  }
+
   async getPresignedDownloadUrl(key: string): Promise<string> {
     // OAuth providers (Google, Apple) store a full URL directly — return as-is
     if (key.startsWith('http://') || key.startsWith('https://')) return key;

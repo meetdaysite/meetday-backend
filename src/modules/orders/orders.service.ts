@@ -21,6 +21,7 @@ import { CommunityMembersService } from '../communities/community-members.servic
 import { RedisService } from '../../common/redis/redis.service';
 import { RefundsService } from '../refunds/refunds.service';
 import { CancelTicketsDto } from '../refunds/dto/cancel-tickets.dto';
+import { TicketPdfService } from './ticket-pdf.service';
 import { Prisma } from '@prisma/client';
 
 async function generateUniqueBookingId(
@@ -52,6 +53,7 @@ export class OrdersService {
     private readonly communityMembersService: CommunityMembersService,
     private readonly redisService: RedisService,
     private readonly refundsService: RefundsService,
+    private readonly ticketPdfService: TicketPdfService,
   ) {}
 
   async createOrder(userId: string, dto: CreateOrderDto) {
@@ -636,6 +638,24 @@ export class OrdersService {
     if (order.userId !== userId) throw new ForbiddenException('You do not own this order');
 
     return order;
+  }
+
+  // Returns a presigned URL to download the ticket PDF. Only the buyer may
+  // download, and only once the order holds valid tickets (confirmed, possibly
+  // partially refunded). The PDF is lazily generated on first access if needed.
+  async getTicketDownloadUrl(orderId: string, userId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { userId: true, status: true },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.userId !== userId) throw new ForbiddenException('You do not own this order');
+    if (order.status !== 'CONFIRMED' && order.status !== 'PARTIALLY_REFUNDED') {
+      throw new BadRequestException('Tickets are only available for confirmed orders');
+    }
+
+    const url = await this.ticketPdfService.getDownloadUrl(orderId);
+    return { url };
   }
 
   async cancelTickets(orderId: string, userId: string, dto: CancelTicketsDto) {
