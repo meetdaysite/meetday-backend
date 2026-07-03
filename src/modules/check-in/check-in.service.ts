@@ -76,7 +76,7 @@ export class CheckInService {
     });
 
     const appUrl = this.configService.get<string>('frontendUrl');
-    const scannerUrl = `${appUrl}/scan?token=${token}`;
+    const scannerUrl = `${appUrl}/host/scan?token=${token}`;
 
     void this.mailService
       .sendScannerInvite(dto.email, dto.name, event.title, scannerUrl, expiresAt)
