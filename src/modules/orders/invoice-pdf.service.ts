@@ -90,9 +90,9 @@ export class InvoicePdfService {
 
     const html = buildInvoiceHtml({
       company: {
-        legalName: this.configService.get<string>('company.legalName') ?? 'Meetday',
+        legalName: this.configService.get<string>('company.legalName') ?? 'Meetday Global Pvt. Ltd',
         gstin: this.configService.get<string>('company.gstin') ?? '',
-        address: this.configService.get<string>('company.address') ?? '',
+        address: this.configService.get<string>('company.address') ?? 'INNOV8 UCP, 9TH FLOOR, TOWER D,UNITED CYBER PARK, Gurgaon, Sadar Bazar, Haryana, India 122001',
         supportEmail: this.configService.get<string>('company.supportEmail') ?? '',
       },
       invoiceNo: order.bookingId,

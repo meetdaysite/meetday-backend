@@ -16,12 +16,14 @@ import {
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiBody,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -585,24 +587,33 @@ export class EventsController {
     description:
       'Creates a time-limited scanner link for a staff member and emails it to them. No login is required to use the link.',
   })
+  @ApiBody({ type: CreateScannerSessionDto })
   @ApiCreatedResponse({
-    description: 'Scanner session created and invite email sent to staff member.',
+    description:
+      'Scanner session created and invite email sent to the staff member. ' +
+      'The session auto-expires one hour after the event end time. `scannerUrl` is the link staff open — ' +
+      'no login required.',
     schema: {
       example: {
-        id: 'uuid',
-        eventId: 'uuid',
-        staffName: 'Rahul Sharma',
-        staffEmail: 'rahul@example.com',
-        staffPhone: '+919876543210',
-        label: 'Gate A',
-        isActive: true,
-        expiresAt: '2026-05-24T23:59:00.000Z',
-        createdAt: '2026-05-16T10:00:00.000Z',
-        scannerUrl: 'https://app.meetday.app/scan?token=abc123',
+        success: true,
+        timestamp: '2026-05-16T10:00:00.000Z',
+        data: {
+          id: 'session-uuid',
+          eventId: 'event-uuid',
+          staffName: 'Rahul Sharma',
+          staffEmail: 'rahul@example.com',
+          staffPhone: '+919876543210',
+          label: 'Gate A',
+          token: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+          isActive: true,
+          expiresAt: '2026-05-24T23:59:00.000Z',
+          createdAt: '2026-05-16T10:00:00.000Z',
+          scannerUrl: 'https://app.meetday.app/scan?token=a1b2c3d4...',
+        },
       },
     },
   })
-  @ApiBadRequestResponse({ description: 'expiresAt is in the past.' })
+  @ApiBadRequestResponse({ description: 'Event has no date/end time set, or the end time format is unrecognised.' })
   @ApiForbiddenResponse({ description: 'Caller does not own this event.' })
   @ApiNotFoundResponse({ description: 'Event not found.' })
   createScannerSession(
@@ -618,9 +629,33 @@ export class EventsController {
   @Roles('HOST')
   @ApiOperation({
     summary: 'List staff scanner sessions',
-    description: 'Returns all scanner sessions for the event, including per-session check-in counts.',
+    description: 'Returns all scanner sessions for the event, newest first, each with its per-session check-in count and scanner link.',
   })
-  @ApiOkResponse({ description: 'List of scanner sessions with check-in counts.' })
+  @ApiOkResponse({
+    description: 'List of scanner sessions with check-in counts.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-07-03T10:00:00.000Z',
+        data: [
+          {
+            id: 'session-uuid',
+            eventId: 'event-uuid',
+            staffName: 'Rahul Sharma',
+            staffEmail: 'rahul@example.com',
+            staffPhone: '+919876543210',
+            label: 'Gate A',
+            token: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+            isActive: true,
+            expiresAt: '2026-07-12T23:00:00.000Z',
+            createdAt: '2026-07-03T09:00:00.000Z',
+            checkInCount: 42,
+            scannerUrl: 'https://app.meetday.app/scan?token=a1b2c3d4...',
+          },
+        ],
+      },
+    },
+  })
   @ApiForbiddenResponse({ description: 'Caller does not own this event.' })
   @ApiNotFoundResponse({ description: 'Event not found.' })
   listScannerSessions(
@@ -635,9 +670,27 @@ export class EventsController {
   @Roles('HOST')
   @ApiOperation({
     summary: 'Deactivate a scanner session',
-    description: "Revokes a staff member's scanner link before it expires.",
+    description: "Revokes a staff member's scanner link before it expires. Any further use of that link returns 410 Gone.",
   })
-  @ApiOkResponse({ description: 'Session deactivated.' })
+  @ApiParam({ name: 'sessionId', description: 'Scanner session UUID', example: 'session-uuid-1234' })
+  @ApiOkResponse({
+    description: 'Session deactivated. Returns the updated session record.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-07-03T10:00:00.000Z',
+        data: {
+          id: 'session-uuid',
+          eventId: 'event-uuid',
+          staffName: 'Rahul Sharma',
+          label: 'Gate A',
+          isActive: false,
+          expiresAt: '2026-07-12T23:00:00.000Z',
+          createdAt: '2026-07-03T09:00:00.000Z',
+        },
+      },
+    },
+  })
   @ApiBadRequestResponse({ description: 'Session is already inactive.' })
   @ApiForbiddenResponse({ description: 'Caller does not own this event.' })
   @ApiNotFoundResponse({ description: 'Session not found.' })
@@ -654,9 +707,35 @@ export class EventsController {
   @Roles('HOST')
   @ApiOperation({
     summary: 'Get real-time check-in stats',
-    description: 'Returns total, checked-in, and remaining attendee counts, with a per-session breakdown.',
+    description:
+      'Host-facing dashboard stats. Returns total, checked-in, and remaining attendee counts across all ' +
+      'confirmed orders, plus a per-gate (per-session) breakdown. Only the event owner can call this.',
   })
-  @ApiOkResponse({ description: 'Check-in statistics.' })
+  @ApiOkResponse({
+    description: 'Check-in statistics for the event.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-07-03T10:00:00.000Z',
+        data: {
+          totalAttendees: 160,
+          checkedIn: 42,
+          remaining: 118,
+          bySession: [
+            {
+              id: 'session-uuid',
+              staffName: 'Rahul Sharma',
+              staffEmail: 'rahul@example.com',
+              label: 'Gate A',
+              isActive: true,
+              expiresAt: '2026-07-12T23:00:00.000Z',
+              checkInCount: 42,
+            },
+          ],
+        },
+      },
+    },
+  })
   @ApiForbiddenResponse({ description: 'Caller does not own this event.' })
   @ApiNotFoundResponse({ description: 'Event not found.' })
   getCheckInStats(
