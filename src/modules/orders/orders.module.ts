@@ -10,6 +10,7 @@ import { RefundsModule } from '../refunds/refunds.module';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { TicketPdfService } from './ticket-pdf.service';
+import { InvoicePdfService } from './invoice-pdf.service';
 import { OrderMailProcessor } from './processors/order-mail.processor';
 
 @Module({
@@ -24,7 +25,7 @@ import { OrderMailProcessor } from './processors/order-mail.processor';
     RefundsModule,
   ],
   controllers: [OrdersController],
-  providers: [OrdersService, TicketPdfService, OrderMailProcessor],
+  providers: [OrdersService, TicketPdfService, InvoicePdfService, OrderMailProcessor],
   exports: [OrdersService],
 })
 export class OrdersModule {}

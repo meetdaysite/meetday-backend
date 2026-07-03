@@ -22,6 +22,7 @@ import { RedisService } from '../../common/redis/redis.service';
 import { RefundsService } from '../refunds/refunds.service';
 import { CancelTicketsDto } from '../refunds/dto/cancel-tickets.dto';
 import { TicketPdfService } from './ticket-pdf.service';
+import { InvoicePdfService } from './invoice-pdf.service';
 import { Prisma } from '@prisma/client';
 
 async function generateUniqueBookingId(
@@ -54,6 +55,7 @@ export class OrdersService {
     private readonly redisService: RedisService,
     private readonly refundsService: RefundsService,
     private readonly ticketPdfService: TicketPdfService,
+    private readonly invoicePdfService: InvoicePdfService,
   ) {}
 
   async createOrder(userId: string, dto: CreateOrderDto) {
@@ -655,6 +657,23 @@ export class OrdersService {
     }
 
     const url = await this.ticketPdfService.getDownloadUrl(orderId);
+    return { url };
+  }
+
+  // Returns a presigned URL to download the tax invoice. Same access rules as the
+  // ticket download: buyer-only, and only for orders holding valid tickets.
+  async getInvoiceDownloadUrl(orderId: string, userId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { userId: true, status: true },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.userId !== userId) throw new ForbiddenException('You do not own this order');
+    if (order.status !== 'CONFIRMED' && order.status !== 'PARTIALLY_REFUNDED') {
+      throw new BadRequestException('Invoices are only available for confirmed orders');
+    }
+
+    const url = await this.invoicePdfService.getDownloadUrl(orderId);
     return { url };
   }
 

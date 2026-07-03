@@ -893,7 +893,8 @@ model Order {
   cancelledAt        DateTime?
   cancellationReason String?
 
-  ticketPdfKey String? // GCS object key of the generated ticket PDF; null until first generated
+  ticketPdfKey  String? // GCS object key of the generated ticket PDF; null until first generated
+  invoicePdfKey String? // GCS object key of the generated tax-invoice PDF; null until first generated
 
   user           User                @relation(fields: [userId], references: [id])
   event          Event               @relation(fields: [eventId], references: [id])

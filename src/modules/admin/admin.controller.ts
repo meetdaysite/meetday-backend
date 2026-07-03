@@ -56,6 +56,7 @@ import { UpdateGstRateDto } from './dto/update-gst-rate.dto';
 import { UpdatePlanFeeRateDto } from './dto/update-plan-fee-rate.dto';
 import { CreateHostFeePromoDto } from './dto/create-host-fee-promo.dto';
 import { UpdateHostFeePromoDto } from './dto/update-host-fee-promo.dto';
+import { UpdateAdminProfileDto } from './dto/update-admin-profile.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth('firebase-token')
@@ -296,6 +297,66 @@ export class AdminController {
   @ApiNotFoundResponse({ description: 'Admin user record not found in DB.' })
   getOwnProfile(@GetUser('id') userId: string) {
     return this.adminService.getOwnProfile(userId);
+  }
+
+  @Patch('me')
+  @ApiOperation({
+    summary: 'Update own admin profile',
+    description:
+      'Updates the authenticated admin\'s own profile picture, phone, and/or name. ' +
+      'For the profile picture, first obtain an object key via POST /storage/upload-url ' +
+      '(context USER_AVATAR), upload the bytes, then pass the returned key as avatarKey. ' +
+      'All fields are optional — send only the ones you want to change.',
+  })
+  @ApiBody({
+    type: UpdateAdminProfileDto,
+    examples: {
+      fullUpdate: {
+        summary: 'Update picture, phone and name',
+        value: {
+          avatarKey: 'users/6d01f554-2d4a-41c0-8060-368e510ad0bd/avatar/12abd9a8-02b2-4fa4-8e7a-2e7199163a9f.jpg',
+          phone: '+919876543210',
+          firstName: 'Aishik',
+          lastName: 'Sikdar',
+        },
+      },
+      phoneOnly: {
+        summary: 'Update only the phone number',
+        value: { phone: '+919876543210' },
+      },
+      avatarOnly: {
+        summary: 'Update only the profile picture',
+        value: {
+          avatarKey: 'users/6d01f554-2d4a-41c0-8060-368e510ad0bd/avatar/12abd9a8-02b2-4fa4-8e7a-2e7199163a9f.jpg',
+        },
+      },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Updated admin profile.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-04-07T10:00:00.000Z',
+        data: {
+          id: 'admin-uuid',
+          email: 'admin@meetday.in',
+          phone: '+919876543210',
+          firstName: 'Aishik',
+          lastName: 'Sikdar',
+          avatarUrl: 'https://storage.googleapis.com/.../avatar.jpg?X-Goog-Signature=...',
+          isActive: true,
+          role: { name: 'SUPER_ADMIN' },
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-04-07T10:00:00.000Z',
+        },
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Admin user record not found in DB.' })
+  @ApiConflictResponse({ description: 'Phone number already in use by another user.' })
+  updateOwnProfile(@GetUser('id') userId: string, @Body() dto: UpdateAdminProfileDto) {
+    return this.adminService.updateOwnProfile(userId, dto);
   }
 
   @Get('hosts/pending')
@@ -540,8 +601,13 @@ export class AdminController {
       'Existing PUBLISHED events remain visible but new orders will be blocked. ' +
       'A suspension reason is required and is sent to the host via email and in-app notification.',
   })
-  @ApiParam({ name: 'id', description: 'Host profile UUID' })
-  @ApiBody({ type: SuspendHostDto })
+  @ApiParam({ name: 'id', description: 'Host profile UUID', example: 'hp-uuid-1234' })
+  @ApiBody({
+    type: SuspendHostDto,
+    examples: {
+      default: { summary: 'Suspend with reason', value: { reason: 'Multiple reports of fraudulent event listings.' } },
+    },
+  })
   @ApiOkResponse({
     description: 'Host suspended.',
     schema: { example: { success: true, timestamp: '2026-05-15T10:00:00.000Z', data: { message: 'Host suspended successfully' } } },
@@ -566,7 +632,7 @@ export class AdminController {
       'The host can immediately create and submit events again. ' +
       'No body required.',
   })
-  @ApiParam({ name: 'id', description: 'Host profile UUID' })
+  @ApiParam({ name: 'id', description: 'Host profile UUID', example: 'hp-uuid-1234' })
   @ApiOkResponse({
     description: 'Host restored.',
     schema: { example: { success: true, timestamp: '2026-05-15T10:00:00.000Z', data: { message: 'Host restored successfully' } } },
@@ -769,7 +835,41 @@ export class AdminController {
       'code, target, and eventId cannot be changed after creation.',
   })
   @ApiParam({ name: 'id', description: 'Coupon UUID', example: 'coupon-uuid-1234' })
-  @ApiOkResponse({ description: 'Updated coupon.' })
+  @ApiBody({
+    type: UpdateCouponDto,
+    examples: {
+      raiseLimit: {
+        summary: 'Extend validity and raise the usage cap',
+        value: { maxUsages: 500, validUntil: '2027-01-31T23:59:59.000Z' },
+      },
+      changeDiscount: {
+        summary: 'Change the discount value and description',
+        value: { discountValue: 40, description: '40% off platform fee — revised offer' },
+      },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Updated coupon.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-04-14T10:00:00.000Z',
+        data: {
+          id: 'coupon-uuid',
+          code: 'FOUNDING50',
+          target: 'HOST',
+          discountType: 'PERCENTAGE',
+          discountValue: 40,
+          maxUsages: 500,
+          maxUsagesPerUser: 1,
+          usageCount: 12,
+          isActive: true,
+          validFrom: null,
+          validUntil: '2027-01-31T23:59:59.000Z',
+        },
+      },
+    },
+  })
   @ApiNotFoundResponse({ description: 'Coupon not found.' })
   @ApiBadRequestResponse({ description: 'validFrom must be before validUntil, or maxUsages below current count.' })
   updateCoupon(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateCouponDto) {
@@ -929,7 +1029,40 @@ export class AdminController {
       'Returns a paginated list of all events across all statuses. ' +
       'Filter by status, city, hostProfileId, or categoryId. Ordered newest first.',
   })
-  @ApiOkResponse({ description: 'Paginated list of events.' })
+  @ApiOkResponse({
+    description: 'Paginated list of events.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-05-11T10:00:00.000Z',
+        data: {
+          events: [
+            {
+              id: 'event-uuid',
+              title: 'Photography Walk in Bandra',
+              status: 'PUBLISHED',
+              eventType: 'Workshop',
+              eventDate: '2026-06-15T00:00:00.000Z',
+              city: 'Mumbai',
+              isFree: false,
+              submittedAt: '2026-05-10T09:00:00.000Z',
+              createdAt: '2026-05-09T09:00:00.000Z',
+              category: { id: 'cat-uuid', name: 'Photography' },
+              hostProfile: {
+                id: 'hp-uuid',
+                displayName: 'Mumbai Walks by Rahul',
+                user: { id: 'user-uuid', firstName: 'Rahul', lastName: 'Sharma', email: 'host@example.com' },
+              },
+              _count: { tickets: 2 },
+            },
+          ],
+          total: 128,
+          page: 1,
+          limit: 20,
+        },
+      },
+    },
+  })
   listAllEvents(@Query() query: ListEventsQueryDto) {
     return this.adminService.listAllEvents(query);
   }
@@ -943,7 +1076,42 @@ export class AdminController {
       'Used when an admin is reviewing an event before approving or rejecting.',
   })
   @ApiParam({ name: 'id', description: 'Event UUID', example: 'event-uuid-1234' })
-  @ApiOkResponse({ description: 'Full event detail.' })
+  @ApiOkResponse({
+    description: 'Full event detail. Media URLs are returned as presigned download URLs.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-05-11T10:00:00.000Z',
+        data: {
+          id: 'event-uuid',
+          title: 'Photography Walk in Bandra',
+          description: 'A 3-hour guided street photography walk through the lanes of Bandra.',
+          status: 'UNDER_REVIEW',
+          eventType: 'Workshop',
+          eventDate: '2026-06-15T00:00:00.000Z',
+          startTime: '2026-06-15T10:00:00.000Z',
+          endTime: '2026-06-15T13:00:00.000Z',
+          venueName: 'Bandra Bandstand',
+          fullAddress: 'Bandstand Promenade, Bandra West, Mumbai',
+          city: 'Mumbai',
+          isFree: false,
+          category: { id: 'cat-uuid', name: 'Photography' },
+          hostProfile: {
+            id: 'hp-uuid',
+            displayName: 'Mumbai Walks by Rahul',
+            user: { id: 'user-uuid', firstName: 'Rahul', lastName: 'Sharma', email: 'host@example.com' },
+          },
+          tickets: [
+            { id: 'ticket-uuid', name: 'General Admission', price: 999, quantity: 20, soldCount: 2 },
+          ],
+          refundPolicy: { id: 'rp-uuid', type: 'FLEXIBLE', cutoffHours: 48 },
+          media: [
+            { id: 'media-uuid', order: 0, url: 'https://storage.googleapis.com/.../cover.jpg?X-Goog-Signature=...' },
+          ],
+        },
+      },
+    },
+  })
   @ApiNotFoundResponse({ description: 'Event not found.' })
   getEventDetail(@Param('id', ParseUUIDPipe) id: string) {
     return this.adminService.getEventDetail(id);
@@ -1030,8 +1198,13 @@ export class AdminController {
       'The host is notified via email and in-app notification. ' +
       'Use for policy violations, fraud, or safety concerns.',
   })
-  @ApiParam({ name: 'id', description: 'Event UUID' })
-  @ApiBody({ type: ForceCancelEventDto })
+  @ApiParam({ name: 'id', description: 'Event UUID', example: 'event-uuid-1234' })
+  @ApiBody({
+    type: ForceCancelEventDto,
+    examples: {
+      default: { summary: 'Cancel with reason', value: { reason: 'Event violates platform safety guidelines.' } },
+    },
+  })
   @ApiOkResponse({
     description: 'Event cancelled. Returns count of pending orders also cancelled.',
     schema: {
@@ -1098,8 +1271,54 @@ export class AdminController {
     summary: 'Get order detail',
     description: 'Full order detail including attendees, ticket codes, coupon, and financials. No ownership restriction.',
   })
-  @ApiParam({ name: 'id', description: 'Order UUID' })
-  @ApiOkResponse({ description: 'Order detail.' })
+  @ApiParam({ name: 'id', description: 'Order UUID', example: 'order-uuid-1234' })
+  @ApiOkResponse({
+    description: 'Full order detail including buyer, event, coupon, line items, and per-ticket attendees.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-05-15T10:00:00.000Z',
+        data: {
+          id: 'order-uuid',
+          bookingId: 'MDAY-AB12-CD34',
+          status: 'CONFIRMED',
+          subtotal: 1998,
+          discountAmount: 200,
+          platformFee: 270,
+          taxAmount: 320,
+          totalAmount: 2388,
+          confirmedAt: '2026-05-10T10:05:00.000Z',
+          cancelledAt: null,
+          createdAt: '2026-05-10T10:00:00.000Z',
+          user: { id: 'user-uuid', firstName: 'Rahul', lastName: 'Sharma', email: 'rahul@example.com', phone: '+919876543210' },
+          event: {
+            id: 'event-uuid',
+            title: 'Mumbai Heritage Walk',
+            eventDate: '2026-06-15T00:00:00.000Z',
+            startTime: '2026-06-15T10:00:00.000Z',
+            endTime: '2026-06-15T13:00:00.000Z',
+            venueName: 'Gateway of India',
+            fullAddress: 'Apollo Bandar, Colaba, Mumbai',
+            city: 'Mumbai',
+            hostProfile: { id: 'hp-uuid', displayName: 'Mumbai Walks by Rahul', userId: 'host-user-uuid' },
+          },
+          coupon: { code: 'LAUNCH200', discountType: 'FLAT', discountValue: 200 },
+          items: [
+            {
+              id: 'order-item-uuid',
+              quantity: 2,
+              unitPrice: 999,
+              ticket: { id: 'ticket-uuid', name: 'General Admission', description: 'Standard entry', price: 999 },
+              attendees: [
+                { id: 'attendee-uuid-1', name: 'Rahul Sharma', ticketCode: 'MDAY-TCKT-0001', cancelledAt: null },
+                { id: 'attendee-uuid-2', name: 'Priya Nair', ticketCode: 'MDAY-TCKT-0002', cancelledAt: null },
+              ],
+            },
+          ],
+        },
+      },
+    },
+  })
   @ApiNotFoundResponse({ description: 'Order not found.' })
   getOrderDetail(@Param('id', ParseUUIDPipe) id: string) {
     return this.adminService.getOrderDetail(id);
@@ -1112,10 +1331,46 @@ export class AdminController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Create an interest',
-    description: 'Creates a new interest. Slug is auto-generated from the name. Only SUPER_ADMIN.',
+    description:
+      'Creates a new interest that users can pick during onboarding. ' +
+      'The slug is auto-generated from the name (e.g. "Founder\'s Huddle" → "founders-huddle"). ' +
+      'For the cover image, pass an S3 object key; the response returns it as a presigned download URL. ' +
+      'Only SUPER_ADMIN can call this endpoint.',
   })
-  @ApiBody({ type: CreateInterestDto })
-  @ApiCreatedResponse({ description: 'Interest created.' })
+  @ApiBody({
+    type: CreateInterestDto,
+    examples: {
+      default: {
+        summary: 'Create interest with cover image',
+        value: {
+          name: "Founder's Huddle",
+          description: 'For startup founders and entrepreneurs building the next big thing',
+          image: 'interests/founders-huddle.jpg',
+        },
+      },
+      minimal: {
+        summary: 'Name only',
+        value: { name: 'Live Music' },
+      },
+    },
+  })
+  @ApiCreatedResponse({
+    description: 'Interest created. `image` is returned as a presigned URL (or null).',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-07-03T10:00:00.000Z',
+        data: {
+          id: 'interest-uuid',
+          name: "Founder's Huddle",
+          slug: 'founders-huddle',
+          description: 'For startup founders and entrepreneurs building the next big thing',
+          image: 'https://storage.googleapis.com/.../founders-huddle.jpg?X-Goog-Signature=...',
+          createdAt: '2026-07-03T10:00:00.000Z',
+        },
+      },
+    },
+  })
   @ApiConflictResponse({ description: 'An interest with this name already exists.' })
   createInterest(@Body() dto: CreateInterestDto) {
     return this.adminService.createInterest(dto);
@@ -1123,17 +1378,60 @@ export class AdminController {
 
   @Get('interests')
   @Roles('SUPER_ADMIN')
-  @ApiOperation({ summary: 'List all interests', description: 'Returns all interests ordered by name. Only SUPER_ADMIN.' })
-  @ApiOkResponse({ description: 'List of interests.' })
+  @ApiOperation({
+    summary: 'List all interests',
+    description:
+      'Returns all interests ordered by name, each with its mapped categories. ' +
+      'Image keys are returned as presigned download URLs. Only SUPER_ADMIN.',
+  })
+  @ApiOkResponse({
+    description: 'List of interests with their category mappings.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-07-03T10:00:00.000Z',
+        data: [
+          {
+            id: 'interest-uuid',
+            name: "Founder's Huddle",
+            slug: 'founders-huddle',
+            description: 'For startup founders and entrepreneurs',
+            image: 'https://storage.googleapis.com/.../founders-huddle.jpg?X-Goog-Signature=...',
+            categoryMappings: [
+              { interestId: 'interest-uuid', categoryId: 'cat-uuid', category: { id: 'cat-uuid', name: 'Networking' } },
+            ],
+          },
+        ],
+      },
+    },
+  })
   getInterests() {
     return this.adminService.getInterests();
   }
 
   @Get('interests/:id')
   @Roles('SUPER_ADMIN')
-  @ApiOperation({ summary: 'Get interest by ID', description: 'Returns a single interest by UUID. Only SUPER_ADMIN.' })
-  @ApiParam({ name: 'id', type: String })
-  @ApiOkResponse({ description: 'Interest detail.' })
+  @ApiOperation({ summary: 'Get interest by ID', description: 'Returns a single interest with its category mappings. Only SUPER_ADMIN.' })
+  @ApiParam({ name: 'id', description: 'Interest UUID', example: 'interest-uuid-1234' })
+  @ApiOkResponse({
+    description: 'Interest detail with category mappings.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-07-03T10:00:00.000Z',
+        data: {
+          id: 'interest-uuid',
+          name: "Founder's Huddle",
+          slug: 'founders-huddle',
+          description: 'For startup founders and entrepreneurs',
+          image: 'https://storage.googleapis.com/.../founders-huddle.jpg?X-Goog-Signature=...',
+          categoryMappings: [
+            { interestId: 'interest-uuid', categoryId: 'cat-uuid', category: { id: 'cat-uuid', name: 'Networking' } },
+          ],
+        },
+      },
+    },
+  })
   @ApiNotFoundResponse({ description: 'Interest not found.' })
   getInterestById(@Param('id', ParseUUIDPipe) id: string) {
     return this.adminService.getInterestById(id);
@@ -1143,11 +1441,34 @@ export class AdminController {
   @Roles('SUPER_ADMIN')
   @ApiOperation({
     summary: 'Update an interest',
-    description: 'Partially updates an interest. Slug is re-generated if name changes. Only SUPER_ADMIN.',
+    description:
+      'Partially updates an interest — send only the fields you want to change. ' +
+      'The slug is re-generated if the name changes. Only SUPER_ADMIN.',
   })
-  @ApiParam({ name: 'id', type: String })
-  @ApiBody({ type: UpdateInterestDto })
-  @ApiOkResponse({ description: 'Interest updated.' })
+  @ApiParam({ name: 'id', description: 'Interest UUID', example: 'interest-uuid-1234' })
+  @ApiBody({
+    type: UpdateInterestDto,
+    examples: {
+      rename: { summary: 'Rename (slug regenerates)', value: { name: 'Startup Founders' } },
+      changeImage: { summary: 'Replace the cover image', value: { image: 'interests/startup-founders.jpg' } },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Updated interest.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-07-03T10:00:00.000Z',
+        data: {
+          id: 'interest-uuid',
+          name: 'Startup Founders',
+          slug: 'startup-founders',
+          description: 'For startup founders and entrepreneurs',
+          image: 'https://storage.googleapis.com/.../startup-founders.jpg?X-Goog-Signature=...',
+        },
+      },
+    },
+  })
   @ApiNotFoundResponse({ description: 'Interest not found.' })
   @ApiConflictResponse({ description: 'An interest with this name already exists.' })
   updateInterest(
@@ -1161,11 +1482,37 @@ export class AdminController {
   @Roles('SUPER_ADMIN')
   @ApiOperation({
     summary: 'Replace category mappings for an interest',
-    description: 'Full replace — existing mappings are deleted and replaced with the provided list. Pass an empty array to clear all mappings. Duplicate categoryIds in the request are ignored.',
+    description:
+      'Full replace — existing mappings are deleted and replaced with the provided list. ' +
+      'Pass an empty array to clear all mappings. Duplicate categoryIds in the request are ignored. Only SUPER_ADMIN.',
   })
-  @ApiParam({ name: 'id', type: String })
-  @ApiBody({ type: SetInterestCategoriesDto })
-  @ApiOkResponse({ description: 'Interest with updated category mappings.' })
+  @ApiParam({ name: 'id', description: 'Interest UUID', example: 'interest-uuid-1234' })
+  @ApiBody({
+    type: SetInterestCategoriesDto,
+    examples: {
+      setTwo: { summary: 'Map to two categories', value: { categoryIds: ['cat-uuid-1', 'cat-uuid-2'] } },
+      clearAll: { summary: 'Clear all mappings', value: { categoryIds: [] } },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Interest with its updated category mappings.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-07-03T10:00:00.000Z',
+        data: {
+          id: 'interest-uuid',
+          name: "Founder's Huddle",
+          slug: 'founders-huddle',
+          image: null,
+          categoryMappings: [
+            { interestId: 'interest-uuid', categoryId: 'cat-uuid-1', category: { id: 'cat-uuid-1', name: 'Networking' } },
+            { interestId: 'interest-uuid', categoryId: 'cat-uuid-2', category: { id: 'cat-uuid-2', name: 'Business' } },
+          ],
+        },
+      },
+    },
+  })
   @ApiNotFoundResponse({ description: 'Interest not found.' })
   setInterestCategories(
     @Param('id', ParseUUIDPipe) id: string,
@@ -1185,7 +1532,44 @@ export class AdminController {
       'Filter by actor, entity type/ID, action, or date range. ' +
       'Only SUPER_ADMIN and CITY_ADMIN can access audit logs.',
   })
-  @ApiOkResponse({ description: 'Paginated audit log entries.' })
+  @ApiOkResponse({
+    description: 'Paginated audit log entries, newest first.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-07-03T10:00:00.000Z',
+        data: {
+          data: [
+            {
+              id: 'audit-uuid',
+              actorId: 'admin-uuid',
+              actorRole: 'ADMIN',
+              action: 'KYC_APPROVED',
+              entityType: 'HOST',
+              entityId: 'hp-uuid',
+              metadata: null,
+              createdAt: '2026-07-03T09:59:00.000Z',
+              actor: { id: 'admin-uuid', firstName: 'Aishik', lastName: 'Sikdar', email: 'admin@meetday.in' },
+            },
+            {
+              id: 'audit-uuid-2',
+              actorId: 'admin-uuid',
+              actorRole: 'ADMIN',
+              action: 'EVENT_REJECTED',
+              entityType: 'EVENT',
+              entityId: 'event-uuid',
+              metadata: { eventTitle: 'Photography Walk', remark: 'Please revise the description.' },
+              createdAt: '2026-07-03T09:40:00.000Z',
+              actor: { id: 'admin-uuid', firstName: 'Aishik', lastName: 'Sikdar', email: 'admin@meetday.in' },
+            },
+          ],
+          total: 2,
+          page: 1,
+          limit: 50,
+        },
+      },
+    },
+  })
   queryAuditLogs(@Query() query: QueryAuditLogDto) {
     return this.auditLogService.queryLogs(query);
   }
@@ -1193,7 +1577,39 @@ export class AdminController {
   // ─── Reviews ──────────────────────────────────────────────────────────────
 
   @Get('reviews')
-  @ApiOperation({ summary: 'List all reviews with moderation status' })
+  @ApiOperation({
+    summary: 'List all reviews with moderation status',
+    description:
+      'Returns a paginated list of every event review across the platform, newest first, ' +
+      'each with its author, the reviewed event, and any attached photos with their approval status. ' +
+      'Use the visibility endpoint to hide a review that violates guidelines.',
+  })
+  @ApiOkResponse({
+    description: 'Paginated list of reviews.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-07-03T10:00:00.000Z',
+        data: {
+          reviews: [
+            {
+              id: 'review-uuid',
+              rating: 5,
+              comment: 'Fantastic walk, our host knew every hidden corner of Bandra!',
+              isVisible: true,
+              createdAt: '2026-06-16T08:00:00.000Z',
+              event: { id: 'event-uuid', title: 'Mumbai Heritage Walk' },
+              user: { id: 'user-uuid', firstName: 'Rahul', lastName: 'Sharma', email: 'rahul@example.com' },
+              photos: [{ id: 'photo-uuid', approvalStatus: 'APPROVED' }],
+            },
+          ],
+          total: 1,
+          page: 1,
+          limit: 20,
+        },
+      },
+    },
+  })
   listReviews(
     @Query('page', new ParseIntPipe({ optional: true })) page?: number,
     @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
@@ -1202,8 +1618,43 @@ export class AdminController {
   }
 
   @Patch('reviews/:id/visibility')
-  @ApiOperation({ summary: 'Show or hide a review' })
-  @ApiParam({ name: 'id', type: String })
+  @ApiOperation({
+    summary: 'Show or hide a review',
+    description:
+      'Toggles whether a review is publicly visible. Hiding a review excludes it from the host ' +
+      'rating aggregate, which is recalculated automatically.',
+  })
+  @ApiParam({ name: 'id', description: 'Review UUID', example: 'review-uuid-1234' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['isVisible'],
+      properties: { isVisible: { type: 'boolean', example: false, description: 'true to show, false to hide' } },
+    },
+    examples: {
+      hide: { summary: 'Hide the review', value: { isVisible: false } },
+      show: { summary: 'Show the review', value: { isVisible: true } },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Updated review.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-07-03T10:00:00.000Z',
+        data: {
+          id: 'review-uuid',
+          rating: 5,
+          comment: 'Fantastic walk, our host knew every hidden corner of Bandra!',
+          isVisible: false,
+          eventId: 'event-uuid',
+          userId: 'user-uuid',
+          createdAt: '2026-06-16T08:00:00.000Z',
+        },
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Review not found.' })
   setReviewVisibility(
     @Param('id', ParseUUIDPipe) id: string,
     @Body('isVisible') isVisible: boolean,
@@ -1215,8 +1666,20 @@ export class AdminController {
 
   @Get('platform-config')
   @Roles('SUPER_ADMIN')
-  @ApiOperation({ summary: 'Get all platform config values (gst_rate, etc.)' })
-  @ApiOkResponse({ description: 'Key-value map of all platform config entries.' })
+  @ApiOperation({
+    summary: 'Get all platform config values',
+    description: 'Returns every platform config entry as a key-value map. Values are stored as strings. Only SUPER_ADMIN.',
+  })
+  @ApiOkResponse({
+    description: 'Key-value map of all platform config entries.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-07-03T10:00:00.000Z',
+        data: { gst_rate: '0.18' },
+      },
+    },
+  })
   getPlatformConfig() {
     return this.adminService.getPlatformConfig();
   }
@@ -1224,18 +1687,34 @@ export class AdminController {
   @Patch('platform-config/gst-rate')
   @Roles('SUPER_ADMIN')
   @ApiOperation({ summary: 'Update platform GST rate', description: 'Updates the GST rate applied to all new orders. Value is a decimal (e.g. 0.18 = 18%). Only SUPER_ADMIN.' })
-  @ApiBody({ type: UpdateGstRateDto })
-  @ApiOkResponse({ description: 'Updated GST rate.' })
+  @ApiBody({
+    type: UpdateGstRateDto,
+    examples: { default: { summary: 'Set GST to 18%', value: { gstRate: 0.18 } } },
+  })
+  @ApiOkResponse({
+    description: 'Updated GST rate.',
+    schema: {
+      example: { success: true, timestamp: '2026-07-03T10:00:00.000Z', data: { gstRate: 0.18 } },
+    },
+  })
   updateGstRate(@Body() dto: UpdateGstRateDto) {
     return this.adminService.updateGstRate(dto);
   }
 
   @Patch('subscription-plans/:plan/fee-rate')
   @Roles('SUPER_ADMIN')
-  @ApiOperation({ summary: 'Update platform fee rate for a subscription plan', description: 'Updates the platformFeeRate on a subscription plan (DISCOVER, SELL, COMMUNITY). Only SUPER_ADMIN.' })
-  @ApiParam({ name: 'plan', enum: ['DISCOVER', 'SELL', 'COMMUNITY'] })
-  @ApiBody({ type: UpdatePlanFeeRateDto })
-  @ApiOkResponse({ description: 'Updated plan fee rate.' })
+  @ApiOperation({ summary: 'Update platform fee rate for a subscription plan', description: 'Updates the platformFeeRate on a subscription plan (DISCOVER, SELL, COMMUNITY). Value is a decimal (e.g. 0.15 = 15%). Only SUPER_ADMIN.' })
+  @ApiParam({ name: 'plan', enum: ['DISCOVER', 'SELL', 'COMMUNITY'], example: 'SELL' })
+  @ApiBody({
+    type: UpdatePlanFeeRateDto,
+    examples: { default: { summary: 'Set fee to 15%', value: { feeRate: 0.15 } } },
+  })
+  @ApiOkResponse({
+    description: 'Updated plan fee rate.',
+    schema: {
+      example: { success: true, timestamp: '2026-07-03T10:00:00.000Z', data: { plan: 'SELL', platformFeeRate: 0.15 } },
+    },
+  })
   @ApiNotFoundResponse({ description: 'Plan not found.' })
   updateSubscriptionPlanFeeRate(@Param('plan') plan: string, @Body() dto: UpdatePlanFeeRateDto) {
     return this.adminService.updateSubscriptionPlanFeeRate(plan, dto);
@@ -1245,10 +1724,51 @@ export class AdminController {
 
   @Post('hosts/:hostProfileId/fee-promos')
   @Roles('SUPER_ADMIN')
-  @ApiOperation({ summary: 'Create a platform fee promo for a host', description: 'Grants a host a time-based or event-count-based discount on their platform fee. Only SUPER_ADMIN.' })
-  @ApiParam({ name: 'hostProfileId', type: String })
-  @ApiBody({ type: CreateHostFeePromoDto })
-  @ApiCreatedResponse({ description: 'Fee promo created.' })
+  @ApiOperation({
+    summary: 'Create a platform fee promo for a host',
+    description:
+      'Grants a host a discount on their platform fee, bounded by a date window and/or a max number of events. ' +
+      'Leave validFrom/validUntil null for an open-ended promo, and maxEvents null for unlimited events. Only SUPER_ADMIN.',
+  })
+  @ApiParam({ name: 'hostProfileId', description: 'Host profile UUID', example: 'hp-uuid-1234' })
+  @ApiBody({
+    type: CreateHostFeePromoDto,
+    examples: {
+      timeBound: {
+        summary: '50% off for a 2-month window',
+        value: {
+          discountType: 'PERCENTAGE',
+          discountValue: 50,
+          validFrom: '2026-07-01T00:00:00.000Z',
+          validUntil: '2026-09-01T00:00:00.000Z',
+        },
+      },
+      eventCapped: {
+        summary: 'Flat 5-point reduction for the next 5 events',
+        value: { discountType: 'FLAT', discountValue: 5, maxEvents: 5 },
+      },
+    },
+  })
+  @ApiCreatedResponse({
+    description: 'Fee promo created.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-07-03T10:00:00.000Z',
+        data: {
+          id: 'promo-uuid',
+          hostProfileId: 'hp-uuid',
+          discountType: 'PERCENTAGE',
+          discountValue: 50,
+          validFrom: '2026-07-01T00:00:00.000Z',
+          validUntil: '2026-09-01T00:00:00.000Z',
+          maxEvents: null,
+          isActive: true,
+          createdAt: '2026-07-03T10:00:00.000Z',
+        },
+      },
+    },
+  })
   @ApiNotFoundResponse({ description: 'Host profile not found.' })
   createHostFeePromo(@Param('hostProfileId', ParseUUIDPipe) hostProfileId: string, @Body() dto: CreateHostFeePromoDto) {
     return this.adminService.createHostFeePromo(hostProfileId, dto);
@@ -1256,9 +1776,30 @@ export class AdminController {
 
   @Get('hosts/:hostProfileId/fee-promos')
   @Roles('SUPER_ADMIN')
-  @ApiOperation({ summary: 'List fee promos for a host' })
-  @ApiParam({ name: 'hostProfileId', type: String })
-  @ApiOkResponse({ description: 'Array of fee promos.' })
+  @ApiOperation({ summary: 'List fee promos for a host', description: 'Returns all fee promos for the host, newest first. Only SUPER_ADMIN.' })
+  @ApiParam({ name: 'hostProfileId', description: 'Host profile UUID', example: 'hp-uuid-1234' })
+  @ApiOkResponse({
+    description: 'Array of fee promos.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-07-03T10:00:00.000Z',
+        data: [
+          {
+            id: 'promo-uuid',
+            hostProfileId: 'hp-uuid',
+            discountType: 'PERCENTAGE',
+            discountValue: 50,
+            validFrom: '2026-07-01T00:00:00.000Z',
+            validUntil: '2026-09-01T00:00:00.000Z',
+            maxEvents: null,
+            isActive: true,
+            createdAt: '2026-07-03T10:00:00.000Z',
+          },
+        ],
+      },
+    },
+  })
   @ApiNotFoundResponse({ description: 'Host profile not found.' })
   getHostFeePromos(@Param('hostProfileId', ParseUUIDPipe) hostProfileId: string) {
     return this.adminService.getHostFeePromos(hostProfileId);
@@ -1266,11 +1807,39 @@ export class AdminController {
 
   @Patch('hosts/:hostProfileId/fee-promos/:promoId')
   @Roles('SUPER_ADMIN')
-  @ApiOperation({ summary: 'Deactivate or update a host fee promo' })
-  @ApiParam({ name: 'hostProfileId', type: String })
-  @ApiParam({ name: 'promoId', type: String })
-  @ApiBody({ type: UpdateHostFeePromoDto })
-  @ApiOkResponse({ description: 'Updated fee promo.' })
+  @ApiOperation({
+    summary: 'Deactivate or update a host fee promo',
+    description: 'Update a promo\'s active flag and/or expiry date. Send only the fields you want to change. Only SUPER_ADMIN.',
+  })
+  @ApiParam({ name: 'hostProfileId', description: 'Host profile UUID', example: 'hp-uuid-1234' })
+  @ApiParam({ name: 'promoId', description: 'Fee promo UUID', example: 'promo-uuid-1234' })
+  @ApiBody({
+    type: UpdateHostFeePromoDto,
+    examples: {
+      deactivate: { summary: 'Deactivate the promo', value: { isActive: false } },
+      extend: { summary: 'Extend the expiry date', value: { validUntil: '2026-12-31T23:59:59.000Z' } },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Updated fee promo.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-07-03T10:00:00.000Z',
+        data: {
+          id: 'promo-uuid',
+          hostProfileId: 'hp-uuid',
+          discountType: 'PERCENTAGE',
+          discountValue: 50,
+          validFrom: '2026-07-01T00:00:00.000Z',
+          validUntil: '2026-12-31T23:59:59.000Z',
+          maxEvents: null,
+          isActive: false,
+          createdAt: '2026-07-03T10:00:00.000Z',
+        },
+      },
+    },
+  })
   @ApiNotFoundResponse({ description: 'Promo not found.' })
   updateHostFeePromo(
     @Param('hostProfileId', ParseUUIDPipe) hostProfileId: string,
