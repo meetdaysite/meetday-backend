@@ -69,6 +69,7 @@ Swagger docs at: http://localhost:3000/api/docs
 | `FIREBASE_PRIVATE_KEY` | Firebase private key (with `\n` line breaks) |
 | `PORT` | Server port (default: 3000) |
 | `NODE_ENV` | `development` or `production` |
+| `ALLOWED_ORIGINS` | Comma-separated CORS origins, required in production (e.g. `https://app.meetday.ai,https://admin.meetday.ai`) |
 
 ---
 
