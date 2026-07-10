@@ -1,0 +1,59 @@
+# compiled output
+dist
+node_modules
+*.tsbuildinfo
+prisma/seeders/*.js
+prisma/seeders/*.js.map
+prisma/seeders/*.d.ts
+
+# Logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# OS
+.DS_Store
+
+# Tests
+/coverage
+/.nyc_output
+
+# IDEs
+.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+.claude
+.vscode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# env
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# prisma
+# prisma/migrations/
+
+interest-images
+
+# local dev tunnel (machine-specific key path)
+tunnel.ps1
+
+seed-images
+seed-community-covers
+
+*.xlsx

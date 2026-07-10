@@ -1,0 +1,1136 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { EventStatus, Prisma, Visibility } from '@prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../../common/storage/storage.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { CreateEventDto } from './dto/create-event.dto';
+import { ListMyEventsQueryDto } from './dto/list-my-events-query.dto';
+import { BrowseEventsQueryDto } from './dto/browse-events-query.dto';
+import { CancelEventDto } from './dto/cancel-event.dto';
+import { ListSavedEventsQueryDto } from './dto/list-saved-events-query.dto';
+import { AuditLogService } from '../audit-log/audit-log.service';
+import { RedisService } from '../../common/redis/redis.service';
+import { RefundsService } from '../refunds/refunds.service';
+
+const EVENT_DETAIL_INCLUDE = {
+  tickets: true,
+  refundPolicy: true,
+  category: { select: { id: true, name: true } },
+  hostProfile: { select: { id: true, displayName: true } },
+};
+
+@Injectable()
+export class EventsService {
+  private readonly logger = new Logger(EventsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storageService: StorageService,
+    private readonly notificationsService: NotificationsService,
+    private readonly auditLogService: AuditLogService,
+    private readonly redisService: RedisService,
+    private readonly refundsService: RefundsService,
+  ) {}
+
+  private async withSignedMedia<T extends { media: Array<{ url: string }> }>(obj: T): Promise<T> {
+    const signed = await Promise.all(
+      obj.media.map(async (m) => ({ ...m, url: await this.storageService.getPresignedDownloadUrl(m.url) })),
+    );
+    return { ...obj, media: signed };
+  }
+
+  async createEvent(userId: string, dto: CreateEventDto) {
+    const hostProfile = await this.prisma.hostProfile.findUnique({
+      where: { userId },
+      select: { id: true, approvalStatus: true },
+    });
+    if (!hostProfile) throw new NotFoundException('Host profile not found');
+    if (hostProfile.approvalStatus !== 'APPROVED')
+      throw new ForbiddenException('Host must be approved to create events');
+
+    if (dto.categoryId) {
+      const category = await this.prisma.category.findFirst({
+        where: { id: dto.categoryId, isActive: true },
+        select: { id: true },
+      });
+      if (!category) throw new NotFoundException('Category not found or inactive');
+    }
+
+    if (dto.isFree && dto.tickets?.some((t) => (t.price ?? 0) !== 0))
+      throw new BadRequestException('All ticket prices must be 0 for a free event');
+
+    const event = await this.prisma.$transaction(async (tx) => {
+      return tx.event.create({
+        data: {
+          hostProfileId: hostProfile.id,
+          categoryId: dto.categoryId,
+          title: dto.title,
+          description: dto.description,
+          eventType: dto.eventType,
+          languages: dto.languages ?? [],
+          tags: dto.tags ?? [],
+          eventDate: dto.eventDate ? new Date(dto.eventDate) : null,
+          startTime: dto.startTime,
+          endTime: dto.endTime,
+          venueName: dto.venueName,
+          fullAddress: dto.fullAddress,
+          city: dto.city,
+          latitude: dto.latitude,
+          longitude: dto.longitude,
+          whatToExpect: dto.whatToExpect ?? [],
+          whoShouldAttend: dto.whoShouldAttend ?? [],
+          visibility: dto.visibility ?? Visibility.PUBLIC,
+          ageRestriction: dto.ageRestriction,
+          specialInstructions: dto.specialInstructions,
+          isFree: dto.isFree ?? false,
+          status: EventStatus.DRAFT,
+          ...(dto.tickets && {
+            tickets: {
+              create: dto.tickets.map((t) => ({
+                name: t.name as string,
+                price: t.price ?? 0,
+                isFree: t.isFree ?? false,
+                totalCapacity: t.totalCapacity ?? 0,
+                maxPerPerson: t.maxPerPerson,
+                description: t.description,
+                saleStartDate: t.saleStartDate ? new Date(t.saleStartDate) : null,
+                saleEndDate: t.saleEndDate ? new Date(t.saleEndDate) : null,
+              })),
+            },
+          }),
+          ...(dto.refundPolicy && {
+            refundPolicy: {
+              create: {
+                type: dto.refundPolicy.type!,
+                cutoffHours: dto.refundPolicy.cutoffHours,
+                refundPercent: dto.refundPolicy.refundPercent,
+                refundTo: dto.refundPolicy.refundTo!,
+              },
+            },
+          }),
+          ...(dto.media && {
+            media: {
+              create: dto.media.map((m) => ({
+                url: m.key,
+                type: m.type,
+                order: m.order ?? 0,
+              })),
+            },
+          }),
+        },
+        include: EVENT_DETAIL_INCLUDE,
+      });
+    });
+    this.auditLogService.log({
+      actorId: userId,
+      actorRole: 'HOST',
+      action: 'EVENT_CREATED',
+      entityType: 'EVENT',
+      entityId: event.id,
+    });
+    return event;
+  }
+
+  async updateEvent(userId: string, eventId: string, dto: CreateEventDto) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: { hostProfile: { select: { userId: true } } },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+    if (event.hostProfile.userId !== userId)
+      throw new ForbiddenException('You do not own this event');
+    if (event.status !== EventStatus.DRAFT)
+      throw new ForbiddenException('Only DRAFT events can be edited');
+
+    if (dto.categoryId) {
+      const category = await this.prisma.category.findFirst({
+        where: { id: dto.categoryId, isActive: true },
+        select: { id: true },
+      });
+      if (!category) throw new NotFoundException('Category not found or inactive');
+    }
+
+    const isFree = dto.isFree ?? (event.isFree as boolean);
+    if (dto.tickets && isFree && dto.tickets.some((t) => (t.price ?? 0) !== 0))
+      throw new BadRequestException('All ticket prices must be 0 for a free event');
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.event.update({
+        where: { id: eventId },
+        data: {
+          ...(dto.categoryId !== undefined && { categoryId: dto.categoryId }),
+          ...(dto.title !== undefined && { title: dto.title }),
+          ...(dto.description !== undefined && { description: dto.description }),
+          ...(dto.eventType !== undefined && { eventType: dto.eventType }),
+          ...(dto.languages !== undefined && { languages: dto.languages }),
+          ...(dto.tags !== undefined && { tags: dto.tags }),
+          ...(dto.eventDate !== undefined && { eventDate: new Date(dto.eventDate) }),
+          ...(dto.startTime !== undefined && { startTime: dto.startTime }),
+          ...(dto.endTime !== undefined && { endTime: dto.endTime }),
+          ...(dto.venueName !== undefined && { venueName: dto.venueName }),
+          ...(dto.fullAddress !== undefined && { fullAddress: dto.fullAddress }),
+          ...(dto.city !== undefined && { city: dto.city }),
+          ...(dto.latitude !== undefined && { latitude: dto.latitude }),
+          ...(dto.longitude !== undefined && { longitude: dto.longitude }),
+          ...(dto.whatToExpect !== undefined && { whatToExpect: dto.whatToExpect }),
+          ...(dto.whoShouldAttend !== undefined && { whoShouldAttend: dto.whoShouldAttend }),
+          ...(dto.visibility !== undefined && { visibility: dto.visibility }),
+          ...(dto.ageRestriction !== undefined && { ageRestriction: dto.ageRestriction }),
+          ...(dto.specialInstructions !== undefined && { specialInstructions: dto.specialInstructions }),
+          ...(dto.isFree !== undefined && { isFree: dto.isFree }),
+        },
+      });
+
+      if (dto.tickets !== undefined) {
+        await tx.eventTicket.deleteMany({ where: { eventId } });
+        if (dto.tickets.length > 0) {
+          await tx.eventTicket.createMany({
+            data: dto.tickets.map((t) => ({
+              eventId,
+              name: t.name as string,
+              price: t.price ?? 0,
+              isFree: t.isFree ?? false,
+              totalCapacity: t.totalCapacity ?? 0,
+              maxPerPerson: t.maxPerPerson,
+              description: t.description,
+              saleStartDate: t.saleStartDate ? new Date(t.saleStartDate) : null,
+              saleEndDate: t.saleEndDate ? new Date(t.saleEndDate) : null,
+            })),
+          });
+        }
+      }
+
+      if (dto.refundPolicy !== undefined) {
+        await tx.eventRefundPolicy.upsert({
+          where: { eventId },
+          create: {
+            eventId,
+            type: dto.refundPolicy.type!,
+            cutoffHours: dto.refundPolicy.cutoffHours,
+            refundPercent: dto.refundPolicy.refundPercent,
+            refundTo: dto.refundPolicy.refundTo!,
+          },
+          update: {
+            ...(dto.refundPolicy.type !== undefined && { type: dto.refundPolicy.type }),
+            ...(dto.refundPolicy.cutoffHours !== undefined && { cutoffHours: dto.refundPolicy.cutoffHours }),
+            ...(dto.refundPolicy.refundPercent !== undefined && { refundPercent: dto.refundPolicy.refundPercent }),
+            ...(dto.refundPolicy.refundTo !== undefined && { refundTo: dto.refundPolicy.refundTo }),
+          },
+        });
+      }
+
+      if (dto.media !== undefined) {
+        await tx.eventMedia.deleteMany({ where: { eventId } });
+        if (dto.media.length > 0) {
+          await tx.eventMedia.createMany({
+            data: dto.media.map((m) => ({
+              eventId,
+              url: m.key,
+              type: m.type,
+              order: m.order ?? 0,
+            })),
+          });
+        }
+      }
+
+      return tx.event.findUnique({
+        where: { id: eventId },
+        include: EVENT_DETAIL_INCLUDE,
+      });
+    });
+  }
+
+  async submitEvent(userId: string, eventId: string) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: {
+        hostProfile: { select: { userId: true, approvalStatus: true } },
+        tickets: { select: { id: true } },
+        refundPolicy: { select: { id: true } },
+      },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+    if (event.hostProfile.userId !== userId)
+      throw new ForbiddenException('You do not own this event');
+    if (event.hostProfile.approvalStatus === 'SUSPENDED')
+      throw new ForbiddenException('Your account is suspended. Please contact support.');
+    if (event.status !== EventStatus.DRAFT)
+      throw new ForbiddenException('Only DRAFT events can be submitted for review');
+
+    const missing: string[] = [];
+    if (!event.title) missing.push('title');
+    if (!event.description) missing.push('description');
+    if (!event.eventType) missing.push('eventType');
+    if (!event.categoryId) missing.push('categoryId');
+    if (!event.languages?.length) missing.push('languages');
+    if (!event.eventDate) missing.push('eventDate');
+    if (!event.startTime) missing.push('startTime');
+    if (!event.endTime) missing.push('endTime');
+    if (!event.venueName) missing.push('venueName');
+    if (!event.fullAddress) missing.push('fullAddress');
+    if (!(event.whatToExpect as string[])?.length) missing.push('whatToExpect');
+    if (!(event.whoShouldAttend as string[])?.length) missing.push('whoShouldAttend');
+    if (!event.tickets.length) missing.push('tickets');
+    if (!event.refundPolicy) missing.push('refundPolicy');
+    if (event.eventDate && event.eventDate <= new Date()) missing.push('eventDate (must be in the future)');
+
+    if (missing.length)
+      throw new BadRequestException(`Event is incomplete. Missing: ${missing.join(', ')}`);
+
+    const updated = await this.prisma.event.update({
+      where: { id: eventId },
+      data: { status: EventStatus.UNDER_REVIEW, submittedAt: new Date() },
+      include: EVENT_DETAIL_INCLUDE,
+    });
+
+    const adminRoles = ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'];
+    const admins = await this.prisma.user.findMany({
+      where: { isActive: true, role: { name: { in: adminRoles } } },
+      select: { id: true },
+    });
+
+    this.auditLogService.log({
+      actorId: userId,
+      actorRole: 'HOST',
+      action: 'EVENT_SUBMITTED_FOR_REVIEW',
+      entityType: 'EVENT',
+      entityId: eventId,
+    });
+
+    const notifyResults = await Promise.allSettled(
+      admins.map((admin) =>
+        this.notificationsService.create(
+          admin.id,
+          'event_pending_review',
+          'New Event Pending Review',
+          `A new event "${event.title ?? 'Untitled'}" has been submitted for review.`,
+        ),
+      ),
+    );
+    notifyResults.forEach((r, i) => {
+      if (r.status === 'rejected')
+        this.logger.error(`Failed to notify admin ${admins[i].id} of pending event`, r.reason);
+    });
+
+    return updated;
+  }
+
+  async getMyEvents(userId: string, query: ListMyEventsQueryDto) {
+    const hostProfile = await this.prisma.hostProfile.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    if (!hostProfile) throw new NotFoundException('Host profile not found');
+
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const where: any = {
+      hostProfileId: hostProfile.id,
+      ...(query.status && { status: query.status }),
+    };
+
+    const [events, total] = await Promise.all([
+      this.prisma.event.findMany({
+        where,
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          eventDate: true,
+          city: true,
+          venueName: true,
+          isFree: true,
+          adminRejectionRemark: true,
+          submittedAt: true,
+          createdAt: true,
+          category: { select: { id: true, name: true } },
+          media: {
+            where: { type: 'COVER' },
+            select: { url: true },
+            take: 1,
+          },
+          tickets: {
+            select: { totalCapacity: true, price: true },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.event.count({ where }),
+    ]);
+
+    const enriched = await Promise.all(
+      events.map(async (e) => {
+        const cover = e.media[0];
+        const totalCapacity = e.tickets.reduce((sum, t) => sum + t.totalCapacity, 0);
+        const prices = e.tickets.map((t) => Number(t.price)).filter((p) => p > 0);
+        const startingPrice = prices.length ? Math.min(...prices) : null;
+
+        const { media: _media, tickets: _tickets, ...rest } = e;
+        return {
+          ...rest,
+          coverImageUrl: cover
+            ? await this.storageService.getPresignedDownloadUrl(cover.url)
+            : null,
+          totalCapacity,
+          startingPrice,
+        };
+      }),
+    );
+
+    return { events: enriched, total, page, limit };
+  }
+
+  async getMyEventById(userId: string, eventId: string) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: {
+        ...EVENT_DETAIL_INCLUDE,
+        hostProfile: { select: { id: true, displayName: true, userId: true } },
+        media: { orderBy: { order: 'asc' } },
+        communities: {
+          select: {
+            source: true,
+            community: {
+              select: {
+                id: true,
+                slug: true,
+                name: true,
+                description: true,
+                type: true,
+                access: true,
+                primaryCity: true,
+                memberCount: true,
+                coverImageKey: true,
+                iconKey: true,
+                events: {
+                  where: {
+                    event: {
+                      eventDate: { gte: new Date() },
+                      status: EventStatus.PUBLISHED,
+                    },
+                  },
+                  select: { id: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+    if (event.hostProfile.userId !== userId)
+      throw new ForbiddenException('You do not own this event');
+    const withMedia = await this.withSignedMedia(event);
+    const communities = await Promise.all(
+      event.communities.map(async ({ source, community }) => ({
+        id: community.id,
+        slug: community.slug,
+        name: community.name,
+        description: community.description,
+        type: community.type,
+        access: community.access,
+        city: community.primaryCity,
+        memberCount: community.memberCount,
+        upcomingExperiencesCount: community.events.length,
+        source,
+        coverImageUrl: community.coverImageKey
+          ? await this.storageService.getPresignedDownloadUrl(community.coverImageKey)
+          : null,
+        iconUrl: community.iconKey
+          ? await this.storageService.getPresignedDownloadUrl(community.iconKey)
+          : null,
+      })),
+    );
+    return { ...withMedia, communities };
+  }
+
+  async getEventAttendees(hostUserId: string, eventId: string, page = 1, limit = 50) {
+    const hostProfile = await this.prisma.hostProfile.findUnique({
+      where: { userId: hostUserId },
+      select: { id: true },
+    });
+    if (!hostProfile) throw new NotFoundException('Host profile not found');
+
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: { hostProfileId: true },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+    if (event.hostProfileId !== hostProfile.id) throw new ForbiddenException('You do not own this event');
+
+    const [attendees, total] = await Promise.all([
+      this.prisma.orderAttendee.findMany({
+        where: { orderItem: { order: { eventId, status: 'CONFIRMED' } } },
+        select: {
+          fullName: true,
+          checkedInAt: true,
+          orderItem: {
+            select: {
+              unitPrice: true,
+              ticket: { select: { name: true } },
+              order: { select: { confirmedAt: true, bookingId: true } },
+            },
+          },
+        },
+        orderBy: { orderItem: { order: { confirmedAt: 'desc' } } },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.orderAttendee.count({
+        where: { orderItem: { order: { eventId, status: 'CONFIRMED' } } },
+      }),
+    ]);
+
+    const rows = attendees.map((a) => {
+      const spaceIdx = a.fullName.indexOf(' ');
+      return {
+        firstName:   spaceIdx === -1 ? a.fullName : a.fullName.slice(0, spaceIdx),
+        lastName:    spaceIdx === -1 ? ''         : a.fullName.slice(spaceIdx + 1),
+        ticketType:  a.orderItem.ticket.name,
+        bookingDate: a.orderItem.order.confirmedAt,
+        bookingId:   a.orderItem.order.bookingId,
+        amountPaid:  a.orderItem.unitPrice,
+        isCheckedIn: !!a.checkedInAt,
+        checkedInAt: a.checkedInAt ?? null,
+      };
+    });
+
+    return { attendees: rows, total, page, limit };
+  }
+
+  async cancelEvent(userId: string, eventId: string, dto: CancelEventDto) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: { hostProfile: { select: { userId: true } } },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+    if (event.hostProfile.userId !== userId)
+      throw new ForbiddenException('You do not own this event');
+    if (event.status !== EventStatus.PUBLISHED)
+      throw new BadRequestException('Only PUBLISHED events can be cancelled');
+
+    const pendingOrders = await this.prisma.order.findMany({
+      where: { eventId, status: 'PENDING_PAYMENT' },
+      select: {
+        id: true,
+        couponId: true,
+        items: { select: { ticketId: true, quantity: true } },
+      },
+    });
+
+    const cancelled = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.event.update({
+        where: { id: eventId },
+        data: {
+          status: EventStatus.CANCELLED,
+          cancelledAt: new Date(),
+          cancellationReason: dto.cancellationReason,
+        },
+        include: EVENT_DETAIL_INCLUDE,
+      });
+
+      for (const order of pendingOrders) {
+        for (const item of order.items) {
+          await tx.$executeRaw`
+            UPDATE event_tickets
+            SET sold_count = GREATEST(sold_count - ${item.quantity}, 0)
+            WHERE id = ${item.ticketId}
+          `;
+        }
+        if (order.couponId) {
+          await tx.$executeRaw`
+            UPDATE coupons
+            SET usage_count = GREATEST(usage_count - 1, 0)
+            WHERE id = ${order.couponId}
+          `;
+        }
+      }
+
+      if (pendingOrders.length > 0) {
+        await tx.order.updateMany({
+          where: { id: { in: pendingOrders.map((o) => o.id) } },
+          data: { status: 'CANCELLED', cancelledAt: new Date(), cancellationReason: 'EVENT_CANCELLED' },
+        });
+      }
+
+      return result;
+    });
+
+    await this.syncTotalEventsHosted(event.hostProfileId);
+
+    this.auditLogService.log({
+      actorId: userId,
+      actorRole: 'HOST',
+      action: 'EVENT_CANCELLED',
+      entityType: 'EVENT',
+      entityId: eventId,
+      metadata: { reason: dto.cancellationReason, pendingOrdersCancelled: pendingOrders.length },
+    });
+
+    // Fan out refunds for all paid, confirmed orders
+    void this.fanOutEventCancellationRefunds(eventId, userId);
+
+    return cancelled;
+  }
+
+  private async syncTotalEventsHosted(hostProfileId: string): Promise<void> {
+    const count = await this.prisma.event.count({
+      where: { hostProfileId, status: EventStatus.PUBLISHED },
+    });
+    await this.prisma.hostProfile.update({
+      where: { id: hostProfileId },
+      data: { totalEventsHosted: count },
+    });
+  }
+
+  private async fanOutEventCancellationRefunds(eventId: string, actorId: string) {
+    const confirmedOrders = await this.prisma.order.findMany({
+      where: { eventId, status: { in: ['CONFIRMED', 'PARTIALLY_REFUNDED'] } },
+      include: {
+        items: {
+          include: { attendees: { where: { cancelledAt: null }, select: { id: true } } },
+        },
+      },
+    });
+
+    for (const order of confirmedOrders) {
+      const items = order.items
+        .map((item) => ({
+          orderItemId: item.id,
+          quantity: item.quantity - item.cancelledCount,
+          attendeeIds: item.attendees.map((a) => a.id),
+        }))
+        .filter((i) => i.quantity > 0 && i.attendeeIds.length > 0);
+
+      if (items.length === 0) continue;
+
+      await this.refundsService
+        .initiateCancellation(order.id, items, 'EVENT_CANCELLED', actorId)
+        .catch((err) => this.logger.error(`Failed to initiate refund for order ${order.id}`, err));
+    }
+
+    if (confirmedOrders.length > 0)
+      this.logger.log(`Initiated refunds for ${confirmedOrders.length} confirmed order(s) on event ${eventId}`);
+  }
+
+  async browseEvents(query: BrowseEventsQueryDto, firebaseUid?: string | null) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const sortOrder = query.sortOrder ?? 'asc';
+
+    // Resolve interest slugs → category IDs via InterestCategory mapping
+    let resolvedCategoryIds: string[] | undefined;
+    if (query.interestSlugs?.length) {
+      const interests = await this.prisma.interest.findMany({
+        where: { slug: { in: query.interestSlugs } },
+        include: { categoryMappings: { select: { categoryId: true } } },
+      });
+      resolvedCategoryIds = [...new Set(interests.flatMap((i) => i.categoryMappings.map((m) => m.categoryId)))];
+    }
+
+    // Union direct categoryId with interest-resolved category IDs
+    const allCategoryIds = [
+      ...(query.categoryId ? [query.categoryId] : []),
+      ...(resolvedCategoryIds ?? []),
+    ];
+    const categoryFilter = allCategoryIds.length
+      ? { categoryId: { in: [...new Set(allCategoryIds)] } }
+      : {};
+
+    // Default to upcoming events; respect explicit dateFrom if provided
+    const dateFilter = {
+      eventDate: {
+        gte: query.dateFrom ? new Date(query.dateFrom) : new Date(),
+        ...(query.dateTo && { lte: new Date(query.dateTo) }),
+      },
+    };
+
+    const where: Prisma.EventWhereInput = {
+      status: EventStatus.PUBLISHED,
+      visibility: Visibility.PUBLIC,
+      ...categoryFilter,
+      ...dateFilter,
+      ...(query.city && { city: { contains: query.city, mode: Prisma.QueryMode.insensitive } }),
+      ...(query.isFree !== undefined && { isFree: query.isFree }),
+      ...(query.search && { title: { contains: query.search, mode: Prisma.QueryMode.insensitive } }),
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const orderBy: any =
+      query.sortBy === 'price'
+        ? { tickets: { _min: { price: sortOrder } } }
+        : { eventDate: sortOrder };
+
+    const [events, total] = await Promise.all([
+      this.prisma.event.findMany({
+        where,
+        select: {
+          id: true,
+          title: true,
+          eventType: true,
+          eventDate: true,
+          startTime: true,
+          venueName: true,
+          tags: true,
+          category: { select: { id: true, name: true } },
+          media: { where: { type: 'COVER' }, select: { url: true }, take: 1 },
+          tickets: { select: { price: true } },
+        },
+        orderBy,
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.event.count({ where }),
+    ]);
+
+    let savedSet = new Set<string>();
+    if (firebaseUid) {
+      const user = await this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } });
+      if (user && events.length) {
+        const rows = await this.prisma.savedEvent.findMany({
+          where: { userId: user.id, eventId: { in: events.map((e) => e.id) } },
+          select: { eventId: true },
+        });
+        savedSet = new Set(rows.map((r) => r.eventId));
+      }
+    }
+
+    const enriched = await Promise.all(
+      events.map(async (e) => {
+        const cover = e.media[0];
+        const prices = e.tickets.map((t) => Number(t.price)).filter((p) => p > 0);
+        const startingPrice = prices.length ? Math.min(...prices) : null;
+        const { media: _media, tickets: _tickets, ...rest } = e;
+        return {
+          ...rest,
+          coverImageUrl: cover ? await this.storageService.getPresignedDownloadUrl(cover.url) : null,
+          startingPrice,
+          isSaved: savedSet.has(e.id),
+        };
+      }),
+    );
+
+    return { events: enriched, total, page, limit };
+  }
+
+  async getPublicEventById(eventId: string, firebaseUid?: string | null) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId, status: EventStatus.PUBLISHED, visibility: Visibility.PUBLIC },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        eventType: true,
+        languages: true,
+        tags: true,
+        eventDate: true,
+        startTime: true,
+        endTime: true,
+        venueName: true,
+        fullAddress: true,
+        city: true,
+        latitude: true,
+        longitude: true,
+        whatToExpect: true,
+        whoShouldAttend: true,
+        vibeSummary: true,
+        crowdPulse: true,
+        isFree: true,
+        ageRestriction: true,
+        specialInstructions: true,
+        category: { select: { id: true, name: true } },
+        hostProfile: {
+          select: {
+            id: true,
+            displayName: true,
+            tagline: true,
+            averageRating: true,
+            totalReviews: true,
+            totalEventsHosted: true,
+          },
+        },
+        tickets: {
+          select: {
+            id: true,
+            name: true,
+            price: true,
+            totalCapacity: true,
+            maxPerPerson: true,
+            description: true,
+            saleStartDate: true,
+            saleEndDate: true,
+          },
+        },
+        refundPolicy: true,
+        media: { orderBy: { order: 'asc' } },
+        communities: {
+          select: {
+            community: {
+              select: {
+                id: true,
+                slug: true,
+                name: true,
+                description: true,
+                type: true,
+                access: true,
+                primaryCity: true,
+                memberCount: true,
+                coverImageKey: true,
+                iconKey: true,
+                events: {
+                  where: {
+                    event: {
+                      eventDate: { gte: new Date() },
+                      status: EventStatus.PUBLISHED,
+                    },
+                  },
+                  select: { id: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!event) throw new NotFoundException('Event not found');
+
+    const [signedMedia, reviewAgg, recentReviews, communities] = await Promise.all([
+      Promise.all(
+        event.media.map(async (m) => ({
+          ...m,
+          url: await this.storageService.getPresignedDownloadUrl(m.url),
+        })),
+      ),
+      this.prisma.eventReview.aggregate({
+        where: { eventId, isVisible: true },
+        _avg: { rating: true },
+        _count: { rating: true },
+      }),
+      this.prisma.eventReview.findMany({
+        where: { eventId, isVisible: true },
+        select: {
+          id: true,
+          rating: true,
+          highlights: true,
+          body: true,
+          createdAt: true,
+          user: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
+          photos: {
+            where: { approvalStatus: 'APPROVED' },
+            select: { id: true, key: true },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 3,
+      }),
+      Promise.all(
+        event.communities.map(async ({ community }) => ({
+          id: community.id,
+          slug: community.slug,
+          name: community.name,
+          description: community.description,
+          type: community.type,
+          access: community.access,
+          city: community.primaryCity,
+          memberCount: community.memberCount,
+          upcomingExperiencesCount: community.events.length,
+          coverImageUrl: community.coverImageKey
+            ? await this.storageService.getPresignedDownloadUrl(community.coverImageKey)
+            : null,
+          iconUrl: community.iconKey
+            ? await this.storageService.getPresignedDownloadUrl(community.iconKey)
+            : null,
+        })),
+      ),
+    ]);
+
+    const signedReviews = await Promise.all(
+      recentReviews.map(async (r) => ({
+        ...r,
+        photos: await Promise.all(
+          r.photos.map(async (p) => ({
+            id: p.id,
+            url: await this.storageService.getPresignedDownloadUrl(p.key),
+          })),
+        ),
+      })),
+    );
+
+    const prices = event.tickets.map((t) => Number(t.price)).filter((p) => p > 0);
+    const startingPrice = prices.length ? Math.min(...prices) : null;
+
+    const reviewSummary = {
+      averageRating: reviewAgg._avg.rating ? Math.round(reviewAgg._avg.rating * 10) / 10 : null,
+      reviewCount: reviewAgg._count.rating,
+      recentReviews: signedReviews,
+    };
+
+    let isSaved = false;
+    if (firebaseUid) {
+      const user = await this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } });
+      if (user) {
+        const saved = await this.prisma.savedEvent.findUnique({
+          where: { userId_eventId: { userId: user.id, eventId } },
+          select: { id: true },
+        });
+        isSaved = !!saved;
+      }
+    }
+
+    return { ...event, media: signedMedia, startingPrice, reviewSummary, isSaved, communities };
+  }
+
+  // ─── Save / unsave ─────────────────────────────────────────────────────────
+
+  async saveEvent(eventId: string, firebaseUid: string) {
+    const [user, event] = await Promise.all([
+      this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } }),
+      this.prisma.event.findUnique({ where: { id: eventId, status: EventStatus.PUBLISHED }, select: { id: true } }),
+    ]);
+    if (!user) throw new NotFoundException('User not found');
+    if (!event) throw new NotFoundException('Event not found');
+
+    await this.prisma.savedEvent.upsert({
+      where: { userId_eventId: { userId: user.id, eventId } },
+      create: { userId: user.id, eventId },
+      update: {},
+    });
+    return { saved: true };
+  }
+
+  async unsaveEvent(eventId: string, firebaseUid: string) {
+    const user = await this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } });
+    if (!user) throw new NotFoundException('User not found');
+
+    await this.prisma.savedEvent.deleteMany({ where: { userId: user.id, eventId } });
+    return { saved: false };
+  }
+
+  async listSavedEvents(firebaseUid: string, query: ListSavedEventsQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const user = await this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const [rows, total] = await Promise.all([
+      this.prisma.savedEvent.findMany({
+        where: { userId: user.id },
+        include: {
+          event: {
+            select: {
+              id: true,
+              title: true,
+              eventType: true,
+              eventDate: true,
+              startTime: true,
+              venueName: true,
+              city: true,
+              isFree: true,
+              tags: true,
+              status: true,
+              category: { select: { id: true, name: true } },
+              media: { where: { type: 'COVER' }, select: { url: true }, take: 1 },
+              tickets: { select: { price: true } },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.savedEvent.count({ where: { userId: user.id } }),
+    ]);
+
+    const data = await Promise.all(
+      rows.map(async ({ event, createdAt }) => {
+        const cover = event.media[0];
+        const prices = event.tickets.map((t) => Number(t.price)).filter((p) => p > 0);
+        const { media: _media, tickets: _tickets, ...rest } = event;
+        return {
+          ...rest,
+          coverImageUrl: cover ? await this.storageService.getPresignedDownloadUrl(cover.url) : null,
+          startingPrice: prices.length ? Math.min(...prices) : null,
+          isSaved: true,
+          savedAt: createdAt,
+        };
+      }),
+    );
+
+    return { data, total, page, limit };
+  }
+
+  async deleteEvent(userId: string, eventId: string): Promise<void> {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: { hostProfile: { select: { userId: true } } },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+    if (event.hostProfile.userId !== userId)
+      throw new ForbiddenException('You do not own this event');
+    if (event.status !== EventStatus.DRAFT)
+      throw new BadRequestException('Only DRAFT events can be deleted');
+
+    await this.prisma.event.delete({ where: { id: eventId } });
+  }
+
+  async getEventPricingConfig(eventId: string) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: {
+        platformFeeWaived: true,
+        hostProfile: {
+          select: {
+            id: true,
+            subscriptions: {
+              where: { status: 'ACTIVE' },
+              select: { lockedFeeRate: true },
+              take: 1,
+            },
+          },
+        },
+      },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+
+    let feeRate = 0;
+    if (!event.platformFeeWaived) {
+      const activeSub = event.hostProfile.subscriptions[0];
+      if (activeSub) {
+        feeRate = activeSub.lockedFeeRate;
+      } else {
+        const plan = await this.prisma.subscriptionPlan.findUnique({
+          where: { plan: 'DISCOVER' },
+          select: { platformFeeRate: true },
+        });
+        feeRate = plan?.platformFeeRate ?? 0;
+      }
+    }
+
+    const promo = event.platformFeeWaived
+      ? null
+      : await this.peekActiveHostFeePromo(event.hostProfile.id, eventId);
+
+    let effectiveFeeRate = feeRate;
+    if (promo) {
+      if (promo.discountType === 'PERCENTAGE') {
+        effectiveFeeRate = Math.round(feeRate * (1 - promo.discountValue / 100) * 10000) / 10000;
+      } else {
+        effectiveFeeRate = Math.round(Math.max(0, feeRate - promo.discountValue / 100) * 10000) / 10000;
+      }
+    }
+
+    const cachedGst = await this.redisService.get<number>('platform_config:gst_rate');
+    let gstRate: number;
+    if (cachedGst !== null) {
+      gstRate = cachedGst;
+    } else {
+      const config = await this.prisma.platformConfig.findUnique({ where: { key: 'gst_rate' } });
+      gstRate = config ? parseFloat(config.value) : 0.18;
+      await this.redisService.set('platform_config:gst_rate', gstRate, 300);
+    }
+
+    return {
+      platformFeeRate: effectiveFeeRate,
+      gstRate,
+      platformFeeWaived: event.platformFeeWaived,
+      hostFeePromoApplied: !!promo,
+    };
+  }
+
+  async getAvailableOffers(eventId: string, userId: string) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId, status: EventStatus.PUBLISHED },
+      select: { id: true },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+
+    const now = new Date();
+    const cacheKey = `event_offers:${eventId}`;
+
+    let candidates = await this.redisService.get<any[]>(cacheKey);
+    if (!candidates) {
+      const rows = await this.prisma.coupon.findMany({
+        where: {
+          eventId,
+          target: 'ATTENDEE',
+          isActive: true,
+          AND: [
+            { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
+            { OR: [{ validUntil: null }, { validUntil: { gte: now } }] },
+          ],
+        },
+        select: {
+          id: true,
+          code: true,
+          description: true,
+          discountType: true,
+          discountValue: true,
+          maxDiscountAmount: true,
+          minOrderValue: true,
+          validUntil: true,
+          maxUsages: true,
+          usageCount: true,
+          maxUsagesPerUser: true,
+        },
+      });
+
+      // Drop globally exhausted codes before caching
+      candidates = rows.filter((c) => c.maxUsages === null || c.usageCount < c.maxUsages);
+      await this.redisService.set(cacheKey, candidates, 60);
+    }
+
+    // Per-user filter: exclude codes this user has personally exhausted
+    const usable = await Promise.all(
+      candidates.map(async (c) => {
+        if (!c.maxUsagesPerUser) return c;
+        const used = await this.prisma.order.count({
+          where: { userId, couponId: c.id, status: { in: ['CONFIRMED', 'PENDING_PAYMENT'] } },
+        });
+        return used < c.maxUsagesPerUser ? c : null;
+      }),
+    );
+
+    // Return only the fields the frontend needs — no internal counters
+    return usable
+      .filter(Boolean)
+      .map(({ id: _id, maxUsages: _mu, usageCount: _uc, maxUsagesPerUser: _mup, ...safe }) => safe);
+  }
+
+  private async peekActiveHostFeePromo(hostProfileId: string, eventId: string) {
+    const now = new Date();
+
+    const existingUsage = await this.prisma.hostFeePromoUsage.findFirst({
+      where: { eventId },
+      select: { promo: { select: { id: true, discountType: true, discountValue: true } } },
+    });
+    if (existingUsage) return existingUsage.promo;
+
+    const promo = await this.prisma.hostFeePromo.findFirst({
+      where: {
+        hostProfileId,
+        isActive: true,
+        AND: [
+          { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
+          { OR: [{ validUntil: null }, { validUntil: { gte: now } }] },
+        ],
+      },
+      select: { id: true, discountType: true, discountValue: true, maxEvents: true, eventsApplied: true },
+    });
+
+    if (!promo) return null;
+    if (promo.maxEvents !== null && promo.eventsApplied >= promo.maxEvents) return null;
+    return promo;
+  }
+
+}
