@@ -6,6 +6,7 @@ import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { getCorsOrigin } from './common/utils/cors-origin.util';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -22,9 +23,9 @@ async function bootstrap() {
   // Security headers — only in production (helmet blocks Swagger UI in dev)
   if (isProduction) app.use(helmet());
 
-  // CORS — locked to known frontend in production, permissive in dev
+  // CORS — locked to known frontends (comma-separated ALLOWED_ORIGINS) in production, permissive in dev
   app.enableCors({
-    origin: isProduction ? process.env.FRONTEND_URL : true,
+    origin: getCorsOrigin(),
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true,
   });

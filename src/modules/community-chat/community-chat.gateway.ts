@@ -13,6 +13,7 @@ import {
 import * as firebaseAdmin from 'firebase-admin';
 import { Namespace, Socket } from 'socket.io';
 import { PrismaService } from '../../prisma/prisma.service';
+import { getCorsOrigin } from '../../common/utils/cors-origin.util';
 import { CommunityChatService } from './community-chat.service';
 import { CommunityDmService } from './community-dm.service';
 import { CommunityPresenceService } from './community-presence.service';
@@ -33,7 +34,7 @@ const TYPING_TIMEOUT_MS = 3000;
 @WebSocketGateway({
   namespace: '/community-chat',
   cors: {
-    origin: process.env.NODE_ENV === 'production' ? process.env.FRONTEND_URL : true,
+    origin: getCorsOrigin(),
     credentials: true,
   },
 })

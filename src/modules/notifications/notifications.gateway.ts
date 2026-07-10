@@ -11,11 +11,12 @@ import * as firebaseAdmin from 'firebase-admin';
 import { Redis } from 'ioredis';
 import { Namespace, Socket } from 'socket.io';
 import { PrismaService } from '../../prisma/prisma.service';
+import { getCorsOrigin } from '../../common/utils/cors-origin.util';
 
 @WebSocketGateway({
   namespace: '/notifications',
   cors: {
-    origin: process.env.NODE_ENV === 'production' ? process.env.FRONTEND_URL : true,
+    origin: getCorsOrigin(),
     credentials: true,
   },
 })
