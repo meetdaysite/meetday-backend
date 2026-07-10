@@ -26,3 +26,24 @@ build-dev:
     - docker image prune -f
   rules:
     - if: $CI_COMMIT_BRANCH == "dev"
+
+build-prod:
+  stage: build
+  image: docker:24
+  services:
+    - docker:24-dind
+  before_script:
+    - docker builder prune -f
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker build
+        -t $IMAGE:latest
+        -t $IMAGE:$CI_COMMIT_SHORT_SHA
+        .
+    - docker push $IMAGE:latest
+    - docker push $IMAGE:$CI_COMMIT_SHORT_SHA
+  after_script:
+    - docker builder prune -f
+    - docker image prune -f
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
