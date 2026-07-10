@@ -45,6 +45,7 @@ export default () => {
       encryptionKey: env.ENCRYPTION_KEY,
     },
     frontendUrl: env.FRONTEND_URL,
+    allowedOrigins: (env.ALLOWED_ORIGINS ?? '').split(',').map((o) => o.trim()).filter(Boolean),
     internalApiKey: env.INTERNAL_API_KEY,
     aiServerUrl: env.AI_SERVER_URL,
     gcs: {
