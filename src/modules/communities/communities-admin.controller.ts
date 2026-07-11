@@ -390,7 +390,7 @@ export class CommunitiesAdminController {
       '- `members.value` = total member count (denormalized); `deltaPct` = % change in new joins vs prior 30d.\n' +
       '- `activeMembers.value` = members with activity (`lastActivityAt`) in the last 30d.\n' +
       '- `experiencesBooked.value` = confirmed orders on community events in the last 30d.\n' +
-      '- `communityRevenue.value` = sum of `totalAmount` on those orders in **paise** (divide by 100 for ₹).\n' +
+      '- `communityRevenue.value` = sum of `totalAmount` on those orders, in **rupees**.\n' +
       '- `retention.value` = `ACTIVE members / all members × 100`; `deltaPct` is always `0` (no historical snapshot).\n\n' +
       '**`growth`** — 30-entry daily series for the member growth chart:\n' +
       '- `joined` / `left` / `netGrowth` per day. Note: `left` uses `updatedAt` as a proxy for `leftAt` ' +
@@ -401,7 +401,7 @@ export class CommunitiesAdminController {
       '`announcementReach` is total members notified (fan-out count), **not** literal opens — ' +
       'no open-tracking exists.\n\n' +
       '**`experiencesImpact`** — Booking totals and a top-5 experience table:\n' +
-      '- `revenue` is in **paise**.\n' +
+      '- `revenue` is in **rupees**.\n' +
       '- `attendancePct` = checked-in attendees ÷ total booked attendees × 100. ' +
       '`null` when no booking attendee records exist yet.\n\n' +
       '**`healthScore`** — A composite 0–100 score with five factors scored 0–20 each:\n' +

@@ -224,7 +224,7 @@ export class PayoutsService {
       narration: `Meetday - ${payout.event?.title ?? 'event'} proceeds`,
     });
 
-    await this.prisma.$transaction([
+    const [updatedPayout] = await this.prisma.$transaction([
       this.prisma.hostPayout.update({
         where: { id: payoutId },
         data: {
@@ -253,7 +253,7 @@ export class PayoutsService {
     });
 
     this.logger.log(`Payout ${payoutId} triggered — Razorpay payout ID: ${razorpayPayout.id}`);
-    return razorpayPayout;
+    return updatedPayout;
   }
 
   // ─── Razorpay payout webhook handler ──────────────────────────────────────
