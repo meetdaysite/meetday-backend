@@ -8,7 +8,7 @@ import { RedisService } from '../../common/redis/redis.service';
 
 function makePrisma() {
   const prisma: any = {
-    hostProfile: { count: jest.fn().mockResolvedValue(0) },
+    hostProfile: { count: jest.fn().mockResolvedValue(0), findUnique: jest.fn() },
     event: { count: jest.fn().mockResolvedValue(0), findMany: jest.fn().mockResolvedValue([]) },
     communityMember: { count: jest.fn().mockResolvedValue(0) },
     communityPostReport: { count: jest.fn().mockResolvedValue(0) },
@@ -18,12 +18,14 @@ function makePrisma() {
       aggregate: jest.fn().mockResolvedValue({ _sum: { totalAmount: null } }),
       count: jest.fn().mockResolvedValue(0),
       findMany: jest.fn().mockResolvedValue([]),
+      findUnique: jest.fn(),
     },
     user: { count: jest.fn().mockResolvedValue(0) },
     hostPayout: {
       aggregate: jest.fn().mockResolvedValue({ _sum: { totalAmount: null, netPayoutAmount: null } }),
       count: jest.fn().mockResolvedValue(0),
     },
+    auditLog: { findMany: jest.fn().mockResolvedValue([]) },
   };
   prisma.$transaction = jest.fn().mockImplementation(async (ops: any[]) => Promise.all(ops));
   prisma.$queryRaw = jest.fn().mockResolvedValue([]);
@@ -89,6 +91,75 @@ describe('AdminDashboardService', () => {
         supportFlags: 0,
         revenueToday: 0,
       });
+    });
+  });
+
+  describe('getRecentActivity', () => {
+    it('falls back to the actor\'s name when the host has not set a displayName yet', async () => {
+      mockRedis.get.mockResolvedValue(null);
+      prisma.auditLog.findMany.mockResolvedValue([
+        {
+          id: 'log-1',
+          action: 'KYC_SUBMITTED',
+          entityType: 'HOST',
+          entityId: 'host-1',
+          actor: { firstName: 'New', lastName: 'Host 3' },
+          createdAt: new Date(),
+        },
+      ]);
+      prisma.hostProfile.findUnique.mockResolvedValue({ displayName: null, operatingCities: ['Kolkata'] });
+
+      const result: any = await service.getRecentActivity();
+
+      expect(result.items[0].label).toBe('New host application by New Host 3');
+      expect(result.items[0].label).not.toContain('null');
+    });
+
+    it('uses the host displayName once it has been set', async () => {
+      mockRedis.get.mockResolvedValue(null);
+      prisma.auditLog.findMany.mockResolvedValue([
+        {
+          id: 'log-2',
+          action: 'KYC_APPROVED',
+          entityType: 'HOST',
+          entityId: 'host-1',
+          actor: { firstName: 'Aishik', lastName: 'Sikdar' },
+          createdAt: new Date(),
+        },
+      ]);
+      prisma.hostProfile.findUnique.mockResolvedValue({ displayName: "Adrita's Experiences", operatingCities: ['Kolkata'] });
+
+      const result: any = await service.getRecentActivity();
+
+      expect(result.items[0].label).toBe("New host application by Adrita's Experiences");
+    });
+
+    it('labels REFUND_COMPLETED distinctly from ORDER_CONFIRMED', async () => {
+      mockRedis.get.mockResolvedValue(null);
+      prisma.auditLog.findMany.mockResolvedValue([
+        {
+          id: 'log-3',
+          action: 'REFUND_COMPLETED',
+          entityType: 'ORDER',
+          entityId: 'order-1',
+          actor: null,
+          createdAt: new Date(),
+        },
+        {
+          id: 'log-4',
+          action: 'ORDER_CONFIRMED',
+          entityType: 'ORDER',
+          entityId: 'order-1',
+          actor: null,
+          createdAt: new Date(),
+        },
+      ]);
+      prisma.order.findUnique.mockResolvedValue({ bookingId: 'MDAY-E641-AE4E' });
+
+      const result: any = await service.getRecentActivity();
+
+      expect(result.items[0].label).toBe('Refund completed for order MDAY-E641-AE4E');
+      expect(result.items[1].label).toBe('Order MDAY-E641-AE4E confirmed');
     });
   });
 
