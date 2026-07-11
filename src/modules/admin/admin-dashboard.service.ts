@@ -309,7 +309,9 @@ export class AdminDashboardService {
               select: { displayName: true, operatingCities: true },
             });
             if (host) {
-              label = `New host application by ${host.displayName}`;
+              // displayName is only set once the host names their business — early in
+              // onboarding (e.g. at KYC_SUBMITTED) it's still null, so fall back to the actor.
+              label = `New host application by ${host.displayName ?? actorName}`;
               subLabel = host.operatingCities?.[0] ?? null;
             }
           } else if (log.entityType === 'EVENT' && log.entityId) {
@@ -339,7 +341,9 @@ export class AdminDashboardService {
               label =
                 log.action === 'REFUND_INITIATED'
                   ? `Refund request for order ${order.bookingId}`
-                  : `Order ${order.bookingId} confirmed`;
+                  : log.action === 'REFUND_COMPLETED'
+                    ? `Refund completed for order ${order.bookingId}`
+                    : `Order ${order.bookingId} confirmed`;
             }
           } else if (log.entityType === 'SUPPORT_TICKET' && log.entityId) {
             const ticket = await this.prisma.supportTicket.findUnique({
