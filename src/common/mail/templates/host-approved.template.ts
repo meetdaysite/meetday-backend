@@ -5,7 +5,6 @@ export function hostApprovedTemplate(hostName: string): string {
       <p>Hi ${hostName},</p>
       <p>Great news! Your host application has been reviewed and approved.</p>
       <p>You are now live on the <strong>Discover</strong> plan and can start hosting events on Meetday.</p>
-      <p>To unlock ticket sales and additional features, you can upgrade to the <strong>Sell</strong> or <strong>Community</strong> plan from your dashboard.</p>
       <br/>
       <p>Welcome to the Meetday host community!</p>
       <p>The Meetday Team</p>
