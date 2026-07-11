@@ -85,10 +85,12 @@ export class CommunityAnnouncementsHostController {
   @ApiOperation({
     summary: 'List own announcements (host)',
     description:
-      'Returns the calling host\'s announcements for this community using **offset pagination**.\n\n' +
+      'Returns the calling host\'s announcements for this community, plus any Meetday **admin**-authored ' +
+      'announcements (so the host has full visibility into what\'s posted to their community), using **offset pagination**.\n\n' +
       'Unlike the member feed, this returns **all statuses** (`PUBLISHED`, `SCHEDULED`, `DRAFT`) ' +
       'so the host can manage drafts and see upcoming scheduled items. Filter by `status` to isolate a view.\n\n' +
-      'Only the calling host\'s own announcements are returned — admin- or other-host-authored announcements are excluded.',
+      'Admin-authored announcements are **read-only** here — `PATCH`, `DELETE`, and pin/unpin all return 403 ' +
+      'unless the calling host is the original author. Other hosts\'/managers\' announcements are excluded.',
   })
   @ApiParam({ name: 'communityId', description: 'UUID of the community.', example: 'c1d2e3f4-a5b6-7890-cdef-012345678901' })
   @ApiOkResponse({
