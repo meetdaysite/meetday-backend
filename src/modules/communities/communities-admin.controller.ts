@@ -64,6 +64,23 @@ const COMMUNITY_EXAMPLE = {
   url: 'meetday.ai/communities/meetday-music-nights',
 };
 
+// Row shape returned by GET / (list) — a lighter projection than COMMUNITY_EXAMPLE,
+// which represents the full detail record returned by GET /:id and friends.
+const COMMUNITY_LIST_ITEM_EXAMPLE = {
+  id: 'c1d2e3f4-a5b6-7890-cdef-012345678901',
+  name: 'Meetday Music Nights',
+  slug: 'meetday-music-nights',
+  type: 'MEETDAY_MANAGED_PUBLIC',
+  status: 'PUBLISHED',
+  primaryCity: 'Kolkata',
+  memberCount: 1248,
+  experienceCount: 12,
+  createdAt: '2024-05-25T00:00:00.000Z',
+  publishedAt: '2024-05-26T00:00:00.000Z',
+  iconUrl: 'https://storage.googleapis.com/meetday-media/communities/icon-c1d2e3f4.jpg?X-Goog-Signature=...',
+  category: { id: 'cat-1', name: 'Music' },
+};
+
 const SPARKLINE_14 = [8, 12, 5, 19, 14, 7, 22, 18, 11, 25, 9, 16, 20, 47];
 
 const OVERVIEW_EXAMPLE = {
@@ -279,14 +296,15 @@ export class CommunitiesAdminController {
       '- `ARCHIVED` — deactivated; no new members can join',
   })
   @ApiOkResponse({
-    description: 'Paginated list of communities.',
+    description:
+      'Paginated list of communities. Each item includes a presigned `iconUrl` (valid ~15 min, `null` if no icon set); ' +
+      'cover image is not included here — fetch `GET :id` for the full detail record.',
     schema: {
       example: wrapData({
-        items: [COMMUNITY_EXAMPLE],
+        data: [COMMUNITY_LIST_ITEM_EXAMPLE],
         total: 42,
         page: 1,
         limit: 20,
-        totalPages: 3,
       }),
     },
   })
