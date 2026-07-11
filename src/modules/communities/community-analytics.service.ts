@@ -316,26 +316,40 @@ export class CommunityAnalyticsService {
           ...communityEventFilter,
         },
       }),
+      // order_totals is pre-aggregated per order before joining down to attendee
+      // granularity — SUM(o."totalAmount") over a join fanned out through order_items/
+      // order_attendees would otherwise double- (or N-)count each order's revenue once
+      // per attendee row.
       this.prisma.$queryRawUnsafe<TopExpRow[]>(
-        `SELECT
-           e.id,
-           e.title,
-           COUNT(DISTINCT o.id)::int                                                     AS bookings,
-           COALESCE(SUM(o."totalAmount")::float8, 0)                                    AS revenue,
-           ROUND(
-             COUNT(oa.id) FILTER (WHERE oa."checkedInAt" IS NOT NULL)::numeric
-             * 100.0 / NULLIF(COUNT(oa.id), 0), 1
-           )::float                                                                      AS "attendancePct"
+        `WITH order_totals AS (
+           SELECT o.id, o."eventId", o."totalAmount"
+           FROM "orders" o
+           WHERE o.status = 'CONFIRMED' AND o."confirmedAt" >= $2
+         ),
+         event_orders AS (
+           SELECT "eventId", COUNT(*)::int AS bookings, SUM("totalAmount")::float8 AS revenue
+           FROM order_totals
+           GROUP BY "eventId"
+         ),
+         event_attendance AS (
+           SELECT t."eventId",
+             ROUND(
+               COUNT(oa.id) FILTER (WHERE oa."checkedInAt" IS NOT NULL)::numeric
+               * 100.0 / NULLIF(COUNT(oa.id), 0), 1
+             )::float AS "attendancePct"
+           FROM order_totals ot
+           JOIN "order_items" oi ON oi."orderId" = ot.id
+           JOIN "order_attendees" oa ON oa."orderItemId" = oi.id
+           JOIN "event_tickets" t ON t.id = oi."ticketId"
+           GROUP BY t."eventId"
+         )
+         SELECT e.id, e.title, eo.bookings, eo.revenue, ea."attendancePct"
          FROM "community_events" ce
-         JOIN "events" e  ON e.id = ce."eventId"
-         JOIN "orders" o  ON o."eventId" = e.id
-                         AND o.status = 'CONFIRMED'
-                         AND o."confirmedAt" >= $2
-         LEFT JOIN "order_items" oi ON oi."orderId" = o.id
-         LEFT JOIN "order_attendees" oa ON oa."orderItemId" = oi.id
+         JOIN "events" e ON e.id = ce."eventId"
+         JOIN event_orders eo ON eo."eventId" = e.id
+         LEFT JOIN event_attendance ea ON ea."eventId" = e.id
          WHERE ce."communityId" = $1
-         GROUP BY e.id, e.title
-         ORDER BY bookings DESC
+         ORDER BY eo.bookings DESC
          LIMIT 5`,
         communityId,
         window30Start,
