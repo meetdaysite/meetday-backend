@@ -1,9 +1,11 @@
 import { Test } from '@nestjs/testing';
+import { createHmac } from 'crypto';
 import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { getQueueToken } from '@nestjs/bull';
 import { BillingCycle, HostPlan } from '@prisma/client';
@@ -19,6 +21,9 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { ConsentService } from '../consent/consent.service';
+
+const TEST_WEBHOOK_SECRET = 'test-webhook-secret';
+const sign = (rawBody: Buffer) => createHmac('sha256', TEST_WEBHOOK_SECRET).update(rawBody).digest('hex');
 
 // ── Mock factories ───────────────────────────────────────────────────────────
 
@@ -101,7 +106,10 @@ describe('HostsService', () => {
         HostsService,
         { provide: PrismaService, useValue: prisma },
         { provide: CryptoService, useValue: mockCrypto },
-        { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue(undefined) } },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn((key: string) => (key === 'razorpay.webhookSecret' ? TEST_WEBHOOK_SECRET : undefined)) },
+        },
         { provide: KYC_PROVIDER, useValue: mockKycProvider },
         { provide: SubscriptionService, useValue: mockSubscriptionService },
         { provide: PennyDropService, useValue: mockPennyDropService },
@@ -386,6 +394,39 @@ describe('HostsService', () => {
       status: 'SUCCESS' as const,
       bankName: 'ICICI Bank',
     };
+    const rawBody = Buffer.from(JSON.stringify(webhookDto));
+    const validSignature = sign(rawBody);
+
+    it('rejects the webhook when no signing secret is configured (fails closed)', async () => {
+      const configService = { get: jest.fn().mockReturnValue(undefined) };
+      const module = await Test.createTestingModule({
+        providers: [
+          HostsService,
+          { provide: PrismaService, useValue: prisma },
+          { provide: CryptoService, useValue: mockCrypto },
+          { provide: ConfigService, useValue: configService },
+          { provide: KYC_PROVIDER, useValue: mockKycProvider },
+          { provide: SubscriptionService, useValue: mockSubscriptionService },
+          { provide: PennyDropService, useValue: mockPennyDropService },
+          { provide: getQueueToken('mail'), useValue: mockMailQueue },
+          { provide: NotificationsService, useValue: { create: jest.fn().mockResolvedValue(undefined) } },
+          { provide: StorageService, useValue: { getPresignedDownloadUrl: jest.fn() } },
+          { provide: AuditLogService, useValue: { log: jest.fn() } },
+          { provide: ConsentService, useValue: { hasActiveConsent: jest.fn(), recordConsent: jest.fn() } },
+        ],
+      }).compile();
+      const svc = module.get(HostsService);
+
+      await expect(svc.handleBankWebhook(webhookDto, rawBody, validSignature)).rejects.toThrow(UnauthorizedException);
+      expect(prisma.hostPayoutAccount.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('rejects the webhook when the signature does not match', async () => {
+      await expect(service.handleBankWebhook(webhookDto, rawBody, 'not-the-real-signature')).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(prisma.hostPayoutAccount.findUnique).not.toHaveBeenCalled();
+    });
 
     it('ignores stale webhooks for deactivated payout accounts', async () => {
       prisma.hostPayoutAccount.findUnique.mockResolvedValue({
@@ -394,7 +435,7 @@ describe('HostsService', () => {
         hostProfile: { ...baseProfile, panVerificationStatus: 'VERIFIED', user: baseProfile.user },
       });
 
-      await service.handleBankWebhook(webhookDto, Buffer.alloc(0), '');
+      await service.handleBankWebhook(webhookDto, rawBody, validSignature);
 
       expect(prisma.hostPayoutAccount.update).not.toHaveBeenCalled();
     });
@@ -409,7 +450,7 @@ describe('HostsService', () => {
       prisma.hostPayoutAccountHistory.create.mockResolvedValue({});
       prisma.hostProfile.update.mockResolvedValue({});
 
-      await service.handleBankWebhook(webhookDto, Buffer.alloc(0), '');
+      await service.handleBankWebhook(webhookDto, rawBody, validSignature);
 
       expect(prisma.hostPayoutAccount.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -428,7 +469,7 @@ describe('HostsService', () => {
       prisma.hostPayoutAccountHistory.create.mockResolvedValue({});
       prisma.hostProfile.update.mockResolvedValue({});
 
-      await service.handleBankWebhook(webhookDto, Buffer.alloc(0), '');
+      await service.handleBankWebhook(webhookDto, rawBody, validSignature);
 
       expect(prisma.hostProfile.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -447,7 +488,9 @@ describe('HostsService', () => {
       prisma.hostPayoutAccountHistory.create.mockResolvedValue({});
       prisma.hostProfile.update.mockResolvedValue({});
 
-      await service.handleBankWebhook({ ...webhookDto, status: 'FAILED' }, Buffer.alloc(0), '');
+      const failedDto = { ...webhookDto, status: 'FAILED' as const };
+      const failedRawBody = Buffer.from(JSON.stringify(failedDto));
+      await service.handleBankWebhook(failedDto, failedRawBody, sign(failedRawBody));
 
       expect(prisma.hostProfile.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ kycStatus: 'FAILED' }) }),
@@ -457,7 +500,7 @@ describe('HostsService', () => {
 
     it('throws NotFoundException when payout account not found', async () => {
       prisma.hostPayoutAccount.findUnique.mockResolvedValue(null);
-      await expect(service.handleBankWebhook(webhookDto, Buffer.alloc(0), '')).rejects.toThrow(NotFoundException);
+      await expect(service.handleBankWebhook(webhookDto, rawBody, validSignature)).rejects.toThrow(NotFoundException);
     });
   });
 

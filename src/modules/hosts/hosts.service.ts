@@ -22,7 +22,6 @@ import { PennyDropService } from './penny-drop.service';
 import { ApplyHostDto } from './dto/apply-host.dto';
 import { UpdateHostProfileDto } from './dto/update-host-profile.dto';
 import { VerifyBankDto } from './dto/submit-kyc.dto';
-import { PanWebhookDto } from './dto/pan-webhook.dto';
 import { BankWebhookDto } from './dto/bank-webhook.dto';
 import { UpgradeSubscriptionDto } from './dto/upgrade-subscription.dto';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -557,18 +556,6 @@ export class HostsService {
         `PAN verification failed.${failureReason ? ` ${failureReason}` : ''}`,
       ).catch((err) => this.logger.error('Failed to create kyc_failed notification', err));
     }
-  }
-
-  async handlePanWebhook(dto: PanWebhookDto) {
-    const profile = await this.prisma.hostProfile.findUnique({
-      where: { id: dto.hostProfileId },
-      include: {
-        user: { select: { email: true, firstName: true } },
-        payoutAccount: true,
-      },
-    });
-    if (!profile) throw new NotFoundException('Host profile not found');
-    await this.applyPanVerificationResult(profile, dto.status, dto.failureReason);
   }
 
   private async applyBankVerificationResult(
@@ -1261,8 +1248,7 @@ export class HostsService {
   private verifyRazorpaySignature(rawBody: Buffer, signature: string): void {
     const secret = this.configService.get<string>('razorpay.webhookSecret');
     if (!secret) {
-      this.logger.warn('RAZORPAY_WEBHOOK_SECRET not set — skipping signature verification (dev mode)');
-      return;
+      throw new UnauthorizedException('Webhook signature verification is not configured');
     }
     const expected = createHmac('sha256', secret).update(rawBody).digest('hex');
     if (expected !== signature) {
