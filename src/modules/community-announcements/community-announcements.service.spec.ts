@@ -143,6 +143,35 @@ describe('CommunityAnnouncementsService', () => {
     });
   });
 
+  describe('listForHost', () => {
+    it('queries for the host\'s own announcements plus admin-authored ones, not other hosts\'', async () => {
+      prisma.communityAnnouncement.findMany.mockResolvedValue([]);
+      prisma.communityAnnouncement.count.mockResolvedValue(0);
+
+      await service.listForHost(communityId, hostId, {} as any);
+
+      const where = prisma.communityAnnouncement.findMany.mock.calls[0][0].where;
+      expect(where).toMatchObject({
+        communityId,
+        deletedAt: null,
+        OR: [{ authorId: hostId }, { authorRole: 'ADMIN' }],
+      });
+      expect(where.authorId).toBeUndefined(); // not a hard filter — must go through OR
+    });
+
+    it('includes both the host\'s own and admin-authored announcements in the result', async () => {
+      const own = makeAnnouncement({ id: 'a1', authorId: hostId, authorRole: 'HOST' });
+      const admin = makeAnnouncement({ id: 'a2', authorId: 'admin-uuid', authorRole: 'ADMIN' });
+      prisma.communityAnnouncement.findMany.mockResolvedValue([own, admin]);
+      prisma.communityAnnouncement.count.mockResolvedValue(2);
+
+      const result = await service.listForHost(communityId, hostId, {} as any);
+
+      expect(result.items.map((i: any) => i.id)).toEqual(['a1', 'a2']);
+      expect(result.total).toBe(2);
+    });
+  });
+
   describe('updateAsHost', () => {
     it('throws NotFoundException when announcement does not belong to host', async () => {
       prisma.communityAnnouncement.findFirst.mockResolvedValue(null);

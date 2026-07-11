@@ -587,7 +587,7 @@ export class CommunitiesService {
     }
     if (query.search) where.name = { contains: query.search, mode: 'insensitive' };
 
-    const [data, total] = await Promise.all([
+    const [rows, total] = await Promise.all([
       this.prisma.community.findMany({
         where,
         select: {
@@ -601,6 +601,7 @@ export class CommunitiesService {
           experienceCount: true,
           createdAt: true,
           publishedAt: true,
+          iconKey: true,
           category: { select: { id: true, name: true } },
         },
         orderBy: { createdAt: 'desc' },
@@ -610,6 +611,12 @@ export class CommunitiesService {
       this.prisma.community.count({ where }),
     ]);
 
+    const data = await Promise.all(
+      rows.map(async ({ iconKey, ...r }) => ({
+        ...r,
+        iconUrl: iconKey ? await this.storageService.getPresignedDownloadUrl(iconKey) : null,
+      })),
+    );
     return { data, total, page, limit };
   }
 

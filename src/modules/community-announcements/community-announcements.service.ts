@@ -184,8 +184,11 @@ export class CommunityAnnouncementsService {
 
     const where: Prisma.CommunityAnnouncementWhereInput = {
       communityId,
-      authorId: hostId,
       deletedAt: null,
+      // The host sees their own announcements plus Meetday-wide admin announcements
+      // (read-only here — findOrThrowOwned still blocks editing/deleting/pinning
+      // anything not authored by this host). Other hosts'/managers' posts stay excluded.
+      OR: [{ authorId: hostId }, { authorRole: 'ADMIN' }],
       ...(status ? { status } : {}),
     };
 
