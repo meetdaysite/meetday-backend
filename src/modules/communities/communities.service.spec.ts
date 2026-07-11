@@ -210,6 +210,28 @@ describe('CommunitiesService', () => {
     });
   });
 
+  describe('listForAdmin', () => {
+    it('signs each row iconKey into a presigned iconUrl', async () => {
+      prisma.community.findMany.mockResolvedValue([
+        { id: 'c1', name: 'Community One', iconKey: 'communities/icon-c1.jpg' },
+        { id: 'c2', name: 'Community Two', iconKey: null },
+      ]);
+      prisma.community.count.mockResolvedValue(2);
+
+      const result = await service.listForAdmin({} as any);
+
+      expect(prisma.community.findMany.mock.calls[0][0].select.iconKey).toBe(true);
+      expect(mockStorage.getPresignedDownloadUrl).toHaveBeenCalledWith('communities/icon-c1.jpg');
+      expect(result.data).toEqual([
+        { id: 'c1', name: 'Community One', iconUrl: 'https://cdn.example.com/img' },
+        { id: 'c2', name: 'Community Two', iconUrl: null },
+      ]);
+      // no raw storage key or unrelated cover field should leak into the response
+      expect(result.data[0]).not.toHaveProperty('iconKey');
+      expect(result.data[0]).not.toHaveProperty('coverImageUrl');
+    });
+  });
+
   describe('join', () => {
     const communityDetail = { id: 'c1', name: 'Test Community', slug: 'test-community', memberCount: 1, experienceCount: 0, primaryCity: 'Mumbai', iconKey: null };
 

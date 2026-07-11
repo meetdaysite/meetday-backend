@@ -241,11 +241,18 @@ describe('PayoutsService', () => {
     it('creates Razorpay payout and updates status to PROCESSING', async () => {
       prisma.hostPayout.findUnique.mockResolvedValue({ ...makePayout(), event: { title: 'Test Concert' } });
       mockRzpPayoutsCreate.mockResolvedValue({ id: 'rzp_payout_123' });
+      prisma.hostPayout.update.mockResolvedValue({
+        ...makePayout(),
+        status: 'PROCESSING',
+        razorpayPayoutId: 'rzp_payout_123',
+      });
 
-      await service.triggerPayout(payoutId);
+      const result = await service.triggerPayout(payoutId);
 
       expect(mockRzpPayoutsCreate).toHaveBeenCalledWith(expect.objectContaining({ reference_id: payoutId }));
       expect(prisma.$transaction).toHaveBeenCalled();
+      // Returns the rupee-denominated HostPayout record, not the raw paise-denominated Razorpay payout object
+      expect(result).toMatchObject({ id: payoutId, status: 'PROCESSING', razorpayPayoutId: 'rzp_payout_123' });
     });
   });
 
