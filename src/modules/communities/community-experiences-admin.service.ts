@@ -287,25 +287,45 @@ export class CommunityExperiencesAdminService {
 
   private async getSidebar(communityId: string, window30Start: Date, window60Start: Date) {
     const [totalsRows, topExpRows] = await Promise.all([
+      // order_window is joined down to attendee granularity only inside attendee_window,
+      // and bookings/revenue are aggregated from order_window directly (one row per
+      // order) — otherwise COUNT(o.id)/SUM(o."totalAmount") over the old orders→
+      // order_items→order_attendees join would multiply each order's count/amount by
+      // its attendee count.
       this.prisma.$queryRawUnsafe<SidebarTotalsRow[]>(
-        `SELECT
-           COUNT(o.id) FILTER (WHERE o."confirmedAt" >= $2)::int                    AS bookings_current,
-           COUNT(o.id) FILTER (WHERE o."confirmedAt" >= $3 AND o."confirmedAt" < $2)::int AS bookings_prior,
-           COALESCE(SUM(o."totalAmount") FILTER (WHERE o."confirmedAt" >= $2), 0)::float8   AS revenue_current,
-           COALESCE(SUM(o."totalAmount") FILTER (WHERE o."confirmedAt" >= $3 AND o."confirmedAt" < $2), 0)::float8 AS revenue_prior,
-           ROUND(
-             COUNT(oa.id) FILTER (WHERE oa."checkedInAt" IS NOT NULL AND o."confirmedAt" >= $2)::numeric
-             * 100.0 / NULLIF(COUNT(oa.id) FILTER (WHERE o."confirmedAt" >= $2), 0), 1
-           )::float8  AS attendance_current,
-           ROUND(
-             COUNT(oa.id) FILTER (WHERE oa."checkedInAt" IS NOT NULL AND o."confirmedAt" >= $3 AND o."confirmedAt" < $2)::numeric
-             * 100.0 / NULLIF(COUNT(oa.id) FILTER (WHERE o."confirmedAt" >= $3 AND o."confirmedAt" < $2), 0), 1
-           )::float8  AS attendance_prior
-         FROM "community_events" ce
-         JOIN "orders" o ON o."eventId" = ce."eventId" AND o.status = 'CONFIRMED'
-         LEFT JOIN "order_items" oi ON oi."orderId" = o.id
-         LEFT JOIN "order_attendees" oa ON oa."orderItemId" = oi.id
-         WHERE ce."communityId" = $1`,
+        `WITH order_window AS (
+           SELECT o.id, o."totalAmount", o."confirmedAt"
+           FROM "community_events" ce
+           JOIN "orders" o ON o."eventId" = ce."eventId" AND o.status = 'CONFIRMED'
+           WHERE ce."communityId" = $1
+         ),
+         attendee_window AS (
+           SELECT oa."checkedInAt", ow."confirmedAt"
+           FROM order_window ow
+           JOIN "order_items" oi ON oi."orderId" = ow.id
+           JOIN "order_attendees" oa ON oa."orderItemId" = oi.id
+         ),
+         totals AS (
+           SELECT
+             COUNT(*) FILTER (WHERE "confirmedAt" >= $2)::int AS bookings_current,
+             COUNT(*) FILTER (WHERE "confirmedAt" >= $3 AND "confirmedAt" < $2)::int AS bookings_prior,
+             COALESCE(SUM("totalAmount") FILTER (WHERE "confirmedAt" >= $2), 0)::float8 AS revenue_current,
+             COALESCE(SUM("totalAmount") FILTER (WHERE "confirmedAt" >= $3 AND "confirmedAt" < $2), 0)::float8 AS revenue_prior
+           FROM order_window
+         ),
+         attendance AS (
+           SELECT
+             ROUND(
+               COUNT(*) FILTER (WHERE "checkedInAt" IS NOT NULL AND "confirmedAt" >= $2)::numeric
+               * 100.0 / NULLIF(COUNT(*) FILTER (WHERE "confirmedAt" >= $2), 0), 1
+             )::float8 AS attendance_current,
+             ROUND(
+               COUNT(*) FILTER (WHERE "checkedInAt" IS NOT NULL AND "confirmedAt" >= $3 AND "confirmedAt" < $2)::numeric
+               * 100.0 / NULLIF(COUNT(*) FILTER (WHERE "confirmedAt" >= $3 AND "confirmedAt" < $2), 0), 1
+             )::float8 AS attendance_prior
+           FROM attendee_window
+         )
+         SELECT * FROM totals, attendance`,
         communityId,
         window30Start,
         window60Start,
