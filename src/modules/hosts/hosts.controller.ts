@@ -33,7 +33,6 @@ import { Public } from '../../common/decorators/public.decorator';
 import { ApplyHostDto } from './dto/apply-host.dto';
 import { UpdateHostProfileDto } from './dto/update-host-profile.dto';
 import { VerifyBankDto } from './dto/submit-kyc.dto';
-import { PanWebhookDto } from './dto/pan-webhook.dto';
 import { BankWebhookDto } from './dto/bank-webhook.dto';
 import { UpgradeSubscriptionDto } from './dto/upgrade-subscription.dto';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
@@ -426,47 +425,6 @@ export class HostsController {
   @ApiConflictResponse({ description: 'KYC is already verified.' })
   verifyBank(@GetUser('id') userId: string, @Body() dto: VerifyBankDto) {
     return this.hostsService.verifyBank(userId, dto);
-  }
-
-  @Post('kyc/pan-webhook')
-  @SkipThrottle()
-  @Public()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'PAN KYC provider async webhook',
-    description:
-      'Not invoked by the current Sandbox integration (synchronous — result processed inline). ' +
-      'Retained for async provider compatibility. ' +
-      'On VERIFIED: panVerificationStatus is set to VERIFIED. If penny drop has also succeeded, kycStatus becomes VERIFIED. ' +
-      'On FAILED: kycStatus is set to FAILED and a failure email is sent to the host.',
-    deprecated: true,
-  })
-  @ApiBody({
-    type: PanWebhookDto,
-    examples: {
-      verified: {
-        summary: 'PAN verification passed',
-        value: {
-          referenceId: 'KYC-PAN-STUB-a1b2c3d4',
-          hostProfileId: 'hp-uuid',
-          status: 'VERIFIED',
-        },
-      },
-      failed: {
-        summary: 'PAN verification failed',
-        value: {
-          referenceId: 'KYC-PAN-STUB-a1b2c3d4',
-          hostProfileId: 'hp-uuid',
-          status: 'FAILED',
-          failureReason: 'PAN not found in ITD database',
-        },
-      },
-    },
-  })
-  @ApiOkResponse({ description: 'Webhook processed.' })
-  @ApiNotFoundResponse({ description: 'hostProfileId does not match any host profile.' })
-  handlePanWebhook(@Body() dto: PanWebhookDto) {
-    return this.hostsService.handlePanWebhook(dto);
   }
 
   @Post('kyc/bank-webhook')
