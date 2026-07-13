@@ -5,7 +5,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { ConsentType } from '@prisma/client';
+import { ConsentType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
@@ -48,55 +48,59 @@ export class AuthService {
     const resolved = this.resolveIdentity(tokenUser, dto);
 
     let result: { id: string };
-    if (dto.accountType === 'HOST') {
-      result = await this.registerHost(tokenUser.uid, resolved, dto);
-    } else {
-      const userRole = await this.prisma.role.findUniqueOrThrow({ where: { name: 'USER' } });
+    try {
+      if (dto.accountType === 'HOST') {
+        result = await this.registerHost(tokenUser.uid, resolved, dto);
+      } else {
+        const userRole = await this.prisma.role.findUniqueOrThrow({ where: { name: 'USER' } });
 
-      result = await this.prisma.user.create({
-        data: {
-          firebaseUid: tokenUser.uid,
-          email: resolved.email,
-          phone: resolved.phone,
-          firstName: resolved.firstName,
-          lastName: resolved.lastName,
-          avatarUrl: resolved.avatarUrl,
-          roleId: userRole.id,
-          ...(dto.vibeType || dto.socialStyle
-            ? {
-                attendeeProfile: {
-                  create: {
-                    vibeType: dto.vibeType,
-                    socialStyle: dto.socialStyle,
+        result = await this.prisma.user.create({
+          data: {
+            firebaseUid: tokenUser.uid,
+            email: resolved.email,
+            phone: resolved.phone,
+            firstName: resolved.firstName,
+            lastName: resolved.lastName,
+            avatarUrl: resolved.avatarUrl,
+            roleId: userRole.id,
+            ...(dto.vibeType || dto.socialStyle
+              ? {
+                  attendeeProfile: {
+                    create: {
+                      vibeType: dto.vibeType,
+                      socialStyle: dto.socialStyle,
+                    },
                   },
-                },
-              }
-            : {}),
-          ...(dto.interests?.length
-            ? {
-                interestAffinities: {
-                  createMany: {
-                    data: dto.interests.map(({ interestId, affinity }) => ({
-                      interestId,
-                      affinity,
-                    })),
+                }
+              : {}),
+            ...(dto.interests?.length
+              ? {
+                  interestAffinities: {
+                    createMany: {
+                      data: dto.interests.map(({ interestId, affinity }) => ({
+                        interestId,
+                        affinity,
+                      })),
+                    },
                   },
-                },
-              }
-            : {}),
-        },
-        select: {
-          id: true,
-          email: true,
-          phone: true,
-          firstName: true,
-          lastName: true,
-          avatarUrl: true,
-          isActive: true,
-          role: { select: { name: true } },
-          createdAt: true,
-        },
-      });
+                }
+              : {}),
+          },
+          select: {
+            id: true,
+            email: true,
+            phone: true,
+            firstName: true,
+            lastName: true,
+            avatarUrl: true,
+            isActive: true,
+            role: { select: { name: true } },
+            createdAt: true,
+          },
+        });
+      }
+    } catch (err) {
+      this.handleUserCreateConflict(err);
     }
 
     void Promise.all([
@@ -116,6 +120,20 @@ export class AuthService {
     }
 
     return result;
+  }
+
+  private handleUserCreateConflict(err: unknown): never {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      const target = (err.meta?.target as string[] | undefined) ?? [];
+      if (target.includes('email')) {
+        throw new ConflictException('An account with this email already exists');
+      }
+      if (target.includes('phone')) {
+        throw new ConflictException('An account with this phone number already exists');
+      }
+      throw new ConflictException('User already registered');
+    }
+    throw err;
   }
 
   private async registerHost(
