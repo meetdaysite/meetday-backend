@@ -55,6 +55,11 @@ export const envSchema = z.object({
   COMPANY_GSTIN: z.string().default(''),
   COMPANY_ADDRESS: z.string().default(''),
   COMPANY_SUPPORT_EMAIL: z.string().default(''),
+
+  // HostProfile.id of Meetday's own house account (see prisma/scripts/seed-meetday-host.ts).
+  // Excluded from the payout cron — its ticket revenue never leaves the platform, so there's
+  // nothing to pay out. Omit in environments where the house account hasn't been provisioned.
+  MEETDAY_HOST_PROFILE_ID: z.string().uuid().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

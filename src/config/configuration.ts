@@ -61,5 +61,8 @@ export default () => {
       address: env.COMPANY_ADDRESS,
       supportEmail: env.COMPANY_SUPPORT_EMAIL,
     },
+    houseAccount: {
+      meetdayHostProfileId: env.MEETDAY_HOST_PROFILE_ID,
+    },
   };
 };
