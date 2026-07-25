@@ -36,6 +36,9 @@ function makePrisma() {
   };
   prisma.$transaction = jest.fn().mockImplementation(async (fn: any) => fn(prisma));
   prisma.$executeRaw = jest.fn().mockResolvedValue(1);
+  // updateEvent's in-transaction `SELECT ... FOR UPDATE` status re-check. Default to DRAFT;
+  // tests exercising the under-review recall override this per-call.
+  prisma.$queryRaw = jest.fn().mockResolvedValue([{ status: 'DRAFT' }]);
   return prisma;
 }
 
@@ -384,6 +387,29 @@ describe('EventsService', () => {
       await expect(
         service.updateEvent(userId, eventId, { categoryId: 'bad-cat' } as any),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('recalls an under-review event to DRAFT (clearing submittedAt) when edited', async () => {
+      prisma.event.findUnique.mockResolvedValue({ ...draftEvent, status: 'UNDER_REVIEW' });
+      prisma.$queryRaw.mockResolvedValueOnce([{ status: 'UNDER_REVIEW' }]);
+
+      await service.updateEvent(userId, eventId, { title: 'Updated title' } as any);
+
+      expect(prisma.event.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: 'DRAFT', submittedAt: null }),
+        }),
+      );
+    });
+
+    it('does not change status when editing a draft event', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([{ status: 'DRAFT' }]);
+
+      await service.updateEvent(userId, eventId, { title: 'Updated title' } as any);
+
+      expect(prisma.event.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'DRAFT', submittedAt: null }) }),
+      );
     });
   });
 

@@ -30,6 +30,7 @@ import { GraphModule } from './modules/graph/graph.module';
 import { SupportTicketModule } from './modules/support-ticket/support-ticket.module';
 import { PayoutsModule } from './modules/payouts/payouts.module';
 import { RefundsModule } from './modules/refunds/refunds.module';
+import { MaintenanceModule } from './modules/maintenance/maintenance.module';
 import { FirebaseAuthGuard } from './common/guards/firebase-auth.guard';
 import { IpRateLimitMiddleware } from './common/middleware/ip-rate-limit.middleware';
 import { RegistrationVelocityMiddleware } from './common/middleware/registration-velocity.middleware';
@@ -88,6 +89,7 @@ import { StorageModule } from './common/storage/storage.module';
     SupportTicketModule,
     PayoutsModule,
     RefundsModule,
+    MaintenanceModule,
   ],
   providers: [
     Logger,

@@ -5,12 +5,13 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { randomUUID } from 'crypto';
 import { EventStatus, Prisma, Visibility } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreateEventDto } from './dto/create-event.dto';
+import { UpdatePublishedEventDto } from './dto/update-published-event.dto';
+import { applyEventChanges, EventChanges } from './event-changes.util';
 import { ListMyEventsQueryDto } from './dto/list-my-events-query.dto';
 import { BrowseEventsQueryDto } from './dto/browse-events-query.dto';
 import { CancelEventDto } from './dto/cancel-event.dto';
@@ -146,8 +147,14 @@ export class EventsService {
     if (!event) throw new NotFoundException('Event not found');
     if (event.hostProfile.userId !== userId)
       throw new ForbiddenException('You do not own this event');
-    if (event.status !== EventStatus.DRAFT)
-      throw new ForbiddenException('Only DRAFT events can be edited');
+    // DRAFT and UNDER_REVIEW are freely editable (no orders can exist until PUBLISHED). Published
+    // events go through the admin-reviewed revision flow instead.
+    if (event.status !== EventStatus.DRAFT && event.status !== EventStatus.UNDER_REVIEW)
+      throw new ForbiddenException(
+        event.status === EventStatus.PUBLISHED
+          ? 'Published events are edited via PATCH /events/:id/revision'
+          : 'Only draft or under-review events can be edited',
+      );
 
     if (dto.categoryId) {
       const category = await this.prisma.category.findFirst({
@@ -162,82 +169,26 @@ export class EventsService {
       throw new BadRequestException('All ticket prices must be 0 for a free event');
 
     return this.prisma.$transaction(async (tx) => {
-      await tx.event.update({
-        where: { id: eventId },
-        data: {
-          ...(dto.categoryId !== undefined && { categoryId: dto.categoryId }),
-          ...(dto.title !== undefined && { title: dto.title }),
-          ...(dto.description !== undefined && { description: dto.description }),
-          ...(dto.eventType !== undefined && { eventType: dto.eventType }),
-          ...(dto.languages !== undefined && { languages: dto.languages }),
-          ...(dto.tags !== undefined && { tags: dto.tags }),
-          ...(dto.eventDate !== undefined && { eventDate: new Date(dto.eventDate) }),
-          ...(dto.startTime !== undefined && { startTime: dto.startTime }),
-          ...(dto.endTime !== undefined && { endTime: dto.endTime }),
-          ...(dto.venueName !== undefined && { venueName: dto.venueName }),
-          ...(dto.fullAddress !== undefined && { fullAddress: dto.fullAddress }),
-          ...(dto.city !== undefined && { city: dto.city }),
-          ...(dto.latitude !== undefined && { latitude: dto.latitude }),
-          ...(dto.longitude !== undefined && { longitude: dto.longitude }),
-          ...(dto.whatToExpect !== undefined && { whatToExpect: dto.whatToExpect }),
-          ...(dto.whoShouldAttend !== undefined && { whoShouldAttend: dto.whoShouldAttend }),
-          ...(dto.visibility !== undefined && { visibility: dto.visibility }),
-          ...(dto.ageRestriction !== undefined && { ageRestriction: dto.ageRestriction }),
-          ...(dto.specialInstructions !== undefined && { specialInstructions: dto.specialInstructions }),
-          ...(dto.isFree !== undefined && { isFree: dto.isFree }),
-        },
-      });
+      // Lock the row and re-check status inside the transaction. This serialises against a
+      // concurrent admin approve/reject (both compare-and-set on status), so an edit can never
+      // land on an event that just became PUBLISHED, and no update is lost.
+      const locked = await tx.$queryRaw<Array<{ status: EventStatus }>>`
+        SELECT status FROM events WHERE id = ${eventId} FOR UPDATE
+      `;
+      const currentStatus = locked[0]?.status;
+      if (!currentStatus) throw new NotFoundException('Event not found');
+      if (currentStatus !== EventStatus.DRAFT && currentStatus !== EventStatus.UNDER_REVIEW)
+        throw new ForbiddenException('Event can no longer be edited (it may have just been approved)');
 
-      if (dto.tickets !== undefined) {
-        await tx.eventTicket.deleteMany({ where: { eventId } });
-        if (dto.tickets.length > 0) {
-          await tx.eventTicket.createMany({
-            data: dto.tickets.map((t) => ({
-              eventId,
-              name: t.name as string,
-              price: t.price ?? 0,
-              isFree: t.isFree ?? false,
-              totalCapacity: t.totalCapacity ?? 0,
-              maxPerPerson: t.maxPerPerson,
-              description: t.description,
-              saleStartDate: t.saleStartDate ? new Date(t.saleStartDate) : null,
-              saleEndDate: t.saleEndDate ? new Date(t.saleEndDate) : null,
-            })),
-          });
-        }
-      }
+      await applyEventChanges(tx, eventId, dto as EventChanges);
 
-      if (dto.refundPolicy !== undefined) {
-        await tx.eventRefundPolicy.upsert({
-          where: { eventId },
-          create: {
-            eventId,
-            type: dto.refundPolicy.type!,
-            cutoffHours: dto.refundPolicy.cutoffHours,
-            refundPercent: dto.refundPolicy.refundPercent,
-            refundTo: dto.refundPolicy.refundTo!,
-          },
-          update: {
-            ...(dto.refundPolicy.type !== undefined && { type: dto.refundPolicy.type }),
-            ...(dto.refundPolicy.cutoffHours !== undefined && { cutoffHours: dto.refundPolicy.cutoffHours }),
-            ...(dto.refundPolicy.refundPercent !== undefined && { refundPercent: dto.refundPolicy.refundPercent }),
-            ...(dto.refundPolicy.refundTo !== undefined && { refundTo: dto.refundPolicy.refundTo }),
-          },
+      // Editing an event that was under review recalls it to DRAFT and clears its submission — the
+      // host must re-submit, so admins only ever review the exact version that was last submitted.
+      if (currentStatus === EventStatus.UNDER_REVIEW) {
+        await tx.event.update({
+          where: { id: eventId },
+          data: { status: EventStatus.DRAFT, submittedAt: null },
         });
-      }
-
-      if (dto.media !== undefined) {
-        await tx.eventMedia.deleteMany({ where: { eventId } });
-        if (dto.media.length > 0) {
-          await tx.eventMedia.createMany({
-            data: dto.media.map((m) => ({
-              eventId,
-              url: m.key,
-              type: m.type,
-              order: m.order ?? 0,
-            })),
-          });
-        }
       }
 
       return tx.event.findUnique({
@@ -245,6 +196,103 @@ export class EventsService {
         include: EVENT_DETAIL_INCLUDE,
       });
     });
+  }
+
+  /**
+   * Records or updates a host's proposed edits to an already-PUBLISHED event. The live event stays
+   * untouched and publicly visible; the changes wait in a single PENDING {@link EventChanges}
+   * revision until an admin approves or rejects them. Re-submitting replaces the pending revision
+   * (at most one per event). Only the whitelisted content + venue fields can appear here — the DTO
+   * plus the global `forbidNonWhitelisted` pipe reject any locked field before this runs.
+   */
+  async upsertRevision(userId: string, eventId: string, dto: UpdatePublishedEventDto) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: { hostProfile: { select: { userId: true } } },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+    if (event.hostProfile.userId !== userId)
+      throw new ForbiddenException('You do not own this event');
+    if (event.status !== EventStatus.PUBLISHED)
+      throw new ForbiddenException(
+        'Only published events accept revisions. Drafts are edited directly via PATCH /events/:id.',
+      );
+
+    if (dto.categoryId) {
+      const category = await this.prisma.category.findFirst({
+        where: { id: dto.categoryId, isActive: true },
+        select: { id: true },
+      });
+      if (!category) throw new NotFoundException('Category not found or inactive');
+    }
+
+    // Drop undefined keys so the stored snapshot is a clean diff of only what the host changed.
+    const changes = JSON.parse(JSON.stringify(dto)) as EventChanges;
+    if (Object.keys(changes).length === 0)
+      throw new BadRequestException('No changes provided');
+    const changesJson = changes as unknown as Prisma.InputJsonValue;
+
+    const touchesVenue =
+      dto.venueName !== undefined ||
+      dto.fullAddress !== undefined ||
+      dto.city !== undefined ||
+      dto.latitude !== undefined ||
+      dto.longitude !== undefined;
+
+    const existing = await this.prisma.eventRevision.findFirst({
+      where: { eventId, status: 'PENDING' },
+      select: { id: true },
+    });
+
+    const revision = existing
+      ? await this.prisma.eventRevision.update({
+          where: { id: existing.id },
+          data: { changes: changesJson, touchesVenue, submittedBy: userId },
+        })
+      : await this.prisma.eventRevision.create({
+          data: {
+            eventId,
+            changes: changesJson,
+            touchesVenue,
+            submittedBy: userId,
+            status: 'PENDING',
+          },
+        });
+
+    this.auditLogService.log({
+      actorId: userId,
+      actorRole: 'HOST',
+      action: 'EVENT_REVISION_SUBMITTED',
+      entityType: 'EVENT',
+      entityId: eventId,
+      metadata: { revisionId: revision.id, touchesVenue },
+    });
+
+    // Notify admins there is a revision to review. Venue-touching edits are flagged so the queue
+    // (and the alert) can be prioritised — a last-minute venue change should be picked up fast.
+    const adminRoles = ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'];
+    const admins = await this.prisma.user.findMany({
+      where: { isActive: true, role: { name: { in: adminRoles } } },
+      select: { id: true },
+    });
+    const title = event.title ?? 'Untitled';
+    const notifyResults = await Promise.allSettled(
+      admins.map((admin) =>
+        this.notificationsService.create(
+          admin.id,
+          touchesVenue ? 'event_revision_pending_venue' : 'event_revision_pending',
+          touchesVenue ? 'Venue change pending review' : 'Event edit pending review',
+          `Host edits to "${title}" are awaiting review${touchesVenue ? ' (venue change — please prioritise)' : ''}.`,
+          { eventId, revisionId: revision.id, touchesVenue },
+        ),
+      ),
+    );
+    notifyResults.forEach((r, i) => {
+      if (r.status === 'rejected')
+        this.logger.error(`Failed to notify admin ${admins[i].id} of pending revision`, r.reason);
+    });
+
+    return revision;
   }
 
   async submitEvent(userId: string, eventId: string) {
@@ -396,6 +444,7 @@ export class EventsService {
         ...EVENT_DETAIL_INCLUDE,
         hostProfile: { select: { id: true, displayName: true, userId: true } },
         media: { orderBy: { order: 'asc' } },
+        revisions: { where: { status: 'PENDING' }, orderBy: { createdAt: 'desc' }, take: 1 },
         communities: {
           select: {
             source: true,
@@ -429,7 +478,8 @@ export class EventsService {
     if (!event) throw new NotFoundException('Event not found');
     if (event.hostProfile.userId !== userId)
       throw new ForbiddenException('You do not own this event');
-    const withMedia = await this.withSignedMedia(event);
+    const { revisions = [], ...eventRest } = event;
+    const withMedia = await this.withSignedMedia(eventRest);
     const communities = await Promise.all(
       event.communities.map(async ({ source, community }) => ({
         id: community.id,
@@ -450,7 +500,28 @@ export class EventsService {
           : null,
       })),
     );
-    return { ...withMedia, communities };
+
+    // Surface the host's own pending edits (with signed media previews) so the app can render a
+    // "changes under review" banner alongside the still-live event.
+    const pending = revisions[0] ?? null;
+    let pendingRevision: Record<string, unknown> | null = null;
+    if (pending) {
+      const changes = pending.changes as unknown as EventChanges;
+      const mediaPreview = changes.media
+        ? await Promise.all(
+            changes.media.map(async (m) => ({
+              ...m,
+              url: await this.storageService.getPresignedDownloadUrl(m.key),
+            })),
+          )
+        : undefined;
+      pendingRevision = {
+        ...pending,
+        changes: mediaPreview ? { ...changes, media: mediaPreview } : changes,
+      };
+    }
+
+    return { ...withMedia, communities, pendingRevision };
   }
 
   async getEventAttendees(hostUserId: string, eventId: string, page = 1, limit = 50) {

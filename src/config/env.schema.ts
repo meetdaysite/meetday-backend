@@ -60,6 +60,12 @@ export const envSchema = z.object({
   // Excluded from the payout cron — its ticket revenue never leaves the platform, so there's
   // nothing to pay out. Omit in environments where the house account hasn't been provisioned.
   MEETDAY_HOST_PROFILE_ID: z.string().uuid().optional(),
+
+  // Orphaned event-media garbage collector (daily cron). See MediaGcService.
+  MEDIA_GC_ENABLED: z.string().default('true').transform((v) => v !== 'false'), // master on/off switch for the cron
+  MEDIA_GC_DRY_RUN: z.string().default('true').transform((v) => v !== 'false'), // when true, log what would be deleted but delete nothing
+  MEDIA_GC_GRACE_DAYS: z.coerce.number().int().nonnegative().default(7), // only delete objects older than this (guards freshly-uploaded-not-yet-saved)
+  MEDIA_GC_MAX_DELETES_PER_RUN: z.coerce.number().int().positive().default(1000), // safety cap: abort if a run would delete more than this
 });
 
 export type Env = z.infer<typeof envSchema>;
