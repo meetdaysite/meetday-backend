@@ -53,7 +53,8 @@ model User {
   createdCoupons    Coupon[]           @relation("CouponCreatedBy")
   couponRedemptions CouponRedemption[] @relation("CouponRedemptions")
 
-  reviewedEvents Event[] @relation("EventReviewedBy")
+  reviewedEvents    Event[]         @relation("EventReviewedBy")
+  reviewedRevisions EventRevision[] @relation("EventRevisionReviewedBy")
 
   notifications Notification[]
 
@@ -739,6 +740,7 @@ model Event {
   savedBy         SavedEvent[]
   payouts         HostPayout[]
   feePromoUsages  HostFeePromoUsage[]
+  revisions       EventRevision[]
 
   @@index([hostProfileId])
   @@index([categoryId])
@@ -802,6 +804,40 @@ model EventRefundPolicy {
   @@map("event_refund_policies")
 }
 
+// Proposed edits to an already-PUBLISHED event, awaiting admin approval.
+// The live Event row stays untouched (and publicly visible) until a revision is approved.
+model EventRevision {
+  id      String @id @default(uuid())
+  eventId String
+
+  // Validated snapshot of the changed editable fields only (Tier 1 content + Tier 2 venue),
+  // shaped like UpdatePublishedEventDto. May include `media: [{ key, type, order }]`.
+  changes Json
+
+  // True when any location field (venueName/fullAddress/city/latitude/longitude) is part of `changes`.
+  // Used to prioritise the admin review queue and to trigger attendee notification on approval.
+  touchesVenue Boolean @default(false)
+
+  status RevisionStatus @default(PENDING)
+
+  // Review
+  adminRemark    String?
+  reviewedBy     String?
+  reviewedByUser User?     @relation("EventRevisionReviewedBy", fields: [reviewedBy], references: [id])
+  reviewedAt     DateTime?
+
+  submittedBy String // host userId who created/last updated the revision
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, status])
+  @@index([status, touchesVenue])
+  @@map("event_revisions")
+}
+
 // ─── Event Enums ──────────────────────────────────────────────────────────────
 
 enum EventStatus {
@@ -809,6 +845,13 @@ enum EventStatus {
   UNDER_REVIEW
   PUBLISHED
   CANCELLED
+}
+
+enum RevisionStatus {
+  PENDING // awaiting admin review
+  APPROVED // merged into the live event
+  REJECTED // discarded with an admin remark
+  SUPERSEDED // dropped because the event was cancelled or replaced by a newer revision
 }
 
 enum Visibility {
@@ -1200,6 +1243,9 @@ enum AuditAction {
   EVENT_REJECTED
   EVENT_PUBLISHED
   EVENT_CANCELLED
+  EVENT_REVISION_SUBMITTED
+  EVENT_REVISION_APPROVED
+  EVENT_REVISION_REJECTED
 
   // Orders / payments (PMLA / GST)
   ORDER_CREATED
@@ -1237,6 +1283,9 @@ enum AuditAction {
   // DPDP data subject rights (future)
   DATA_EXPORT_REQUESTED
   DATA_DELETION_REQUESTED
+
+  // Maintenance / background jobs
+  MEDIA_GC
 
   // Communities
   COMMUNITY_CREATED

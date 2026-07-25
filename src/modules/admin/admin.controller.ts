@@ -1225,6 +1225,109 @@ export class AdminController {
     return this.adminService.forceCancelEvent(id, adminId, dto);
   }
 
+  // ─── Event revisions (edits to published events) ─────────────────────────────
+
+  @Get('events/revisions/pending')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({
+    summary: 'List pending event revisions',
+    description:
+      'Paginated queue of edits submitted against already-published events, awaiting review. ' +
+      'Venue-changing revisions (`touchesVenue: true`) are surfaced first, then oldest-first (FIFO), ' +
+      'so a last-minute venue change is picked up quickly.',
+  })
+  @ApiOkResponse({ description: 'Paginated list of pending revisions.' })
+  listPendingRevisions(
+    @Query('page', new ParseIntPipe({ optional: true })) page = 1,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit = 20,
+  ) {
+    return this.adminService.listPendingRevisions(page, limit);
+  }
+
+  @Get('events/:id/revision')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({
+    summary: 'Get the pending revision for an event',
+    description:
+      'Returns the pending revision alongside the current live values of the changed fields ' +
+      '(`current` vs `proposed`), with presigned URLs for both current and proposed media, so an ' +
+      'admin can review exactly what will change before approving.',
+  })
+  @ApiParam({ name: 'id', description: 'Event UUID', example: 'event-uuid-1234' })
+  @ApiOkResponse({ description: 'Pending revision with current-vs-proposed diff.' })
+  @ApiNotFoundResponse({ description: 'Event not found, or no pending revision.' })
+  getRevisionForReview(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.getRevisionForReview(id);
+  }
+
+  @Post('events/:id/revision/approve')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Approve an event revision',
+    description:
+      "Merges the pending revision into the live event (which stays published). If the revision " +
+      'changes the venue, confirmed attendees are notified — a major move (different city or >1km) ' +
+      'also triggers an email. Notifies the host that their changes are live.',
+  })
+  @ApiParam({ name: 'id', description: 'Event UUID', example: 'event-uuid-1234' })
+  @ApiOkResponse({
+    description: 'Revision approved and applied.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-07-25T10:00:00.000Z',
+        data: { message: 'Revision approved and applied' },
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Event not found, or no pending revision.' })
+  @ApiBadRequestResponse({ description: 'Event is not PUBLISHED.' })
+  approveRevision(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') adminId: string,
+  ) {
+    return this.adminService.approveRevision(id, adminId);
+  }
+
+  @Post('events/:id/revision/reject')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reject an event revision',
+    description:
+      'Discards the pending revision with an admin remark. The live event is left unchanged. ' +
+      'Notifies the host with the remark.',
+  })
+  @ApiParam({ name: 'id', description: 'Event UUID', example: 'event-uuid-1234' })
+  @ApiBody({
+    type: RejectEventDto,
+    examples: {
+      default: {
+        summary: 'Rejection with remark',
+        value: { remark: 'The proposed cover image is low-resolution. Please upload a sharper one.' },
+      },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Revision rejected.',
+    schema: {
+      example: {
+        success: true,
+        timestamp: '2026-07-25T10:00:00.000Z',
+        data: { message: 'Revision rejected' },
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Event not found, or no pending revision.' })
+  rejectRevision(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') adminId: string,
+    @Body() dto: RejectEventDto,
+  ) {
+    return this.adminService.rejectRevision(id, adminId, dto);
+  }
+
   // ─── Order management ────────────────────────────────────────────────────────
 
   @Get('orders')

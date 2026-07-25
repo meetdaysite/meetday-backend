@@ -88,4 +88,28 @@ export class MailProcessor {
     }
   }
 
+  @Process('event-venue-changed')
+  async handleEventVenueChanged(
+    job: Job<{
+      to: string;
+      firstName: string;
+      eventTitle: string;
+      venueName: string | null;
+      fullAddress: string | null;
+      city: string | null;
+    }>,
+  ) {
+    try {
+      await this.mailService.sendEventVenueChanged(
+        job.data.to,
+        job.data.firstName,
+        job.data.eventTitle,
+        job.data.venueName,
+        job.data.fullAddress,
+        job.data.city,
+      );
+    } catch (error) {
+      this.logger.error(`Failed to process event-venue-changed mail job: ${(error as Error).message}`);
+    }
+  }
 }

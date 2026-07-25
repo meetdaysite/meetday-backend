@@ -14,6 +14,7 @@ import { refundInitiatedTemplate } from './templates/refund-initiated.template';
 import { refundCompletedTemplate } from './templates/refund-completed.template';
 import { refundFailedTemplate } from './templates/refund-failed.template';
 import { eventCancelledAttendeeTemplate } from './templates/event-cancelled-attendee.template';
+import { eventVenueChangedTemplate } from './templates/event-venue-changed.template';
 import { ticketConfirmationTemplate } from './templates/ticket-confirmation.template';
 
 @Injectable()
@@ -142,6 +143,21 @@ export class MailService {
       to,
       `Event cancelled: ${eventTitle} — Meetday`,
       eventCancelledAttendeeTemplate(firstName, eventTitle, cancellationReason, refundAmountRupees),
+    );
+  }
+
+  async sendEventVenueChanged(
+    to: string,
+    firstName: string,
+    eventTitle: string,
+    venueName: string | null,
+    fullAddress: string | null,
+    city: string | null,
+  ): Promise<void> {
+    await this.sendMail(
+      to,
+      `Venue changed: ${eventTitle} — Meetday`,
+      eventVenueChangedTemplate(firstName, eventTitle, venueName, fullAddress, city),
     );
   }
 }

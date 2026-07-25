@@ -39,6 +39,7 @@ import { CheckInService } from '../check-in/check-in.service';
 import { GraphService } from '../graph/graph.service';
 import { CreateScannerSessionDto } from '../check-in/dto/create-scanner-session.dto';
 import { CreateEventDto } from './dto/create-event.dto';
+import { UpdatePublishedEventDto } from './dto/update-published-event.dto';
 import { GenerateDraftDto } from './dto/generate-draft.dto';
 import { ListMyEventsQueryDto } from './dto/list-my-events-query.dto';
 import { BrowseEventsQueryDto } from './dto/browse-events-query.dto';
@@ -516,6 +517,33 @@ export class EventsController {
     @Body() dto: CreateEventDto,
   ) {
     return this.eventsService.updateEvent(userId, id, dto);
+  }
+
+  @Patch(':id/revision')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'Propose edits to a published event',
+    description:
+      'Submits host edits to an already-PUBLISHED event as an admin-reviewed revision. The live ' +
+      'event stays public and unchanged until an admin approves the revision. Only content fields ' +
+      '(title, description, media, tags, languages, whatToExpect, whoShouldAttend, specialInstructions, ' +
+      'eventType, categoryId) and the venue block (venueName, fullAddress, city, latitude, longitude) ' +
+      'can be edited — date/time, tickets, refund policy, isFree, visibility and ageRestriction are ' +
+      'locked. Whenever any location field changes, latitude + longitude must be sent with it. ' +
+      'Media replaces the full set (send existing keys + new ones). Re-submitting replaces the ' +
+      'single pending revision. An approved venue change notifies confirmed attendees.',
+  })
+  @ApiOkResponse({ description: 'Revision saved and pending admin review.' })
+  @ApiForbiddenResponse({ description: 'Not the owner, or event is not PUBLISHED.' })
+  @ApiNotFoundResponse({ description: 'Event or category not found.' })
+  @ApiBadRequestResponse({ description: 'No changes provided, or a locked field was sent.' })
+  updateEventRevision(
+    @GetUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdatePublishedEventDto,
+  ) {
+    return this.eventsService.upsertRevision(userId, id, dto);
   }
 
   @Patch(':id/submit')
