@@ -827,14 +827,21 @@ export class AdminService {
     if (event.status !== 'UNDER_REVIEW')
       throw new BadRequestException('Only events in UNDER_REVIEW status can be approved');
 
-    await this.prisma.event.update({
-      where: { id: eventId },
+    // Compare-and-set on status: if the host edited the event (recalling it to DRAFT) between our
+    // read and here, this affects 0 rows and we abort — we never publish content that changed after
+    // it was submitted for review.
+    const { count } = await this.prisma.event.updateMany({
+      where: { id: eventId, status: 'UNDER_REVIEW' },
       data: {
         status: 'PUBLISHED',
         reviewedBy: adminId,
         reviewedAt: new Date(),
       },
     });
+    if (count === 0)
+      throw new BadRequestException(
+        'Event is no longer under review — it may have been edited and must be resubmitted',
+      );
 
     await this.syncTotalEventsHosted(event.hostProfileId);
 
@@ -948,8 +955,10 @@ export class AdminService {
     if (event.status !== 'UNDER_REVIEW')
       throw new BadRequestException('Only events in UNDER_REVIEW status can be rejected');
 
-    await this.prisma.event.update({
-      where: { id: eventId },
+    // Compare-and-set on status: if the host recalled the event by editing it (now DRAFT) between
+    // our read and here, this affects 0 rows and we abort rather than stamping a stale rejection.
+    const { count } = await this.prisma.event.updateMany({
+      where: { id: eventId, status: 'UNDER_REVIEW' },
       data: {
         status: 'DRAFT',
         adminRejectionRemark: dto.remark,
@@ -957,6 +966,10 @@ export class AdminService {
         reviewedAt: new Date(),
       },
     });
+    if (count === 0)
+      throw new BadRequestException(
+        'Event is no longer under review — it may have been edited and must be resubmitted',
+      );
 
     const hostUser = event.hostProfile.user;
     const eventTitle = event.title ?? 'Untitled';

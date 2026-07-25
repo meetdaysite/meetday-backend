@@ -147,8 +147,14 @@ export class EventsService {
     if (!event) throw new NotFoundException('Event not found');
     if (event.hostProfile.userId !== userId)
       throw new ForbiddenException('You do not own this event');
-    if (event.status !== EventStatus.DRAFT)
-      throw new ForbiddenException('Only DRAFT events can be edited');
+    // DRAFT and UNDER_REVIEW are freely editable (no orders can exist until PUBLISHED). Published
+    // events go through the admin-reviewed revision flow instead.
+    if (event.status !== EventStatus.DRAFT && event.status !== EventStatus.UNDER_REVIEW)
+      throw new ForbiddenException(
+        event.status === EventStatus.PUBLISHED
+          ? 'Published events are edited via PATCH /events/:id/revision'
+          : 'Only draft or under-review events can be edited',
+      );
 
     if (dto.categoryId) {
       const category = await this.prisma.category.findFirst({
@@ -163,7 +169,27 @@ export class EventsService {
       throw new BadRequestException('All ticket prices must be 0 for a free event');
 
     return this.prisma.$transaction(async (tx) => {
+      // Lock the row and re-check status inside the transaction. This serialises against a
+      // concurrent admin approve/reject (both compare-and-set on status), so an edit can never
+      // land on an event that just became PUBLISHED, and no update is lost.
+      const locked = await tx.$queryRaw<Array<{ status: EventStatus }>>`
+        SELECT status FROM events WHERE id = ${eventId} FOR UPDATE
+      `;
+      const currentStatus = locked[0]?.status;
+      if (!currentStatus) throw new NotFoundException('Event not found');
+      if (currentStatus !== EventStatus.DRAFT && currentStatus !== EventStatus.UNDER_REVIEW)
+        throw new ForbiddenException('Event can no longer be edited (it may have just been approved)');
+
       await applyEventChanges(tx, eventId, dto as EventChanges);
+
+      // Editing an event that was under review recalls it to DRAFT and clears its submission — the
+      // host must re-submit, so admins only ever review the exact version that was last submitted.
+      if (currentStatus === EventStatus.UNDER_REVIEW) {
+        await tx.event.update({
+          where: { id: eventId },
+          data: { status: EventStatus.DRAFT, submittedAt: null },
+        });
+      }
 
       return tx.event.findUnique({
         where: { id: eventId },

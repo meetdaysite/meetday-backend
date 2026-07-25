@@ -501,14 +501,16 @@ export class EventsController {
   @UseGuards(RolesGuard)
   @Roles('HOST')
   @ApiOperation({
-    summary: 'Update an event draft',
+    summary: 'Update a draft or under-review event',
     description:
-      'Partially updates a DRAFT event. Only fields present in the request body are updated. ' +
-      'If tickets are provided they replace all existing tickets. ' +
-      'If refundPolicy is provided it is upserted.',
+      'Partially updates a DRAFT or UNDER_REVIEW event (all fields editable — no orders can exist yet). ' +
+      'Only fields present in the request body are updated. If tickets are provided they replace all ' +
+      'existing tickets; if refundPolicy is provided it is upserted. ' +
+      'Editing an UNDER_REVIEW event recalls it to DRAFT (clearing its submission) — the host must ' +
+      'submit again for review. Published events must use PATCH /events/:id/revision instead.',
   })
-  @ApiOkResponse({ description: 'Event draft updated.' })
-  @ApiForbiddenResponse({ description: 'Not the owner, or event is not in DRAFT status.' })
+  @ApiOkResponse({ description: 'Event updated. An under-review event is returned in DRAFT status.' })
+  @ApiForbiddenResponse({ description: 'Not the owner, or event is PUBLISHED/CANCELLED (not directly editable).' })
   @ApiNotFoundResponse({ description: 'Event or category not found.' })
   @ApiBadRequestResponse({ description: 'Ticket prices must be 0 for a free event.' })
   updateEvent(
