@@ -23,6 +23,7 @@ import { ApplyHostDto } from './dto/apply-host.dto';
 import { UpdateHostProfileDto } from './dto/update-host-profile.dto';
 import { VerifyBankDto } from './dto/submit-kyc.dto';
 import { BankWebhookDto } from './dto/bank-webhook.dto';
+import { hasEventEnded } from '../events/event-time.util';
 import { UpgradeSubscriptionDto } from './dto/upgrade-subscription.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { StorageService } from '../../common/storage/storage.service';
@@ -1137,9 +1138,14 @@ export class HostsService {
       countMap[row.status] = row._count._all;
     }
     const publishedAll = countMap['PUBLISHED'] ?? 0;
-    const completedCount = await this.prisma.event.count({
-      where: { hostProfileId, status: 'PUBLISHED', eventDate: { lt: now } },
+    // `eventDate` alone can't tell us the event has actually ended (it's set to midnight of the
+    // event's day), so pre-filter to candidates that could plausibly have ended, then resolve the
+    // exact instant per event with the real endTime.
+    const completedCandidates = await this.prisma.event.findMany({
+      where: { hostProfileId, status: 'PUBLISHED', eventDate: { lte: now } },
+      select: { eventDate: true, endTime: true },
     });
+    const completedCount = completedCandidates.filter((e) => hasEventEnded(e)).length;
     const eventCounts = {
       draft: countMap['DRAFT'] ?? 0,
       underReview: countMap['UNDER_REVIEW'] ?? 0,
@@ -1203,7 +1209,7 @@ export class HostsService {
           ? await this.storageService.getPresignedDownloadUrl(e.media[0].url)
           : null;
         const derivedStatus =
-          e.status === 'PUBLISHED' && e.eventDate < now ? 'COMPLETED' : e.status;
+          e.status === 'PUBLISHED' && hasEventEnded(e) ? 'COMPLETED' : e.status;
         return {
           id: e.id,
           title: e.title,
