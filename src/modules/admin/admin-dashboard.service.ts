@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../common/redis/redis.service';
 import { DashboardRevenueQueryDto, RevenuePeriod } from './dto/dashboard-revenue-query.dto';
+import { getEventStartAt, isEventLiveNow } from '../events/event-time.util';
 
 function todayRange() {
   const start = new Date();
@@ -20,11 +21,6 @@ function yesterdayRange() {
   const end = new Date(start);
   end.setHours(23, 59, 59, 999);
   return { start, end };
-}
-
-function currentTimeString(): string {
-  const now = new Date();
-  return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 }
 
 function getPeriodRange(period: RevenuePeriod): { start: Date; end: Date; prevStart: Date; prevEnd: Date } {
@@ -91,7 +87,7 @@ export class AdminDashboardService {
     return withCache(this.redis, 'admin:dashboard:stats', 30, async () => {
       const { start: todayStart, end: todayEnd } = todayRange();
       const { start: yestStart, end: yestEnd } = yesterdayRange();
-      const nowTime = currentTimeString();
+      const now = new Date();
 
       const [
         hostApprovals,
@@ -125,12 +121,15 @@ export class AdminDashboardService {
             startTime: { not: null },
             endTime: { not: null },
           },
-          select: { id: true, startTime: true, endTime: true },
+          select: { id: true, eventDate: true, startTime: true, endTime: true },
         }),
       ]);
 
-      const liveNow = todayEvents.filter((e) => e.startTime! <= nowTime && e.endTime! >= nowTime);
-      const startingLater = todayEvents.filter((e) => e.startTime! > nowTime);
+      const liveNow = todayEvents.filter((e) => isEventLiveNow(e, now));
+      const startingLater = todayEvents.filter((e) => {
+        const start = getEventStartAt(e);
+        return start !== null && start > now;
+      });
 
       const revenueToday = decimalToNumber(todayRevRaw._sum.totalAmount);
       const revenueYesterday = decimalToNumber(yesterdayRevRaw._sum.totalAmount);
@@ -171,7 +170,7 @@ export class AdminDashboardService {
   async getLiveOperations() {
     return withCache(this.redis, 'admin:dashboard:live-ops', 30, async () => {
       const { start: todayStart, end: todayEnd } = todayRange();
-      const nowTime = currentTimeString();
+      const now = new Date();
 
       const [todayEvents, checkInsToday, todayTickets] = await this.prisma.$transaction([
         this.prisma.event.findMany({
@@ -181,7 +180,7 @@ export class AdminDashboardService {
             startTime: { not: null },
             endTime: { not: null },
           },
-          select: { id: true, startTime: true, endTime: true },
+          select: { id: true, eventDate: true, startTime: true, endTime: true },
         }),
         this.prisma.orderAttendee.count({ where: { checkedInAt: { gte: todayStart } } }),
         this.prisma.eventTicket.findMany({
@@ -195,7 +194,7 @@ export class AdminDashboardService {
         }),
       ]);
 
-      const eventsLiveNow = todayEvents.filter((e) => e.startTime! <= nowTime && e.endTime! >= nowTime).length;
+      const eventsLiveNow = todayEvents.filter((e) => isEventLiveNow(e, now)).length;
 
       const capacityByEvent = new Map<string, { total: number; sold: number }>();
       for (const t of todayTickets) {
