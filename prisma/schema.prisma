@@ -845,6 +845,7 @@ enum EventStatus {
   DRAFT
   UNDER_REVIEW
   PUBLISHED
+  COMPLETED // published event whose end has passed; set by the completion cron, one-way
   CANCELLED
 }
 

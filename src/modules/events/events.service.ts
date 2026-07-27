@@ -12,6 +12,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdatePublishedEventDto } from './dto/update-published-event.dto';
 import { applyEventChanges, EventChanges } from './event-changes.util';
+import { APPROVED_EVENT_STATUSES, deriveEventStatus, hasEventEnded } from './event-time.util';
 import { ListMyEventsQueryDto } from './dto/list-my-events-query.dto';
 import { BrowseEventsQueryDto } from './dto/browse-events-query.dto';
 import { CancelEventDto } from './dto/cancel-event.dto';
@@ -405,6 +406,9 @@ export class EventsService {
           title: true,
           status: true,
           eventDate: true,
+          endDate: true,
+          startTime: true,
+          endTime: true,
           city: true,
           venueName: true,
           isFree: true,
@@ -438,6 +442,9 @@ export class EventsService {
         const { media: _media, tickets: _tickets, ...rest } = e;
         return {
           ...rest,
+          // Raw `status` is preserved (drives the tab filter); `displayStatus` adds the real-time
+          // LIVE window and the pre-sweep COMPLETED that the persisted column may not show yet.
+          displayStatus: deriveEventStatus(e),
           coverImageUrl: cover
             ? await this.storageService.getPresignedDownloadUrl(cover.url)
             : null,
@@ -534,7 +541,7 @@ export class EventsService {
       };
     }
 
-    return { ...withMedia, communities, pendingRevision };
+    return { ...withMedia, displayStatus: deriveEventStatus(withMedia), communities, pendingRevision };
   }
 
   async getEventAttendees(hostUserId: string, eventId: string, page = 1, limit = 50) {
@@ -601,6 +608,10 @@ export class EventsService {
       throw new ForbiddenException('You do not own this event');
     if (event.status !== EventStatus.PUBLISHED)
       throw new BadRequestException('Only PUBLISHED events can be cancelled');
+    // Belt-and-suspenders for the ≤30-min window before the completion cron flips an ended event:
+    // a past event is over, not cancellable.
+    if (hasEventEnded(event))
+      throw new BadRequestException('Cannot cancel an event that has already ended');
 
     const pendingOrders = await this.prisma.order.findMany({
       where: { eventId, status: 'PENDING_PAYMENT' },
@@ -668,7 +679,8 @@ export class EventsService {
 
   private async syncTotalEventsHosted(hostProfileId: string): Promise<void> {
     const count = await this.prisma.event.count({
-      where: { hostProfileId, status: EventStatus.PUBLISHED },
+      // Count both so the tally stays stable when the completion cron flips PUBLISHED → COMPLETED.
+      where: { hostProfileId, status: { in: APPROVED_EVENT_STATUSES } },
     });
     await this.prisma.hostProfile.update({
       where: { id: hostProfileId },
@@ -809,10 +821,12 @@ export class EventsService {
 
   async getPublicEventById(eventId: string, firebaseUid?: string | null) {
     const event = await this.prisma.event.findUnique({
-      where: { id: eventId, status: EventStatus.PUBLISHED, visibility: Visibility.PUBLIC },
+      // COMPLETED included so an attendee can still view (and review) a past event they attended.
+      where: { id: eventId, status: { in: APPROVED_EVENT_STATUSES }, visibility: Visibility.PUBLIC },
       select: {
         id: true,
         title: true,
+        status: true,
         description: true,
         eventType: true,
         languages: true,
@@ -973,7 +987,15 @@ export class EventsService {
       }
     }
 
-    return { ...event, media: signedMedia, startingPrice, reviewSummary, isSaved, communities };
+    return {
+      ...event,
+      displayStatus: deriveEventStatus(event),
+      media: signedMedia,
+      startingPrice,
+      reviewSummary,
+      isSaved,
+      communities,
+    };
   }
 
   // ─── Save / unsave ─────────────────────────────────────────────────────────

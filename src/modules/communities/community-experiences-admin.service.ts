@@ -46,10 +46,11 @@ function computedStatus(
 ): ComputedStatus {
   if (dbStatus === 'CANCELLED') return 'CANCELLED';
   if (dbStatus === 'DRAFT' || dbStatus === 'UNDER_REVIEW') return 'DRAFT';
+  if (dbStatus === 'COMPLETED') return 'COMPLETED';
   if (!eventDate) return 'DRAFT';
   if (eventDate >= todayStart && eventDate <= todayEnd) return 'LIVE';
   if (eventDate > todayEnd) return 'UPCOMING';
-  return 'COMPLETED';
+  return 'COMPLETED'; // past PUBLISHED not yet flipped by the completion cron
 }
 
 @Injectable()
@@ -92,7 +93,7 @@ export class CommunityExperiencesAdminService {
         where: { communityId, event: { status: 'PUBLISHED', eventDate: { gte: now } } },
       }),
       this.prisma.communityEvent.count({
-        where: { communityId, event: { status: 'PUBLISHED', eventDate: { lt: now } } },
+        where: { communityId, event: this.completedEventWhere(now) },
       }),
       this.prisma.order.count({ where: { status: 'CONFIRMED', ...communityFilter } }),
       this.prisma.order.aggregate({
@@ -111,7 +112,7 @@ export class CommunityExperiencesAdminService {
         },
       }),
       this.prisma.communityEvent.count({
-        where: { communityId, event: { status: 'PUBLISHED', eventDate: { lt: todayStart } } },
+        where: { communityId, event: this.completedEventWhere(todayStart) },
       }),
       this.prisma.communityEvent.count({
         where: { communityId, event: { status: { in: ['DRAFT', 'UNDER_REVIEW'] } } },
@@ -275,7 +276,7 @@ export class CommunityExperiencesAdminService {
       case 'LIVE':
         return { status: 'PUBLISHED', eventDate: { gte: todayStart, lte: todayEnd } };
       case 'COMPLETED':
-        return { status: 'PUBLISHED', eventDate: { lt: todayStart } };
+        return this.completedEventWhere(todayStart);
       case 'DRAFT':
         return { status: { in: ['DRAFT', 'UNDER_REVIEW'] } };
       case 'CANCELLED':
@@ -283,6 +284,11 @@ export class CommunityExperiencesAdminService {
       default:
         return {};
     }
+  }
+
+  /** Events that are done: durably COMPLETED, plus past PUBLISHED not yet swept by the completion cron. */
+  private completedEventWhere(before: Date): Prisma.EventWhereInput {
+    return { OR: [{ status: 'COMPLETED' }, { status: 'PUBLISHED', eventDate: { lt: before } }] };
   }
 
   private async getSidebar(communityId: string, window30Start: Date, window60Start: Date) {

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { EventsController } from './events.controller';
 import { EventsService } from './events.service';
 import { EventsVibeService } from './events-vibe.service';
+import { EventsCompletionCron } from './events-completion.cron';
 import { CopilotService } from './copilot.service';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ReviewsModule } from '../reviews/reviews.module';
@@ -13,7 +14,7 @@ import { RefundsModule } from '../refunds/refunds.module';
 @Module({
   imports: [NotificationsModule, ReviewsModule, CheckInModule, GraphModule, StorageModule, RefundsModule],
   controllers: [EventsController],
-  providers: [EventsService, EventsVibeService, CopilotService],
+  providers: [EventsService, EventsVibeService, CopilotService, EventsCompletionCron],
   exports: [EventsService, EventsVibeService],
 })
 export class EventsModule {}

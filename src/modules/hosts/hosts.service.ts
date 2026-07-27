@@ -23,7 +23,7 @@ import { ApplyHostDto } from './dto/apply-host.dto';
 import { UpdateHostProfileDto } from './dto/update-host-profile.dto';
 import { VerifyBankDto } from './dto/submit-kyc.dto';
 import { BankWebhookDto } from './dto/bank-webhook.dto';
-import { hasEventEnded } from '../events/event-time.util';
+import { deriveEventStatus } from '../events/event-time.util';
 import { UpgradeSubscriptionDto } from './dto/upgrade-subscription.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { StorageService } from '../../common/storage/storage.service';
@@ -952,7 +952,6 @@ export class HostsService {
     if (!hostProfile) throw new NotFoundException('Host profile not found');
 
     const hostProfileId = hostProfile.id;
-    const now = new Date();
     const { start, end, prevStart, prevEnd } = this.getPeriodBounds(period);
 
     const periodFilter = start ? { gte: start, lte: end! } : undefined;
@@ -1139,20 +1138,14 @@ export class HostsService {
     for (const row of rawEventCounts) {
       countMap[row.status] = row._count._all;
     }
-    const publishedAll = countMap['PUBLISHED'] ?? 0;
-    // `eventDate` alone can't tell us the event has actually ended (it's set to midnight of the
-    // event's day), so pre-filter to candidates that could plausibly have ended, then resolve the
-    // exact instant per event with the real endTime.
-    const completedCandidates = await this.prisma.event.findMany({
-      where: { hostProfileId, status: 'PUBLISHED', eventDate: { lte: now } },
-      select: { eventDate: true, endDate: true, startTime: true, endTime: true },
-    });
-    const completedCount = completedCandidates.filter((e) => hasEventEnded(e)).length;
+    // COMPLETED is now a persisted status (the completion cron flips ended PUBLISHED events), so the
+    // groupBy already separates the two buckets — no per-event date math needed. A just-ended event
+    // counts as published until the next sweep (≤30 min); acceptable lag for a dashboard summary.
     const eventCounts = {
       draft: countMap['DRAFT'] ?? 0,
       underReview: countMap['UNDER_REVIEW'] ?? 0,
-      published: publishedAll - completedCount,
-      completed: completedCount,
+      published: countMap['PUBLISHED'] ?? 0,
+      completed: countMap['COMPLETED'] ?? 0,
       cancelled: countMap['CANCELLED'] ?? 0,
     };
 
@@ -1210,8 +1203,7 @@ export class HostsService {
         const coverUrl = e.media[0]?.url
           ? await this.storageService.getPresignedDownloadUrl(e.media[0].url)
           : null;
-        const derivedStatus =
-          e.status === 'PUBLISHED' && hasEventEnded(e) ? 'COMPLETED' : e.status;
+        const derivedStatus = deriveEventStatus(e);
         return {
           id: e.id,
           title: e.title,

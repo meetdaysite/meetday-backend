@@ -1,10 +1,12 @@
 import {
+  deriveEventStatus,
   getEventEndAt,
   getEventStartAt,
   hasEventEnded,
   isEventLiveNow,
   parseTimeOfDay,
 } from './event-time.util';
+import { EventStatus } from '@prisma/client';
 
 // Local-time constructors (month is 0-indexed → 6 = July) so they line up with the setHours()
 // arithmetic inside the helper, which also operates in local time.
@@ -111,5 +113,32 @@ describe('isEventLiveNow', () => {
 describe('getEventStartAt', () => {
   it('missing startTime falls back to start of day', () => {
     expect(getEventStartAt({ eventDate: jul26 })!).toEqual(new Date(2026, 6, 26, 0, 0, 0, 0));
+  });
+});
+
+describe('deriveEventStatus', () => {
+  const single = { eventDate: jul26, startTime: '07:00 PM', endTime: '10:00 PM' };
+
+  it.each([EventStatus.DRAFT, EventStatus.UNDER_REVIEW, EventStatus.CANCELLED, EventStatus.COMPLETED])(
+    'passes %s through unchanged',
+    (status) => {
+      expect(deriveEventStatus({ ...single, status })).toBe(status);
+    },
+  );
+
+  it('PUBLISHED before the event → PUBLISHED', () => {
+    expect(deriveEventStatus({ ...single, status: EventStatus.PUBLISHED }, new Date(2026, 6, 26, 6, 0))).toBe(
+      EventStatus.PUBLISHED,
+    );
+  });
+
+  it('PUBLISHED during the event → LIVE', () => {
+    expect(deriveEventStatus({ ...single, status: EventStatus.PUBLISHED }, new Date(2026, 6, 26, 20, 0))).toBe('LIVE');
+  });
+
+  it('PUBLISHED after the event ends → COMPLETED (pre-cron safety net)', () => {
+    expect(deriveEventStatus({ ...single, status: EventStatus.PUBLISHED }, new Date(2026, 6, 26, 23, 0))).toBe(
+      EventStatus.COMPLETED,
+    );
   });
 });
