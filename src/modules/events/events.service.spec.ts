@@ -16,7 +16,7 @@ import { RefundsService } from '../refunds/refunds.service';
 
 function makePrisma() {
   const prisma: any = {
-    hostProfile: { findUnique: jest.fn() },
+    hostProfile: { findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}) },
     category: { findFirst: jest.fn() },
     event: {
       create: jest.fn(),
