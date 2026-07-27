@@ -76,6 +76,7 @@ const adminUser = {
   email: 'admin@meetday.in',
   firstName: 'Super',
   lastName: 'Admin',
+  avatarUrl: null,
   isActive: true,
   role: { name: 'SUPER_ADMIN' },
 };

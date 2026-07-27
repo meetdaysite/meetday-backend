@@ -41,9 +41,13 @@ export class EventsService {
     private readonly refundsService: RefundsService,
   ) {}
 
-  private async withSignedMedia<T extends { media: Array<{ url: string }> }>(obj: T): Promise<T> {
+  private async withSignedMedia<T extends { media: Array<{ url: string }> }>(
+    obj: T,
+  ): Promise<Omit<T, 'media'> & { media: Array<T['media'][number] & { key: string }> }> {
     const signed = await Promise.all(
-      obj.media.map(async (m) => ({ ...m, url: await this.storageService.getPresignedDownloadUrl(m.url) })),
+      // Expose the raw storage `key` alongside the signed `url`: the host needs each existing item's
+      // key to echo back when editing media (the media contract is a full-set replace by key).
+      obj.media.map(async (m) => ({ ...m, key: m.url, url: await this.storageService.getPresignedDownloadUrl(m.url) })),
     );
     return { ...obj, media: signed };
   }

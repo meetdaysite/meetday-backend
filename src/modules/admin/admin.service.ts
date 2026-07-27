@@ -1078,7 +1078,8 @@ export class AdminService {
 
     const [currentMedia, proposedMedia] = await Promise.all([
       Promise.all(
-        event.media.map(async (m) => ({ ...m, url: await this.storageService.getPresignedDownloadUrl(m.url) })),
+        // Include the raw `key` so the diff view and any re-edit have the current items' keys.
+        event.media.map(async (m) => ({ ...m, key: m.url, url: await this.storageService.getPresignedDownloadUrl(m.url) })),
       ),
       changes.media
         ? Promise.all(
