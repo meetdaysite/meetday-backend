@@ -18,6 +18,7 @@ export interface EventChanges {
   languages?: string[];
   tags?: string[];
   eventDate?: string;
+  endDate?: string;
   startTime?: string;
   endTime?: string;
   venueName?: string;
@@ -71,6 +72,7 @@ export async function applyEventChanges(
       ...(changes.languages !== undefined && { languages: changes.languages }),
       ...(changes.tags !== undefined && { tags: changes.tags }),
       ...(changes.eventDate !== undefined && { eventDate: new Date(changes.eventDate) }),
+      ...(changes.endDate !== undefined && { endDate: changes.endDate ? new Date(changes.endDate) : null }),
       ...(changes.startTime !== undefined && { startTime: changes.startTime }),
       ...(changes.endTime !== undefined && { endTime: changes.endTime }),
       ...(changes.venueName !== undefined && { venueName: changes.venueName }),

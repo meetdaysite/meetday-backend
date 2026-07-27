@@ -4,9 +4,12 @@
  * compared `endTime` strings like "10:00 PM" against a 24-hour clock string) across reviews,
  * payouts, the host dashboard, check-in, and the admin dashboard.
  */
+import { EventStatus } from '@prisma/client';
 
 export interface EventTimeFields {
   eventDate: Date | null;
+  /** Last day for multi-day events. Null ⇒ single-day: the event ends on `eventDate`. */
+  endDate?: Date | null;
   startTime?: string | null;
   endTime?: string | null;
 }
@@ -36,13 +39,24 @@ export function getEventStartAt(event: EventTimeFields): Date | null {
   return start;
 }
 
-/** The instant the event ends. Falls back to the end of `eventDate`'s day if `endTime` is missing/malformed. */
+/**
+ * The instant the event ends.
+ *  - Multi-day: anchored to `endDate` (+ `endTime`, or end-of-day if `endTime` is missing/malformed).
+ *  - Single-day (`endDate` null): anchored to `eventDate`. If the end clock time lands at or before
+ *    the start clock time, the event crosses midnight (e.g. a 10 PM–2 AM club night) — roll the end
+ *    forward one day. An explicit `endDate` is always trusted and never rolled.
+ */
 export function getEventEndAt(event: EventTimeFields): Date | null {
   if (!event.eventDate) return null;
-  const end = new Date(event.eventDate);
+  const end = new Date(event.endDate ?? event.eventDate);
   const parsed = event.endTime ? parseTimeOfDay(event.endTime) : null;
   if (parsed) end.setHours(parsed.hours, parsed.minutes, 0, 0);
   else end.setHours(23, 59, 59, 999);
+
+  if (!event.endDate && parsed) {
+    const start = getEventStartAt(event);
+    if (start && end <= start) end.setDate(end.getDate() + 1);
+  }
   return end;
 }
 
@@ -58,4 +72,29 @@ export function isEventLiveNow(event: EventTimeFields, reference: Date = new Dat
   const end = getEventEndAt(event);
   if (!start || !end) return false;
   return start <= reference && reference <= end;
+}
+
+/**
+ * Event statuses that mean "approved and went live" — a real event, whether still upcoming/ongoing
+ * (`PUBLISHED`) or already ended (`COMPLETED`). Use this wherever a query means "any real event"
+ * (payouts, graph, host stats, viewing a past event) so a completed event isn't silently excluded.
+ */
+export const APPROVED_EVENT_STATUSES: EventStatus[] = [EventStatus.PUBLISHED, EventStatus.COMPLETED];
+
+/** Status shown to clients: the persisted enum plus the transient, derived-only `LIVE`. */
+export type DisplayEventStatus = EventStatus | 'LIVE';
+
+/**
+ * Resolves the status to display for an event. `COMPLETED` is persisted by the completion cron, but
+ * we also derive it here so a just-ended event reads correctly in the window before the next sweep
+ * runs. `LIVE` is always derived (never stored). Non-published statuses pass through unchanged.
+ */
+export function deriveEventStatus(
+  event: EventTimeFields & { status: EventStatus },
+  reference: Date = new Date(),
+): DisplayEventStatus {
+  if (event.status !== EventStatus.PUBLISHED) return event.status;
+  if (hasEventEnded(event, reference)) return EventStatus.COMPLETED;
+  if (isEventLiveNow(event, reference)) return 'LIVE';
+  return EventStatus.PUBLISHED;
 }

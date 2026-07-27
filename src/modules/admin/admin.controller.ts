@@ -1089,6 +1089,7 @@ export class AdminController {
           status: 'UNDER_REVIEW',
           eventType: 'Workshop',
           eventDate: '2026-06-15T00:00:00.000Z',
+          endDate: null,
           startTime: '2026-06-15T10:00:00.000Z',
           endTime: '2026-06-15T13:00:00.000Z',
           venueName: 'Bandra Bandstand',

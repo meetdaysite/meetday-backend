@@ -188,10 +188,10 @@ export class EventsController {
   @ApiOperation({
     summary: 'Get public event detail',
     description:
-      'Returns full detail of a published, public event. ' +
-      'Includes all media (presigned S3 URLs), ticket tiers, refund policy, host trust signals, ' +
-      'vibe summary, crowd pulse, what-to-expect, and a computed startingPrice. ' +
-      'Authenticated callers receive an `isSaved` flag.',
+      'Returns full detail of a published or completed, public event (an attendee can still open a ' +
+      'past event they went to). Includes all media (presigned S3 URLs), ticket tiers, refund policy, ' +
+      'host trust signals, vibe summary, crowd pulse, what-to-expect, and a computed startingPrice. ' +
+      'Authenticated callers receive an `isSaved` flag. `displayStatus` is a real-time PUBLISHED/LIVE/COMPLETED label.',
   })
   @ApiOkResponse({ description: 'Event detail with signed media URLs.' })
   @ApiNotFoundResponse({ description: 'Event not found or not publicly available.' })
@@ -309,7 +309,9 @@ export class EventsController {
   @Roles('HOST')
   @ApiOperation({
     summary: "List host's own events",
-    description: 'Returns the authenticated host\'s events. Filter by status.',
+    description:
+      "Returns the authenticated host's events. Filter by `status` (now includes COMPLETED). Each item " +
+      'also carries a `displayStatus` (PUBLISHED/LIVE/COMPLETED) for real-time badges; raw `status` drives the tab filter.',
   })
   @ApiOkResponse({ description: 'Paginated list of host events.' })
   getMyEvents(
@@ -339,6 +341,7 @@ export class EventsController {
         languages: ['English', 'Hindi'],
         tags: ['yoga', 'wellness', 'outdoor'],
         eventDate: '2026-08-15T00:00:00.000Z',
+        endDate: null,
         startTime: '07:00',
         endTime: '08:30',
         venueName: 'Lodhi Garden',
@@ -363,6 +366,7 @@ export class EventsController {
         submittedAt: null,
         graphProcessedAt: null,
         status: 'DRAFT',
+        displayStatus: 'DRAFT',
         createdAt: '2026-07-01T10:00:00.000Z',
         updatedAt: '2026-07-01T10:00:00.000Z',
         tickets: [

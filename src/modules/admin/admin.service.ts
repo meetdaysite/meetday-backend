@@ -47,6 +47,7 @@ import {
   EventChanges,
   VenueMateriality,
 } from '../events/event-changes.util';
+import { APPROVED_EVENT_STATUSES } from '../events/event-time.util';
 
 @Injectable()
 export class AdminService {
@@ -1361,7 +1362,8 @@ export class AdminService {
 
   private async syncTotalEventsHosted(hostProfileId: string): Promise<void> {
     const count = await this.prisma.event.count({
-      where: { hostProfileId, status: 'PUBLISHED' },
+      // Count both so the tally stays stable when the completion cron flips PUBLISHED → COMPLETED.
+      where: { hostProfileId, status: { in: APPROVED_EVENT_STATUSES } },
     });
     await this.prisma.hostProfile.update({
       where: { id: hostProfileId },

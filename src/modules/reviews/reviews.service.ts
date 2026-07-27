@@ -38,6 +38,8 @@ export class ReviewsService {
       select: {
         id: true,
         eventDate: true,
+        endDate: true,
+        startTime: true,
         endTime: true,
         title: true,
         categoryId: true,

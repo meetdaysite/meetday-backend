@@ -23,6 +23,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { APPROVED_EVENT_STATUSES } from '../events/event-time.util';
 import { StorageService } from '../../common/storage/storage.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { ConsentService } from '../consent/consent.service';
@@ -1263,7 +1264,7 @@ export class CommunitiesService {
       select: {
         categories: { select: { categoryId: true } },
         events: {
-          where: { status: EventStatus.PUBLISHED, categoryId: { not: null } },
+          where: { status: { in: APPROVED_EVENT_STATUSES }, categoryId: { not: null } },
           select: { categoryId: true },
         },
       },
@@ -1526,7 +1527,7 @@ export class CommunitiesService {
       select: {
         categories: { select: { categoryId: true } },
         events: {
-          where: { status: EventStatus.PUBLISHED, categoryId: { not: null } },
+          where: { status: { in: APPROVED_EVENT_STATUSES }, categoryId: { not: null } },
           select: { categoryId: true },
         },
       },
@@ -2018,7 +2019,8 @@ export class CommunitiesService {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
 
-    const eventWhere = { communityId, event: { status: EventStatus.PUBLISHED } };
+    // The community's full experience list/count — completed events belong here too, not just upcoming.
+    const eventWhere = { communityId, event: { status: { in: APPROVED_EVENT_STATUSES } } };
     const [total, communityEvents] = await Promise.all([
       this.prisma.communityEvent.count({ where: eventWhere }),
       this.prisma.communityEvent.findMany({
@@ -2109,7 +2111,7 @@ export class CommunitiesService {
           select: {
             categories: { select: { categoryId: true } },
             events: {
-              where: { status: EventStatus.PUBLISHED, categoryId: { not: null } },
+              where: { status: { in: APPROVED_EVENT_STATUSES }, categoryId: { not: null } },
               select: { categoryId: true },
             },
           },

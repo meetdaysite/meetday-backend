@@ -172,7 +172,8 @@ export class HostsController {
       'and the 5 most recent notifications. ' +
       'The `period` query param controls the window for overview stats and their % change vs the preceding equivalent window. ' +
       'ALL_TIME skips date filters and returns null for all delta fields. ' +
-      '"completed" in eventCounts is a derived status (PUBLISHED events whose eventDate is in the past) — no schema enum change.',
+      '"completed" in eventCounts is the persisted COMPLETED status (a completion cron flips PUBLISHED events once they end). ' +
+      'recentEvents[].status is a display status that may also be LIVE while an event is in progress.',
   })
   @ApiOkResponse({
     description: 'Dashboard summary for the authenticated host.',
@@ -200,6 +201,7 @@ export class HostsController {
               coverImageUrl: 'https://cdn.example.com/signed-url',
               city: 'Austin',
               eventDate: '2025-06-21T00:00:00.000Z',
+              endDate: '2025-06-22T00:00:00.000Z',
               endTime: '23:00',
               status: 'PUBLISHED',
               registrations: 1248,

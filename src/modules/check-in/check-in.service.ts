@@ -30,6 +30,8 @@ export class CheckInService {
       select: {
         title: true,
         eventDate: true,
+        endDate: true,
+        startTime: true,
         endTime: true,
         hostProfile: { select: { userId: true } },
       },

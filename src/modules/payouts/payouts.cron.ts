@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import { PayoutsService } from './payouts.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { APPROVED_EVENT_STATUSES } from '../events/event-time.util';
 
 @Injectable()
 export class PayoutsCron {
@@ -32,7 +33,9 @@ export class PayoutsCron {
     // so there's nothing to pay out (see prisma/scripts/seed-meetday-host.ts).
     const eligibleEvents = await this.prisma.event.findMany({
       where: {
-        status: 'PUBLISHED',
+        // COMPLETED events are the common case here (payouts run after the event ends); include both
+        // so a payout is never skipped just because the completion cron already flipped the status.
+        status: { in: APPROVED_EVENT_STATUSES },
         eventDate: { not: null },
         orders: { some: { status: 'CONFIRMED', payoutLineItem: null } },
         ...(meetdayHostProfileId && { hostProfileId: { not: meetdayHostProfileId } }),

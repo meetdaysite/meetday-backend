@@ -151,6 +151,14 @@ export class CreateEventDto {
   @IsDateString()
   eventDate?: string;
 
+  @ApiPropertyOptional({
+    example: '2026-06-17T00:00:00.000Z',
+    description: 'Last day for a multi-day event. Omit for single-day events (ends on eventDate).',
+  })
+  @IsOptional()
+  @IsDateString()
+  endDate?: string;
+
   @ApiPropertyOptional({ example: '10:00 AM', maxLength: 20 })
   @IsOptional()
   @IsString()
