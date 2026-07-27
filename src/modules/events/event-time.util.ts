@@ -7,6 +7,8 @@
 
 export interface EventTimeFields {
   eventDate: Date | null;
+  /** Last day for multi-day events. Null ⇒ single-day: the event ends on `eventDate`. */
+  endDate?: Date | null;
   startTime?: string | null;
   endTime?: string | null;
 }
@@ -36,13 +38,24 @@ export function getEventStartAt(event: EventTimeFields): Date | null {
   return start;
 }
 
-/** The instant the event ends. Falls back to the end of `eventDate`'s day if `endTime` is missing/malformed. */
+/**
+ * The instant the event ends.
+ *  - Multi-day: anchored to `endDate` (+ `endTime`, or end-of-day if `endTime` is missing/malformed).
+ *  - Single-day (`endDate` null): anchored to `eventDate`. If the end clock time lands at or before
+ *    the start clock time, the event crosses midnight (e.g. a 10 PM–2 AM club night) — roll the end
+ *    forward one day. An explicit `endDate` is always trusted and never rolled.
+ */
 export function getEventEndAt(event: EventTimeFields): Date | null {
   if (!event.eventDate) return null;
-  const end = new Date(event.eventDate);
+  const end = new Date(event.endDate ?? event.eventDate);
   const parsed = event.endTime ? parseTimeOfDay(event.endTime) : null;
   if (parsed) end.setHours(parsed.hours, parsed.minutes, 0, 0);
   else end.setHours(23, 59, 59, 999);
+
+  if (!event.endDate && parsed) {
+    const start = getEventStartAt(event);
+    if (start && end <= start) end.setDate(end.getDate() + 1);
+  }
   return end;
 }
 

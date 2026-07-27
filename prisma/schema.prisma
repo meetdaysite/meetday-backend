@@ -679,6 +679,7 @@ model Event {
 
   // Date & Location
   eventDate   DateTime?
+  endDate     DateTime? // last day for multi-day events; null ⇒ single-day (ends on eventDate)
   startTime   String?
   endTime     String?
   venueName   String?

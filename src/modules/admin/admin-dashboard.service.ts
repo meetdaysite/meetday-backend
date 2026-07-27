@@ -121,7 +121,7 @@ export class AdminDashboardService {
             startTime: { not: null },
             endTime: { not: null },
           },
-          select: { id: true, eventDate: true, startTime: true, endTime: true },
+          select: { id: true, eventDate: true, endDate: true, startTime: true, endTime: true },
         }),
       ]);
 
@@ -180,7 +180,7 @@ export class AdminDashboardService {
             startTime: { not: null },
             endTime: { not: null },
           },
-          select: { id: true, eventDate: true, startTime: true, endTime: true },
+          select: { id: true, eventDate: true, endDate: true, startTime: true, endTime: true },
         }),
         this.prisma.orderAttendee.count({ where: { checkedInAt: { gte: todayStart } } }),
         this.prisma.eventTicket.findMany({

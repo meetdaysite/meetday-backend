@@ -200,6 +200,7 @@ export class HostsController {
               coverImageUrl: 'https://cdn.example.com/signed-url',
               city: 'Austin',
               eventDate: '2025-06-21T00:00:00.000Z',
+              endDate: '2025-06-22T00:00:00.000Z',
               endTime: '23:00',
               status: 'PUBLISHED',
               registrations: 1248,

@@ -53,6 +53,7 @@ export class PayoutsService {
         id: true,
         title: true,
         eventDate: true,
+        endDate: true,
         startTime: true,
         endTime: true,
         hostProfileId: true,

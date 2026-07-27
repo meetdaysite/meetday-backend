@@ -1056,6 +1056,8 @@ export class HostsService {
         title: true,
         city: true,
         eventDate: true,
+        endDate: true,
+        startTime: true,
         endTime: true,
         status: true,
         tickets: { select: { soldCount: true } },
@@ -1143,7 +1145,7 @@ export class HostsService {
     // exact instant per event with the real endTime.
     const completedCandidates = await this.prisma.event.findMany({
       where: { hostProfileId, status: 'PUBLISHED', eventDate: { lte: now } },
-      select: { eventDate: true, endTime: true },
+      select: { eventDate: true, endDate: true, startTime: true, endTime: true },
     });
     const completedCount = completedCandidates.filter((e) => hasEventEnded(e)).length;
     const eventCounts = {
@@ -1216,6 +1218,7 @@ export class HostsService {
           coverImageUrl: coverUrl,
           city: e.city,
           eventDate: e.eventDate,
+          endDate: e.endDate,
           endTime: e.endTime,
           status: derivedStatus,
           registrations: e.tickets.reduce((sum, t) => sum + t.soldCount, 0),

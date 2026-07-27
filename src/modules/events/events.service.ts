@@ -67,6 +67,9 @@ export class EventsService {
     if (dto.isFree && dto.tickets?.some((t) => (t.price ?? 0) !== 0))
       throw new BadRequestException('All ticket prices must be 0 for a free event');
 
+    if (dto.endDate && dto.eventDate && new Date(dto.endDate) < new Date(dto.eventDate))
+      throw new BadRequestException('endDate cannot be before eventDate');
+
     const event = await this.prisma.$transaction(async (tx) => {
       return tx.event.create({
         data: {
@@ -78,6 +81,7 @@ export class EventsService {
           languages: dto.languages ?? [],
           tags: dto.tags ?? [],
           eventDate: dto.eventDate ? new Date(dto.eventDate) : null,
+          endDate: dto.endDate ? new Date(dto.endDate) : null,
           startTime: dto.startTime,
           endTime: dto.endTime,
           venueName: dto.venueName,
@@ -167,6 +171,15 @@ export class EventsService {
     const isFree = dto.isFree ?? (event.isFree as boolean);
     if (dto.tickets && isFree && dto.tickets.some((t) => (t.price ?? 0) !== 0))
       throw new BadRequestException('All ticket prices must be 0 for a free event');
+
+    // endDate/eventDate can each be set in this patch or already on the record — validate the
+    // effective pair so a partial update can't leave endDate before eventDate.
+    const effEventDate =
+      dto.eventDate !== undefined ? (dto.eventDate ? new Date(dto.eventDate) : null) : event.eventDate;
+    const effEndDate =
+      dto.endDate !== undefined ? (dto.endDate ? new Date(dto.endDate) : null) : event.endDate;
+    if (effEndDate && effEventDate && effEndDate < effEventDate)
+      throw new BadRequestException('endDate cannot be before eventDate');
 
     return this.prisma.$transaction(async (tx) => {
       // Lock the row and re-check status inside the transaction. This serialises against a
@@ -749,6 +762,7 @@ export class EventsService {
           title: true,
           eventType: true,
           eventDate: true,
+          endDate: true,
           startTime: true,
           venueName: true,
           tags: true,
@@ -804,6 +818,7 @@ export class EventsService {
         languages: true,
         tags: true,
         eventDate: true,
+        endDate: true,
         startTime: true,
         endTime: true,
         venueName: true,

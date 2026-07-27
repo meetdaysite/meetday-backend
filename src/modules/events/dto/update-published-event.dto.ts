@@ -27,8 +27,8 @@ function touchesLocation(o: UpdatePublishedEventDto): boolean {
  * Editable fields for an already-PUBLISHED event, submitted as an admin-reviewed revision.
  *
  * Only the whitelisted Tier 1 (content) and Tier 2 (venue) fields live here — locked fields
- * (eventDate/startTime/endTime, tickets, refundPolicy, isFree, visibility, ageRestriction) are
- * deliberately absent, so the global `forbidNonWhitelisted` ValidationPipe rejects any attempt
+ * (eventDate/endDate/startTime/endTime, tickets, refundPolicy, isFree, visibility, ageRestriction)
+ * are deliberately absent, so the global `forbidNonWhitelisted` ValidationPipe rejects any attempt
  * to change them through this route.
  *
  * All fields are optional; only the ones present are proposed as changes. Whenever any location

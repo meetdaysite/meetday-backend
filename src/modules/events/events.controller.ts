@@ -339,6 +339,7 @@ export class EventsController {
         languages: ['English', 'Hindi'],
         tags: ['yoga', 'wellness', 'outdoor'],
         eventDate: '2026-08-15T00:00:00.000Z',
+        endDate: null,
         startTime: '07:00',
         endTime: '08:30',
         venueName: 'Lodhi Garden',
