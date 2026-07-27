@@ -19,6 +19,20 @@ function makeFetchResponse(body: object, ok = true) {
   };
 }
 
+function makeFetchFailResponse(status: number, rawBody = 'error') {
+  return { ok: false, status, text: jest.fn().mockResolvedValue(rawBody) };
+}
+
+function sandboxTestFixtureMissBody(transactionId: string) {
+  return JSON.stringify({
+    code: 404,
+    timestamp: Date.now(),
+    message:
+      'Test environment: Request does not match any saved example. Learn more: https://help.sandbox.co.in/portal/en/kb/articles/sandbox-test-environment',
+    transaction_id: transactionId,
+  });
+}
+
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
 const hostPayoutAccountId = 'payout-account-uuid';
@@ -105,7 +119,7 @@ describe('PennyDropService', () => {
     });
 
     it('throws InternalServerErrorException when pennyless HTTP request fails', async () => {
-      (global as any).fetch = jest.fn().mockResolvedValue({ ok: false, status: 503 });
+      (global as any).fetch = jest.fn().mockResolvedValue(makeFetchFailResponse(503));
 
       await expect(
         service.initiatePennyDrop(hostPayoutAccountId, accountNumber, ifscCode, holderName, phone),
@@ -117,8 +131,42 @@ describe('PennyDropService', () => {
       (global as any).fetch = jest.fn().mockImplementation(() => {
         callCount++;
         if (callCount === 1) return Promise.resolve(makeFetchResponse({ transaction_id: 'x', data: { message: 'offline' } }));
-        return Promise.resolve({ ok: false, status: 500 });
+        return Promise.resolve(makeFetchFailResponse(500));
       });
+
+      await expect(
+        service.initiatePennyDrop(hostPayoutAccountId, accountNumber, ifscCode, holderName, phone),
+      ).rejects.toThrow(InternalServerErrorException);
+    });
+
+    it('returns FAILED (not throws) when pennyless hits the Sandbox test-environment "no saved example" 404', async () => {
+      (global as any).fetch = jest.fn().mockResolvedValue(makeFetchFailResponse(404, sandboxTestFixtureMissBody('txn_404_pennyless')));
+
+      const result = await service.initiatePennyDrop(hostPayoutAccountId, accountNumber, ifscCode, holderName, phone);
+
+      expect(result.verificationStatus).toBe('FAILED');
+      expect(result.pennyDropReference).toBe('txn_404_pennyless');
+      expect(result.failureReason).toBe('Invalid account number or IFSC');
+    });
+
+    it('returns FAILED (not throws) when the penny drop fallback hits the Sandbox test-environment "no saved example" 404', async () => {
+      let callCount = 0;
+      (global as any).fetch = jest.fn().mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return Promise.resolve(makeFetchResponse({ transaction_id: 'x', data: { message: 'offline' } }));
+        return Promise.resolve(makeFetchFailResponse(404, sandboxTestFixtureMissBody('txn_404_pennydrop')));
+      });
+
+      const result = await service.initiatePennyDrop(hostPayoutAccountId, accountNumber, ifscCode, holderName, phone);
+
+      expect(callCount).toBe(2);
+      expect(result.verificationStatus).toBe('FAILED');
+      expect(result.pennyDropReference).toBe('txn_404_pennydrop');
+      expect(result.failureReason).toBe('Account not found');
+    });
+
+    it('still throws InternalServerErrorException for a 404 that does not match the Sandbox test-fixture shape', async () => {
+      (global as any).fetch = jest.fn().mockResolvedValue(makeFetchFailResponse(404, 'Not Found'));
 
       await expect(
         service.initiatePennyDrop(hostPayoutAccountId, accountNumber, ifscCode, holderName, phone),

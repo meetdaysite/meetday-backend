@@ -96,10 +96,12 @@ const baseProfile = {
 describe('HostsService', () => {
   let service: HostsService;
   let prisma: ReturnType<typeof makePrisma>;
+  let mockNotifications: { create: jest.Mock };
 
   beforeEach(async () => {
     prisma = makePrisma();
     jest.clearAllMocks();
+    mockNotifications = { create: jest.fn().mockResolvedValue(undefined) };
 
     const module = await Test.createTestingModule({
       providers: [
@@ -114,7 +116,7 @@ describe('HostsService', () => {
         { provide: SubscriptionService, useValue: mockSubscriptionService },
         { provide: PennyDropService, useValue: mockPennyDropService },
         { provide: getQueueToken('mail'), useValue: mockMailQueue },
-        { provide: NotificationsService, useValue: { create: jest.fn().mockResolvedValue(undefined) } },
+        { provide: NotificationsService, useValue: mockNotifications },
         { provide: StorageService, useValue: { getPresignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/img') } },
         { provide: AuditLogService, useValue: { log: jest.fn() } },
         { provide: ConsentService, useValue: { hasActiveConsent: jest.fn().mockResolvedValue(true), recordConsent: jest.fn().mockResolvedValue(undefined) } },
@@ -290,32 +292,72 @@ describe('HostsService', () => {
       expect(mockPennyDropService.initiatePennyDrop).toHaveBeenCalled();
     });
 
-    it('hard-deletes PENDING_PENNY_DROP payout account before creating new one', async () => {
+    it('resets an existing PENDING_PENNY_DROP payout account in place instead of creating a new one', async () => {
       prisma.hostProfile.findUnique.mockResolvedValue({
         ...baseProfile,
-        payoutAccount: { id: 'old-pa', status: 'PENDING_PENNY_DROP', deactivatedAt: null },
+        payoutAccount: { id: 'old-pa', status: 'PENDING_PENNY_DROP', deactivatedAt: null, maskedAccountNumber: 'XXXX0000', bankName: 'Old Bank', accountHolderName: 'Old Name' },
       });
-      prisma.hostPayoutAccount.delete.mockResolvedValue({});
+      prisma.hostPayoutAccountHistory.create.mockResolvedValue({});
+      prisma.hostPayoutAccount.update.mockResolvedValue({ id: 'old-pa' });
 
       await service.verifyBank(userId, kycDto);
-      expect(prisma.hostPayoutAccount.delete).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'old-pa' } }),
-      );
-    });
 
-    it('soft-deletes PENDING_ADMIN_REVIEW payout account', async () => {
-      prisma.hostProfile.findUnique.mockResolvedValue({
-        ...baseProfile,
-        payoutAccount: { id: 'old-pa', status: 'PENDING_ADMIN_REVIEW', deactivatedAt: null },
-      });
-
-      await service.verifyBank(userId, kycDto);
+      expect(prisma.hostPayoutAccount.create).not.toHaveBeenCalled();
+      expect(prisma.hostPayoutAccount.delete).not.toHaveBeenCalled();
       expect(prisma.hostPayoutAccount.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'old-pa' },
-          data: expect.objectContaining({ status: 'DEACTIVATED', deactivationReason: 'RESUBMITTED_KYC' }),
+          data: expect.objectContaining({ status: 'PENDING_PENNY_DROP', maskedAccountNumber: 'XXXX9012' }),
         }),
       );
+    });
+
+    it('resets an existing payout account of any prior status in place and logs the change to history', async () => {
+      prisma.hostProfile.findUnique.mockResolvedValue({
+        ...baseProfile,
+        payoutAccount: { id: 'old-pa', status: 'PENDING_ADMIN_REVIEW', deactivatedAt: null, maskedAccountNumber: 'XXXX0000', bankName: 'Old Bank', accountHolderName: 'Old Name' },
+      });
+      prisma.hostPayoutAccountHistory.create.mockResolvedValue({});
+      prisma.hostPayoutAccount.update.mockResolvedValue({ id: 'old-pa' });
+
+      await service.verifyBank(userId, kycDto);
+
+      expect(prisma.hostPayoutAccount.create).not.toHaveBeenCalled();
+      expect(prisma.hostPayoutAccountHistory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            hostPayoutAccountId: 'old-pa',
+            previousStatus: 'PENDING_ADMIN_REVIEW',
+            newStatus: 'PENDING_PENNY_DROP',
+            changeReason: 'RESUBMITTED_KYC',
+          }),
+        }),
+      );
+      expect(prisma.hostPayoutAccount.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'old-pa' },
+          data: expect.objectContaining({
+            status: 'PENDING_PENNY_DROP',
+            deactivatedAt: null,
+            deactivationReason: null,
+          }),
+        }),
+      );
+    });
+
+    it('reuses the payout account row even when it was left deactivated by a prior resubmission attempt', async () => {
+      // Regression test: hostProfileId is @unique on HostPayoutAccount, so a second row can
+      // never be created for the same host — the existing row (deactivated or not) must be reused.
+      prisma.hostProfile.findUnique.mockResolvedValue({
+        ...baseProfile,
+        payoutAccount: { id: 'old-pa', status: 'DEACTIVATED', deactivatedAt: new Date(), maskedAccountNumber: 'XXXX0000', bankName: 'Old Bank', accountHolderName: 'Old Name' },
+      });
+      prisma.hostPayoutAccountHistory.create.mockResolvedValue({});
+      prisma.hostPayoutAccount.update.mockResolvedValue({ id: 'old-pa' });
+
+      await expect(service.verifyBank(userId, kycDto)).resolves.toBeDefined();
+
+      expect(prisma.hostPayoutAccount.create).not.toHaveBeenCalled();
     });
 
     it('throws BadRequestException when PAN is missing', async () => {
@@ -372,6 +414,12 @@ describe('HostsService', () => {
         });
         prisma.hostProfile.update.mockResolvedValue({});
         prisma.hostPayoutAccount.update.mockResolvedValue({});
+        prisma.hostProfile.findUnique.mockResolvedValueOnce({ ...baseProfile, payoutAccount: null }).mockResolvedValueOnce({
+          kycStatus: 'FAILED',
+          panVerificationStatus: 'FAILED',
+          bankVerificationStatus: 'NOT_SUBMITTED',
+          kycFailureReason: 'Name mismatch',
+        });
 
         await service.verifyBank(userId, kycDto);
 
@@ -380,7 +428,29 @@ describe('HostsService', () => {
           call[0]?.data?.kycStatus === 'FAILED',
         );
         expect(failedCall).toBeDefined();
+        // Bank verification never actually ran — its status shouldn't be left at 'PENDING'.
+        expect(failedCall[0].data.bankVerificationStatus).toBe('NOT_SUBMITTED');
         expect(mockMailQueue.add).toHaveBeenCalledWith('kyc-failed', expect.any(Object));
+        // Must not send a misleading "under review" notification for a request that just failed.
+        expect(mockNotifications.create).not.toHaveBeenCalledWith(
+          expect.anything(),
+          'kyc_submitted',
+          expect.anything(),
+          expect.anything(),
+        );
+      });
+
+      it('does not touch the payout account status/bank flow when PAN fails synchronously', async () => {
+        mockKycProvider.initiateVerification.mockResolvedValue({
+          referenceId: 'pan-ref',
+          verificationStatus: 'FAILED',
+          failureReason: 'Name mismatch',
+        });
+        prisma.hostProfile.update.mockResolvedValue({});
+
+        await service.verifyBank(userId, kycDto);
+
+        expect(mockPennyDropService.initiatePennyDrop).not.toHaveBeenCalled();
       });
     });
   });
@@ -440,10 +510,24 @@ describe('HostsService', () => {
       expect(prisma.hostPayoutAccount.update).not.toHaveBeenCalled();
     });
 
+    it('ignores stale webhooks with a mismatched pennyDropReference', async () => {
+      prisma.hostPayoutAccount.findUnique.mockResolvedValue({
+        id: payoutAccountId,
+        deactivatedAt: null,
+        pennyDropReference: 'a-newer-ref',
+        hostProfile: { ...baseProfile, panVerificationStatus: 'VERIFIED', user: baseProfile.user },
+      });
+
+      await service.handleBankWebhook(webhookDto, rawBody, validSignature);
+
+      expect(prisma.hostPayoutAccount.update).not.toHaveBeenCalled();
+    });
+
     it('sets payout status=PENDING_ADMIN_REVIEW on SUCCESS', async () => {
       prisma.hostPayoutAccount.findUnique.mockResolvedValue({
         id: payoutAccountId,
         deactivatedAt: null,
+        pennyDropReference: 'pd-ref',
         hostProfile: { ...baseProfile, panVerificationStatus: 'PENDING', user: baseProfile.user },
       });
       prisma.hostPayoutAccount.update.mockResolvedValue({});
@@ -463,6 +547,7 @@ describe('HostsService', () => {
       prisma.hostPayoutAccount.findUnique.mockResolvedValue({
         id: payoutAccountId,
         deactivatedAt: null,
+        pennyDropReference: 'pd-ref',
         hostProfile: { ...baseProfile, id: hostProfileId, panVerificationStatus: 'VERIFIED', user: baseProfile.user },
       });
       prisma.hostPayoutAccount.update.mockResolvedValue({});
@@ -482,6 +567,7 @@ describe('HostsService', () => {
       prisma.hostPayoutAccount.findUnique.mockResolvedValue({
         id: payoutAccountId,
         deactivatedAt: null,
+        pennyDropReference: 'pd-ref',
         hostProfile: { ...baseProfile, id: hostProfileId, panVerificationStatus: 'PENDING', user: baseProfile.user },
       });
       prisma.hostPayoutAccount.update.mockResolvedValue({});

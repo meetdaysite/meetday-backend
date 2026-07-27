@@ -56,8 +56,20 @@ export class PennyDropService {
     const pennylessRes = await fetch(pennylessUrl, { headers });
 
     if (!pennylessRes.ok) {
+      const errorBody = await pennylessRes.text();
+      const fixtureMiss = SandboxAuthService.matchSandboxTestFixtureMiss(pennylessRes.status, errorBody);
+      if (fixtureMiss) {
+        this.logger.warn(
+          `Bank verification FAILED (pennyless, Sandbox test-environment: no matching fixture) for payoutAccountId: ${hostPayoutAccountId}`,
+        );
+        return {
+          pennyDropReference: fixtureMiss.transactionId,
+          verificationStatus: 'FAILED',
+          failureReason: 'Invalid account number or IFSC',
+        };
+      }
       this.logger.error(
-        `Pennyless verification request failed for payoutAccountId: ${hostPayoutAccountId} — HTTP ${pennylessRes.status}`,
+        `Pennyless verification request failed for payoutAccountId: ${hostPayoutAccountId} — HTTP ${pennylessRes.status} — body: ${errorBody}`,
       );
       throw new InternalServerErrorException('Bank verification service unavailable');
     }
@@ -95,8 +107,20 @@ export class PennyDropService {
     const pennyDropRes = await fetch(pennyDropUrl, { headers });
 
     if (!pennyDropRes.ok) {
+      const errorBody = await pennyDropRes.text();
+      const fixtureMiss = SandboxAuthService.matchSandboxTestFixtureMiss(pennyDropRes.status, errorBody);
+      if (fixtureMiss) {
+        this.logger.warn(
+          `Bank verification FAILED (penny drop, Sandbox test-environment: no matching fixture) for payoutAccountId: ${hostPayoutAccountId}`,
+        );
+        return {
+          pennyDropReference: fixtureMiss.transactionId,
+          verificationStatus: 'FAILED',
+          failureReason: 'Account not found',
+        };
+      }
       this.logger.error(
-        `Penny drop request failed for payoutAccountId: ${hostPayoutAccountId} — HTTP ${pennyDropRes.status}`,
+        `Penny drop request failed for payoutAccountId: ${hostPayoutAccountId} — HTTP ${pennyDropRes.status} — body: ${errorBody}`,
       );
       throw new InternalServerErrorException('Bank verification service unavailable');
     }
