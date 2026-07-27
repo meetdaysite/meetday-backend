@@ -480,11 +480,13 @@ describe('EventsService', () => {
       media: [{ url: 'covers/photo.jpg', type: 'COVER', order: 0 }],
     };
 
-    it('returns event with signed media URLs', async () => {
+    it('returns event with signed media URLs and the raw key', async () => {
       prisma.event.findUnique.mockResolvedValue(eventWithMedia);
 
       const result = await service.getMyEventById(userId, eventId);
       expect(result.media[0].url).toBe('https://cdn.example.com/img');
+      // The host needs the raw key to echo back when editing media.
+      expect(result.media[0].key).toBe('covers/photo.jpg');
     });
 
     it('throws NotFoundException when event not found', async () => {
