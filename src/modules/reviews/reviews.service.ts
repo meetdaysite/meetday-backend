@@ -10,6 +10,7 @@ import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreateReviewDto } from './dto/create-review.dto';
 import { UpdateReviewDto } from './dto/update-review.dto';
+import { hasEventEnded } from '../events/event-time.util';
 
 @Injectable()
 export class ReviewsService {
@@ -34,10 +35,19 @@ export class ReviewsService {
     // Verify event has already taken place
     const event = await this.prisma.event.findUnique({
       where: { id: dto.eventId },
-      select: { id: true, eventDate: true, title: true, categoryId: true, hostProfile: { select: { userId: true } } },
+      select: {
+        id: true,
+        eventDate: true,
+        endDate: true,
+        startTime: true,
+        endTime: true,
+        title: true,
+        categoryId: true,
+        hostProfile: { select: { userId: true } },
+      },
     });
     if (!event) throw new NotFoundException('Event not found');
-    if (!event.eventDate || event.eventDate > new Date())
+    if (!hasEventEnded(event))
       throw new BadRequestException('You can only review an event after it has taken place');
 
     if (dto.highlights?.length) {

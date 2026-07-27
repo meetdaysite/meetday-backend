@@ -45,6 +45,17 @@ export class KycService implements KycProvider {
     });
     if (!res.ok) {
       const errorBody = await res.text();
+      const fixtureMiss = SandboxAuthService.matchSandboxTestFixtureMiss(res.status, errorBody);
+      if (fixtureMiss) {
+        this.logger.warn(
+          `PAN verification FAILED (Sandbox test-environment: no matching fixture) for hostProfileId: ${hostProfileId} — HTTP ${res.status}`,
+        );
+        return {
+          referenceId: fixtureMiss.transactionId,
+          verificationStatus: 'FAILED',
+          failureReason: 'PAN details could not be verified',
+        };
+      }
       this.logger.error(`PAN verification failed — HTTP ${res.status} — URL: ${panUrl} — body: ${errorBody}`);
       throw new InternalServerErrorException('PAN verification service unavailable');
     }

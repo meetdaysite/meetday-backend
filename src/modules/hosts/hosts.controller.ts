@@ -18,6 +18,7 @@ import {
   ApiBody,
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiExcludeEndpoint,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -172,7 +173,8 @@ export class HostsController {
       'and the 5 most recent notifications. ' +
       'The `period` query param controls the window for overview stats and their % change vs the preceding equivalent window. ' +
       'ALL_TIME skips date filters and returns null for all delta fields. ' +
-      '"completed" in eventCounts is a derived status (PUBLISHED events whose eventDate is in the past) — no schema enum change.',
+      '"completed" in eventCounts is the persisted COMPLETED status (a completion cron flips PUBLISHED events once they end). ' +
+      'recentEvents[].status is a display status that may also be LIVE while an event is in progress.',
   })
   @ApiOkResponse({
     description: 'Dashboard summary for the authenticated host.',
@@ -200,6 +202,7 @@ export class HostsController {
               coverImageUrl: 'https://cdn.example.com/signed-url',
               city: 'Austin',
               eventDate: '2025-06-21T00:00:00.000Z',
+              endDate: '2025-06-22T00:00:00.000Z',
               endTime: '23:00',
               status: 'PUBLISHED',
               registrations: 1248,
@@ -431,39 +434,7 @@ export class HostsController {
   @SkipThrottle()
   @Public()
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Razorpay penny drop webhook',
-    description:
-      'Called by Razorpay when the penny drop verification for a bank account completes. This endpoint is public (no auth). ' +
-      'In production this must be secured with Razorpay webhook signature validation. ' +
-      'On SUCCESS: payoutAccount.status becomes PENDING_ADMIN_REVIEW. If PAN has also been verified, kycStatus becomes VERIFIED. ' +
-      'On FAILED: payoutAccount.status becomes PENNY_DROP_FAILED, kycStatus becomes FAILED and a failure email is sent.',
-  })
-  @ApiBody({
-    type: BankWebhookDto,
-    examples: {
-      success: {
-        summary: 'Penny drop passed',
-        value: {
-          pennyDropReference: 'penny_abc123xyz',
-          hostPayoutAccountId: 'payout-uuid',
-          status: 'SUCCESS',
-          bankName: 'HDFC Bank',
-        },
-      },
-      failed: {
-        summary: 'Penny drop failed',
-        value: {
-          pennyDropReference: 'penny_abc123xyz',
-          hostPayoutAccountId: 'payout-uuid',
-          status: 'FAILED',
-          failureReason: 'Account not found',
-        },
-      },
-    },
-  })
-  @ApiOkResponse({ description: 'Webhook processed.' })
-  @ApiNotFoundResponse({ description: 'hostPayoutAccountId does not match any payout account.' })
+  @ApiExcludeEndpoint()
   handleBankWebhook(
     @Body() dto: BankWebhookDto,
     @RawBody() rawBody: Buffer,

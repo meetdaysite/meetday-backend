@@ -23,6 +23,7 @@ import { ApplyHostDto } from './dto/apply-host.dto';
 import { UpdateHostProfileDto } from './dto/update-host-profile.dto';
 import { VerifyBankDto } from './dto/submit-kyc.dto';
 import { BankWebhookDto } from './dto/bank-webhook.dto';
+import { deriveEventStatus } from '../events/event-time.util';
 import { UpgradeSubscriptionDto } from './dto/upgrade-subscription.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { StorageService } from '../../common/storage/storage.service';
@@ -309,7 +310,7 @@ export class HostsService {
     const panAlreadyVerified = profile.panVerificationStatus === 'VERIFIED';
     const maskedAccountNumber = 'XXXX' + dto.bankAccount.accountNumber.slice(-4);
     const existingPayout = profile.payoutAccount;
-    const isResubmission = !!(existingPayout && !existingPayout.deactivatedAt);
+    const isResubmission = !!existingPayout;
 
     // SPDI consent gates (IT Act 2000 / DPDP 2023) — record on first submission if not yet present
     const [hasKycConsent, hasBankConsent] = await Promise.all([
@@ -339,44 +340,63 @@ export class HostsService {
         },
       });
 
-      // Clean up any existing non-deactivated payout account
-      if (existingPayout && !existingPayout.deactivatedAt) {
-        if (existingPayout.status === 'PENDING_PENNY_DROP') {
-          // No financial operation yet — hard delete is safe
-          await tx.hostPayoutAccount.delete({ where: { id: existingPayout.id } });
-        } else {
-          await tx.hostPayoutAccount.update({
-            where: { id: existingPayout.id },
-            data: {
-              deactivatedAt: new Date(),
-              deactivationReason: 'RESUBMITTED_KYC',
-              status: 'DEACTIVATED',
-            },
-          });
-          await tx.hostPayoutAccountHistory.create({
-            data: {
-              hostPayoutAccountId: existingPayout.id,
-              previousStatus: existingPayout.status,
-              newStatus: 'DEACTIVATED',
-              changeReason: 'RESUBMITTED_KYC',
-            },
-          });
-        }
-      }
+      // hostProfileId is unique on HostPayoutAccount — a host can only ever have one row.
+      // Reuse the existing row for a new attempt instead of inserting a second one; the
+      // audit trail is preserved via HostPayoutAccountHistory, not by keeping the old row.
+      if (existingPayout) {
+        await tx.hostPayoutAccountHistory.create({
+          data: {
+            hostPayoutAccountId: existingPayout.id,
+            previousStatus: existingPayout.status,
+            newStatus: 'PENDING_PENNY_DROP',
+            previousMaskedAccountNumber: existingPayout.maskedAccountNumber,
+            newMaskedAccountNumber: maskedAccountNumber,
+            previousBankName: existingPayout.bankName,
+            newBankName: dto.bankAccount.bankName,
+            previousAccountHolderName: existingPayout.accountHolderName,
+            newAccountHolderName: dto.bankAccount.accountHolderName,
+            changeReason: 'RESUBMITTED_KYC',
+          },
+        });
 
-      // Create new payout account — bankName from user input; overwritten by Razorpay on success
-      const created = await tx.hostPayoutAccount.create({
-        data: {
-          hostProfileId: profile.id,
-          maskedAccountNumber,
-          accountHolderName: dto.bankAccount.accountHolderName,
-          bankName: dto.bankAccount.bankName,
-          status: 'PENDING_PENNY_DROP',
-          pennyDropInitiatedAt: new Date(),
-          kycStatusAtSubmission: 'PENDING',
-        },
-      });
-      newPayoutAccountId = created.id;
+        const reset = await tx.hostPayoutAccount.update({
+          where: { id: existingPayout.id },
+          data: {
+            maskedAccountNumber,
+            accountHolderName: dto.bankAccount.accountHolderName,
+            bankName: dto.bankAccount.bankName,
+            accountType: null,
+            status: 'PENDING_PENNY_DROP',
+            pennyDropReference: null,
+            pennyDropInitiatedAt: new Date(),
+            pennyDropCompletedAt: null,
+            pennyDropFailReason: null,
+            razorpayContactId: null,
+            razorpayFundAccountId: null,
+            verifiedBy: null,
+            adminReviewedAt: null,
+            rejectionReason: null,
+            kycStatusAtSubmission: 'PENDING',
+            deactivatedAt: null,
+            deactivationReason: null,
+          },
+        });
+        newPayoutAccountId = reset.id;
+      } else {
+        // First-ever submission — bankName from user input; overwritten by Razorpay on success
+        const created = await tx.hostPayoutAccount.create({
+          data: {
+            hostProfileId: profile.id,
+            maskedAccountNumber,
+            accountHolderName: dto.bankAccount.accountHolderName,
+            bankName: dto.bankAccount.bankName,
+            status: 'PENDING_PENNY_DROP',
+            pennyDropInitiatedAt: new Date(),
+            kycStatusAtSubmission: 'PENDING',
+          },
+        });
+        newPayoutAccountId = created.id;
+      }
     });
 
     // --- PAN verification ---
@@ -411,16 +431,10 @@ export class HostsService {
         panSucceededSync = panResult.verificationStatus === 'VERIFIED';
       }
 
-      // Skip bank verification if PAN already failed synchronously — prevents a duplicate kyc-failed
-      // email for the same submission. Async providers (verificationStatus === undefined) always proceed.
+      // Skip bank verification if PAN already failed synchronously — the kyc_failed
+      // notification was already sent by applyPanVerificationResult above.
+      // Async providers (verificationStatus === undefined) always proceed.
       if (panResult.verificationStatus === 'FAILED') {
-        void this.notificationsService.create(
-          userId,
-          'kyc_submitted',
-          'KYC Under Review',
-          'Your KYC documents have been submitted and are being verified.',
-        ).catch((err) => this.logger.error('Failed to create kyc_submitted notification', err));
-
         const failedProfile = await this.prisma.hostProfile.findUnique({
           where: { id: profile.id },
           select: { kycStatus: true, panVerificationStatus: true, bankVerificationStatus: true, kycFailureReason: true },
@@ -540,6 +554,9 @@ export class HostsService {
         where: { id: profile.id },
         data: {
           panVerificationStatus: 'FAILED',
+          // Bank verification is skipped when PAN fails synchronously (see verifyBank) — reset it
+          // from the 'PENDING' set moments earlier so it doesn't look like a check is in progress.
+          bankVerificationStatus: 'NOT_SUBMITTED',
           kycStatus: 'FAILED',
           kycFailureReason: failureReason ?? null,
         },
@@ -664,6 +681,16 @@ export class HostsService {
     if (payoutAccount.deactivatedAt) {
       this.logger.log(
         `Bank webhook received for deactivated payout account ${payoutAccount.id} — ignoring`,
+      );
+      return;
+    }
+
+    // Stale webhook from a prior attempt on a since-resubmitted (reused) row — the row is
+    // reset with a new pennyDropReference on each resubmission, so a mismatch means this
+    // webhook belongs to an earlier attempt.
+    if (payoutAccount.pennyDropReference !== dto.pennyDropReference) {
+      this.logger.log(
+        `Bank webhook reference mismatch for payout account ${payoutAccount.id} — ignoring stale webhook`,
       );
       return;
     }
@@ -951,7 +978,6 @@ export class HostsService {
     if (!hostProfile) throw new NotFoundException('Host profile not found');
 
     const hostProfileId = hostProfile.id;
-    const now = new Date();
     const { start, end, prevStart, prevEnd } = this.getPeriodBounds(period);
 
     const periodFilter = start ? { gte: start, lte: end! } : undefined;
@@ -1055,6 +1081,8 @@ export class HostsService {
         title: true,
         city: true,
         eventDate: true,
+        endDate: true,
+        startTime: true,
         endTime: true,
         status: true,
         tickets: { select: { soldCount: true } },
@@ -1136,15 +1164,14 @@ export class HostsService {
     for (const row of rawEventCounts) {
       countMap[row.status] = row._count._all;
     }
-    const publishedAll = countMap['PUBLISHED'] ?? 0;
-    const completedCount = await this.prisma.event.count({
-      where: { hostProfileId, status: 'PUBLISHED', eventDate: { lt: now } },
-    });
+    // COMPLETED is now a persisted status (the completion cron flips ended PUBLISHED events), so the
+    // groupBy already separates the two buckets — no per-event date math needed. A just-ended event
+    // counts as published until the next sweep (≤30 min); acceptable lag for a dashboard summary.
     const eventCounts = {
       draft: countMap['DRAFT'] ?? 0,
       underReview: countMap['UNDER_REVIEW'] ?? 0,
-      published: publishedAll - completedCount,
-      completed: completedCount,
+      published: countMap['PUBLISHED'] ?? 0,
+      completed: countMap['COMPLETED'] ?? 0,
       cancelled: countMap['CANCELLED'] ?? 0,
     };
 
@@ -1202,14 +1229,14 @@ export class HostsService {
         const coverUrl = e.media[0]?.url
           ? await this.storageService.getPresignedDownloadUrl(e.media[0].url)
           : null;
-        const derivedStatus =
-          e.status === 'PUBLISHED' && e.eventDate < now ? 'COMPLETED' : e.status;
+        const derivedStatus = deriveEventStatus(e);
         return {
           id: e.id,
           title: e.title,
           coverImageUrl: coverUrl,
           city: e.city,
           eventDate: e.eventDate,
+          endDate: e.endDate,
           endTime: e.endTime,
           status: derivedStatus,
           registrations: e.tickets.reduce((sum, t) => sum + t.soldCount, 0),

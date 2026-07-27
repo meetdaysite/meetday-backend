@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import { PayoutsService } from './payouts.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { APPROVED_EVENT_STATUSES } from '../events/event-time.util';
 
 @Injectable()
 export class PayoutsCron {
@@ -18,6 +19,7 @@ export class PayoutsCron {
   @Cron('0 4 * * *', { name: 'process-due-payouts', timeZone: 'UTC' })
   async processDuePayouts() {
     const xConfigured = !!this.configService.get<string>('razorpay.xAccountNumber');
+    const meetdayHostProfileId = this.configService.get<string>('houseAccount.meetdayHostProfileId');
 
     this.logger.log(
       xConfigured
@@ -27,11 +29,16 @@ export class PayoutsCron {
 
     // Find all PUBLISHED events that have concluded and have confirmed unpaid orders.
     // The service method enforces the hold-days window and other eligibility checks.
+    // Meetday's own house account is excluded — its revenue never leaves the platform,
+    // so there's nothing to pay out (see prisma/scripts/seed-meetday-host.ts).
     const eligibleEvents = await this.prisma.event.findMany({
       where: {
-        status: 'PUBLISHED',
+        // COMPLETED events are the common case here (payouts run after the event ends); include both
+        // so a payout is never skipped just because the completion cron already flipped the status.
+        status: { in: APPROVED_EVENT_STATUSES },
         eventDate: { not: null },
         orders: { some: { status: 'CONFIRMED', payoutLineItem: null } },
+        ...(meetdayHostProfileId && { hostProfileId: { not: meetdayHostProfileId } }),
       },
       select: { id: true },
     });

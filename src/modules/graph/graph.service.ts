@@ -12,6 +12,7 @@ import {
   pairKey,
 } from './graph.constants';
 import { edgeRecomputeSql } from './graph.sql';
+import { APPROVED_EVENT_STATUSES } from '../events/event-time.util';
 
 @Injectable()
 export class GraphService {
@@ -31,7 +32,8 @@ export class GraphService {
     const cutoff = new Date(Date.now() - EVENT_SETTLE_HOURS * 60 * 60 * 1000);
     const events = await this.prisma.event.findMany({
       where: {
-        status: 'PUBLISHED',
+        // Post-event edge computation runs on ended events, which are usually COMPLETED by now.
+        status: { in: APPROVED_EVENT_STATUSES },
         eventDate: { lt: cutoff },
         graphProcessedAt: null,
       },

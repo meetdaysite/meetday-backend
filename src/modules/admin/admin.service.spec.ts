@@ -47,7 +47,7 @@ function makePrisma() {
     hostProfile: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn(), count: jest.fn() },
     coupon: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn(), count: jest.fn() },
     category: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn() },
-    event: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn(), update: jest.fn() },
+    event: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
     order: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn(), updateMany: jest.fn() },
     interest: { findFirst: jest.fn(), findUnique: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn() },
     interestCategory: { deleteMany: jest.fn().mockResolvedValue({}), createMany: jest.fn().mockResolvedValue({}) },
@@ -76,6 +76,7 @@ const adminUser = {
   email: 'admin@meetday.in',
   firstName: 'Super',
   lastName: 'Admin',
+  avatarUrl: null,
   isActive: true,
   role: { name: 'SUPER_ADMIN' },
 };
@@ -712,14 +713,25 @@ describe('AdminService', () => {
 
     it('publishes the event and dispatches approval email', async () => {
       prisma.event.findUnique.mockResolvedValue(underReviewEvent);
-      prisma.event.update.mockResolvedValue({ ...underReviewEvent, status: 'PUBLISHED' });
+      prisma.event.updateMany.mockResolvedValue({ count: 1 });
 
       await service.approveEvent('event-uuid', adminId);
 
-      expect(prisma.event.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ status: 'PUBLISHED' }) }),
+      expect(prisma.event.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ status: 'UNDER_REVIEW' }),
+          data: expect.objectContaining({ status: 'PUBLISHED' }),
+        }),
       );
       expect(mockMailQueue.add).toHaveBeenCalledWith('event-approved', expect.any(Object));
+    });
+
+    it('aborts without publishing when the event was recalled (0 rows updated)', async () => {
+      prisma.event.findUnique.mockResolvedValue(underReviewEvent);
+      prisma.event.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.approveEvent('event-uuid', adminId)).rejects.toThrow(BadRequestException);
+      expect(mockMailQueue.add).not.toHaveBeenCalledWith('event-approved', expect.any(Object));
     });
 
     it('throws BadRequestException when event is not UNDER_REVIEW', async () => {
@@ -785,16 +797,27 @@ describe('AdminService', () => {
 
     it('reverts event to DRAFT with rejection remark and sends email', async () => {
       prisma.event.findUnique.mockResolvedValue(underReviewEvent);
-      prisma.event.update.mockResolvedValue({ ...underReviewEvent, status: 'DRAFT' });
+      prisma.event.updateMany.mockResolvedValue({ count: 1 });
 
       await service.rejectEvent('event-uuid', adminId, { remark: 'Incomplete description' });
 
-      expect(prisma.event.update).toHaveBeenCalledWith(
+      expect(prisma.event.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
+          where: expect.objectContaining({ status: 'UNDER_REVIEW' }),
           data: expect.objectContaining({ status: 'DRAFT', adminRejectionRemark: 'Incomplete description' }),
         }),
       );
       expect(mockMailQueue.add).toHaveBeenCalledWith('event-rejected', expect.any(Object));
+    });
+
+    it('aborts without stamping a rejection when the event was recalled (0 rows updated)', async () => {
+      prisma.event.findUnique.mockResolvedValue(underReviewEvent);
+      prisma.event.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.rejectEvent('event-uuid', adminId, { remark: 'remark' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockMailQueue.add).not.toHaveBeenCalledWith('event-rejected', expect.any(Object));
     });
 
     it('throws BadRequestException when event is not UNDER_REVIEW', async () => {

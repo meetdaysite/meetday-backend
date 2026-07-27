@@ -24,7 +24,7 @@ export function edgeRecomputeSql(userIds?: string[]): Prisma.Sql {
       JOIN events e       ON e.id  = o."eventId"
       WHERE o.status = 'CONFIRMED'
         AND ${userFilter}
-        AND e.status = 'PUBLISHED'
+        AND e.status IN ('PUBLISHED', 'COMPLETED')
         AND e."eventDate" IS NOT NULL
         AND e."eventDate" < NOW()
       GROUP BY oa."userId", o."eventId"

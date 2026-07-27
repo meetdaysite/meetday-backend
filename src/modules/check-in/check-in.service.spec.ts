@@ -104,7 +104,7 @@ describe('CheckInService', () => {
 
     it('creates session and returns scannerUrl with frontendUrl', async () => {
       const result = await service.createScannerSession(hostUserId, eventId, dto);
-      expect(result.scannerUrl).toMatch(/^http:\/\/localhost:3000\/scan\?token=/);
+      expect(result.scannerUrl).toMatch(/^http:\/\/localhost:3000\/host\/scan\?token=/);
       expect(prisma.eventScannerSession.create).toHaveBeenCalled();
     });
 

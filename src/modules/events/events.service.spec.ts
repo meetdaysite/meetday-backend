@@ -16,7 +16,7 @@ import { RefundsService } from '../refunds/refunds.service';
 
 function makePrisma() {
   const prisma: any = {
-    hostProfile: { findUnique: jest.fn() },
+    hostProfile: { findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}) },
     category: { findFirst: jest.fn() },
     event: {
       create: jest.fn(),
@@ -36,6 +36,9 @@ function makePrisma() {
   };
   prisma.$transaction = jest.fn().mockImplementation(async (fn: any) => fn(prisma));
   prisma.$executeRaw = jest.fn().mockResolvedValue(1);
+  // updateEvent's in-transaction `SELECT ... FOR UPDATE` status re-check. Default to DRAFT;
+  // tests exercising the under-review recall override this per-call.
+  prisma.$queryRaw = jest.fn().mockResolvedValue([{ status: 'DRAFT' }]);
   return prisma;
 }
 
@@ -385,6 +388,29 @@ describe('EventsService', () => {
         service.updateEvent(userId, eventId, { categoryId: 'bad-cat' } as any),
       ).rejects.toThrow(NotFoundException);
     });
+
+    it('recalls an under-review event to DRAFT (clearing submittedAt) when edited', async () => {
+      prisma.event.findUnique.mockResolvedValue({ ...draftEvent, status: 'UNDER_REVIEW' });
+      prisma.$queryRaw.mockResolvedValueOnce([{ status: 'UNDER_REVIEW' }]);
+
+      await service.updateEvent(userId, eventId, { title: 'Updated title' } as any);
+
+      expect(prisma.event.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: 'DRAFT', submittedAt: null }),
+        }),
+      );
+    });
+
+    it('does not change status when editing a draft event', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([{ status: 'DRAFT' }]);
+
+      await service.updateEvent(userId, eventId, { title: 'Updated title' } as any);
+
+      expect(prisma.event.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'DRAFT', submittedAt: null }) }),
+      );
+    });
   });
 
   // ── getMyEvents() ─────────────────────────────────────────────────────────
@@ -454,11 +480,13 @@ describe('EventsService', () => {
       media: [{ url: 'covers/photo.jpg', type: 'COVER', order: 0 }],
     };
 
-    it('returns event with signed media URLs', async () => {
+    it('returns event with signed media URLs and the raw key', async () => {
       prisma.event.findUnique.mockResolvedValue(eventWithMedia);
 
       const result = await service.getMyEventById(userId, eventId);
       expect(result.media[0].url).toBe('https://cdn.example.com/img');
+      // The host needs the raw key to echo back when editing media.
+      expect(result.media[0].key).toBe('covers/photo.jpg');
     });
 
     it('throws NotFoundException when event not found', async () => {

@@ -39,6 +39,7 @@ import { CheckInService } from '../check-in/check-in.service';
 import { GraphService } from '../graph/graph.service';
 import { CreateScannerSessionDto } from '../check-in/dto/create-scanner-session.dto';
 import { CreateEventDto } from './dto/create-event.dto';
+import { UpdatePublishedEventDto } from './dto/update-published-event.dto';
 import { GenerateDraftDto } from './dto/generate-draft.dto';
 import { ListMyEventsQueryDto } from './dto/list-my-events-query.dto';
 import { BrowseEventsQueryDto } from './dto/browse-events-query.dto';
@@ -187,10 +188,10 @@ export class EventsController {
   @ApiOperation({
     summary: 'Get public event detail',
     description:
-      'Returns full detail of a published, public event. ' +
-      'Includes all media (presigned S3 URLs), ticket tiers, refund policy, host trust signals, ' +
-      'vibe summary, crowd pulse, what-to-expect, and a computed startingPrice. ' +
-      'Authenticated callers receive an `isSaved` flag.',
+      'Returns full detail of a published or completed, public event (an attendee can still open a ' +
+      'past event they went to). Includes all media (presigned S3 URLs), ticket tiers, refund policy, ' +
+      'host trust signals, vibe summary, crowd pulse, what-to-expect, and a computed startingPrice. ' +
+      'Authenticated callers receive an `isSaved` flag. `displayStatus` is a real-time PUBLISHED/LIVE/COMPLETED label.',
   })
   @ApiOkResponse({ description: 'Event detail with signed media URLs.' })
   @ApiNotFoundResponse({ description: 'Event not found or not publicly available.' })
@@ -308,7 +309,9 @@ export class EventsController {
   @Roles('HOST')
   @ApiOperation({
     summary: "List host's own events",
-    description: 'Returns the authenticated host\'s events. Filter by status.',
+    description:
+      "Returns the authenticated host's events. Filter by `status` (now includes COMPLETED). Each item " +
+      'also carries a `displayStatus` (PUBLISHED/LIVE/COMPLETED) for real-time badges; raw `status` drives the tab filter.',
   })
   @ApiOkResponse({ description: 'Paginated list of host events.' })
   getMyEvents(
@@ -338,6 +341,7 @@ export class EventsController {
         languages: ['English', 'Hindi'],
         tags: ['yoga', 'wellness', 'outdoor'],
         eventDate: '2026-08-15T00:00:00.000Z',
+        endDate: null,
         startTime: '07:00',
         endTime: '08:30',
         venueName: 'Lodhi Garden',
@@ -362,6 +366,7 @@ export class EventsController {
         submittedAt: null,
         graphProcessedAt: null,
         status: 'DRAFT',
+        displayStatus: 'DRAFT',
         createdAt: '2026-07-01T10:00:00.000Z',
         updatedAt: '2026-07-01T10:00:00.000Z',
         tickets: [
@@ -500,14 +505,16 @@ export class EventsController {
   @UseGuards(RolesGuard)
   @Roles('HOST')
   @ApiOperation({
-    summary: 'Update an event draft',
+    summary: 'Update a draft or under-review event',
     description:
-      'Partially updates a DRAFT event. Only fields present in the request body are updated. ' +
-      'If tickets are provided they replace all existing tickets. ' +
-      'If refundPolicy is provided it is upserted.',
+      'Partially updates a DRAFT or UNDER_REVIEW event (all fields editable — no orders can exist yet). ' +
+      'Only fields present in the request body are updated. If tickets are provided they replace all ' +
+      'existing tickets; if refundPolicy is provided it is upserted. ' +
+      'Editing an UNDER_REVIEW event recalls it to DRAFT (clearing its submission) — the host must ' +
+      'submit again for review. Published events must use PATCH /events/:id/revision instead.',
   })
-  @ApiOkResponse({ description: 'Event draft updated.' })
-  @ApiForbiddenResponse({ description: 'Not the owner, or event is not in DRAFT status.' })
+  @ApiOkResponse({ description: 'Event updated. An under-review event is returned in DRAFT status.' })
+  @ApiForbiddenResponse({ description: 'Not the owner, or event is PUBLISHED/CANCELLED (not directly editable).' })
   @ApiNotFoundResponse({ description: 'Event or category not found.' })
   @ApiBadRequestResponse({ description: 'Ticket prices must be 0 for a free event.' })
   updateEvent(
@@ -516,6 +523,33 @@ export class EventsController {
     @Body() dto: CreateEventDto,
   ) {
     return this.eventsService.updateEvent(userId, id, dto);
+  }
+
+  @Patch(':id/revision')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'Propose edits to a published event',
+    description:
+      'Submits host edits to an already-PUBLISHED event as an admin-reviewed revision. The live ' +
+      'event stays public and unchanged until an admin approves the revision. Only content fields ' +
+      '(title, description, media, tags, languages, whatToExpect, whoShouldAttend, specialInstructions, ' +
+      'eventType, categoryId) and the venue block (venueName, fullAddress, city, latitude, longitude) ' +
+      'can be edited — date/time, tickets, refund policy, isFree, visibility and ageRestriction are ' +
+      'locked. Whenever any location field changes, latitude + longitude must be sent with it. ' +
+      'Media replaces the full set (send existing keys + new ones). Re-submitting replaces the ' +
+      'single pending revision. An approved venue change notifies confirmed attendees.',
+  })
+  @ApiOkResponse({ description: 'Revision saved and pending admin review.' })
+  @ApiForbiddenResponse({ description: 'Not the owner, or event is not PUBLISHED.' })
+  @ApiNotFoundResponse({ description: 'Event or category not found.' })
+  @ApiBadRequestResponse({ description: 'No changes provided, or a locked field was sent.' })
+  updateEventRevision(
+    @GetUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdatePublishedEventDto,
+  ) {
+    return this.eventsService.upsertRevision(userId, id, dto);
   }
 
   @Patch(':id/submit')

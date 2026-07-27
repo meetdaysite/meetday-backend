@@ -17,6 +17,7 @@ import { AuditLogService } from '../audit-log/audit-log.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PayoutQueryDto } from './dto/payout-query.dto';
 import { PayoutWebhookDto } from './dto/payout-webhook.dto';
+import { getEventEndAt } from '../events/event-time.util';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const Razorpay = require('razorpay');
@@ -52,6 +53,9 @@ export class PayoutsService {
         id: true,
         title: true,
         eventDate: true,
+        endDate: true,
+        startTime: true,
+        endTime: true,
         hostProfileId: true,
         hostProfile: {
           select: {
@@ -74,7 +78,10 @@ export class PayoutsService {
       return null;
     }
 
-    const eventEnd = new Date(event.eventDate);
+    // `eventDate` alone is midnight of the event's day — anchor the hold window to the real end
+    // of the event (falling back to end-of-day if endTime is missing) so the refund window can't
+    // close before the event has actually finished.
+    const eventEnd = getEventEndAt(event)!;
     const payoutEligibleAfter = new Date(eventEnd.getTime() + holdDays * 24 * 60 * 60 * 1000);
 
     if (new Date() < payoutEligibleAfter) {

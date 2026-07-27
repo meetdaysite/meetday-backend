@@ -19,8 +19,18 @@ function mockFetchOk(body: object) {
   });
 }
 
-function mockFetchFail(status = 500) {
-  return jest.fn().mockResolvedValue({ ok: false, status, text: jest.fn().mockResolvedValue('error') });
+function mockFetchFail(status = 500, rawBody = 'error') {
+  return jest.fn().mockResolvedValue({ ok: false, status, text: jest.fn().mockResolvedValue(rawBody) });
+}
+
+function sandboxTestFixtureMissBody(transactionId: string) {
+  return JSON.stringify({
+    code: 404,
+    timestamp: Date.now(),
+    message:
+      'Test environment: Request does not match any saved example. Learn more: https://help.sandbox.co.in/portal/en/kb/articles/sandbox-test-environment',
+    transaction_id: transactionId,
+  });
 }
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -91,6 +101,24 @@ describe('KycService', () => {
 
     it('throws InternalServerErrorException when Sandbox HTTP request fails', async () => {
       (global as any).fetch = mockFetchFail(503);
+
+      await expect(service.initiateVerification(hostProfileId, panNumber, legalName)).rejects.toThrow(
+        InternalServerErrorException,
+      );
+    });
+
+    it('returns FAILED (not throws) when Sandbox returns its test-environment "no saved example" 404', async () => {
+      (global as any).fetch = mockFetchFail(404, sandboxTestFixtureMissBody('txn_404_fixture_miss'));
+
+      const result = await service.initiateVerification(hostProfileId, panNumber, legalName);
+
+      expect(result.verificationStatus).toBe('FAILED');
+      expect(result.referenceId).toBe('txn_404_fixture_miss');
+      expect(result.failureReason).toBeDefined();
+    });
+
+    it('still throws InternalServerErrorException for a 404 that does not match the Sandbox test-fixture shape', async () => {
+      (global as any).fetch = mockFetchFail(404, 'Not Found');
 
       await expect(service.initiateVerification(hostProfileId, panNumber, legalName)).rejects.toThrow(
         InternalServerErrorException,

@@ -41,6 +41,13 @@ import { RedisService } from '../../common/redis/redis.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { InterestsService } from '../interests/interests.service';
 import { RefundsService } from '../refunds/refunds.service';
+import {
+  applyEventChanges,
+  classifyVenueChange,
+  EventChanges,
+  VenueMateriality,
+} from '../events/event-changes.util';
+import { APPROVED_EVENT_STATUSES } from '../events/event-time.util';
 
 @Injectable()
 export class AdminService {
@@ -821,14 +828,21 @@ export class AdminService {
     if (event.status !== 'UNDER_REVIEW')
       throw new BadRequestException('Only events in UNDER_REVIEW status can be approved');
 
-    await this.prisma.event.update({
-      where: { id: eventId },
+    // Compare-and-set on status: if the host edited the event (recalling it to DRAFT) between our
+    // read and here, this affects 0 rows and we abort — we never publish content that changed after
+    // it was submitted for review.
+    const { count } = await this.prisma.event.updateMany({
+      where: { id: eventId, status: 'UNDER_REVIEW' },
       data: {
         status: 'PUBLISHED',
         reviewedBy: adminId,
         reviewedAt: new Date(),
       },
     });
+    if (count === 0)
+      throw new BadRequestException(
+        'Event is no longer under review — it may have been edited and must be resubmitted',
+      );
 
     await this.syncTotalEventsHosted(event.hostProfileId);
 
@@ -942,8 +956,10 @@ export class AdminService {
     if (event.status !== 'UNDER_REVIEW')
       throw new BadRequestException('Only events in UNDER_REVIEW status can be rejected');
 
-    await this.prisma.event.update({
-      where: { id: eventId },
+    // Compare-and-set on status: if the host recalled the event by editing it (now DRAFT) between
+    // our read and here, this affects 0 rows and we abort rather than stamping a stale rejection.
+    const { count } = await this.prisma.event.updateMany({
+      where: { id: eventId, status: 'UNDER_REVIEW' },
       data: {
         status: 'DRAFT',
         adminRejectionRemark: dto.remark,
@@ -951,6 +967,10 @@ export class AdminService {
         reviewedAt: new Date(),
       },
     });
+    if (count === 0)
+      throw new BadRequestException(
+        'Event is no longer under review — it may have been edited and must be resubmitted',
+      );
 
     const hostUser = event.hostProfile.user;
     const eventTitle = event.title ?? 'Untitled';
@@ -978,6 +998,267 @@ export class AdminService {
     ).catch((err) => this.logger.error('Failed to create event_rejected notification', err));
 
     return { message: 'Event rejected successfully' };
+  }
+
+  // ── Event revisions (edits to already-published events) ────────────────────
+
+  async listPendingRevisions(page: number, limit: number) {
+    const where = { status: 'PENDING' as const };
+
+    const [revisions, total] = await Promise.all([
+      this.prisma.eventRevision.findMany({
+        where,
+        select: {
+          id: true,
+          eventId: true,
+          touchesVenue: true,
+          submittedBy: true,
+          createdAt: true,
+          updatedAt: true,
+          event: {
+            select: {
+              id: true,
+              title: true,
+              city: true,
+              status: true,
+              eventDate: true,
+              hostProfile: {
+                select: {
+                  id: true,
+                  displayName: true,
+                  user: { select: { id: true, firstName: true, lastName: true, email: true } },
+                },
+              },
+            },
+          },
+        },
+        // Venue-touching edits first, then oldest submission first (FIFO) — a last-minute venue
+        // change should surface at the top of the review queue.
+        orderBy: [{ touchesVenue: 'desc' }, { createdAt: 'asc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.eventRevision.count({ where }),
+    ]);
+
+    return { revisions, total, page, limit };
+  }
+
+  async getRevisionForReview(eventId: string) {
+    const revision = await this.prisma.eventRevision.findFirst({
+      where: { eventId, status: 'PENDING' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!revision) throw new NotFoundException('No pending revision for this event');
+
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: {
+        media: { orderBy: { order: 'asc' } },
+        category: { select: { id: true, name: true } },
+        hostProfile: {
+          select: {
+            id: true,
+            displayName: true,
+            user: { select: { id: true, firstName: true, lastName: true, email: true } },
+          },
+        },
+      },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+
+    const changes = revision.changes as unknown as EventChanges;
+
+    // Current value of only the fields the revision touches, for a side-by-side review UI.
+    const current: Record<string, unknown> = {};
+    for (const key of Object.keys(changes)) {
+      if (key === 'media') continue;
+      current[key] = (event as unknown as Record<string, unknown>)[key];
+    }
+
+    const [currentMedia, proposedMedia] = await Promise.all([
+      Promise.all(
+        // Include the raw `key` so the diff view and any re-edit have the current items' keys.
+        event.media.map(async (m) => ({ ...m, key: m.url, url: await this.storageService.getPresignedDownloadUrl(m.url) })),
+      ),
+      changes.media
+        ? Promise.all(
+            changes.media.map(async (m) => ({ ...m, url: await this.storageService.getPresignedDownloadUrl(m.key) })),
+          )
+        : Promise.resolve(undefined),
+    ]);
+
+    return {
+      eventId,
+      status: event.status,
+      touchesVenue: revision.touchesVenue,
+      hostProfile: event.hostProfile,
+      current: { ...current, media: currentMedia },
+      proposed: { ...changes, ...(proposedMedia ? { media: proposedMedia } : {}) },
+      revision: {
+        id: revision.id,
+        status: revision.status,
+        submittedBy: revision.submittedBy,
+        createdAt: revision.createdAt,
+        updatedAt: revision.updatedAt,
+      },
+    };
+  }
+
+  async approveRevision(eventId: string, adminId: string) {
+    const revision = await this.prisma.eventRevision.findFirst({
+      where: { eventId, status: 'PENDING' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!revision) throw new NotFoundException('No pending revision for this event');
+
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: {
+        hostProfile: { include: { user: { select: { id: true, email: true, firstName: true } } } },
+      },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+    if (event.status !== 'PUBLISHED')
+      throw new BadRequestException('Revisions can only be applied to published events');
+
+    const changes = revision.changes as unknown as EventChanges;
+    // Classify against the CURRENT (pre-merge) event so the move is measured from the live venue.
+    const materiality: VenueMateriality | null = revision.touchesVenue
+      ? classifyVenueChange(event, changes)
+      : null;
+
+    await this.prisma.$transaction(async (tx) => {
+      await applyEventChanges(tx, eventId, changes);
+      await tx.eventRevision.update({
+        where: { id: revision.id },
+        data: { status: 'APPROVED', reviewedBy: adminId, reviewedAt: new Date() },
+      });
+    });
+
+    const eventTitle = event.title ?? 'Untitled';
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'EVENT_REVISION_APPROVED',
+      entityType: 'EVENT',
+      entityId: eventId,
+      metadata: { revisionId: revision.id, touchesVenue: revision.touchesVenue, materiality },
+    });
+
+    void this.notificationsService
+      .create(
+        event.hostProfile.user.id,
+        'event_changes_approved',
+        'Your changes are live',
+        `Your updates to "${eventTitle}" have been approved and are now live.`,
+        { eventId },
+      )
+      .catch((err) => this.logger.error('Failed to create event_changes_approved notification', err));
+
+    if (revision.touchesVenue && materiality)
+      await this.fanOutVenueChangeNotice(eventId, eventTitle, changes, materiality);
+
+    return { message: 'Revision approved and applied' };
+  }
+
+  async rejectRevision(eventId: string, adminId: string, dto: RejectEventDto) {
+    const revision = await this.prisma.eventRevision.findFirst({
+      where: { eventId, status: 'PENDING' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!revision) throw new NotFoundException('No pending revision for this event');
+
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: { title: true, hostProfile: { select: { user: { select: { id: true } } } } },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+
+    await this.prisma.eventRevision.update({
+      where: { id: revision.id },
+      data: { status: 'REJECTED', adminRemark: dto.remark, reviewedBy: adminId, reviewedAt: new Date() },
+    });
+
+    const eventTitle = event.title ?? 'Untitled';
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'EVENT_REVISION_REJECTED',
+      entityType: 'EVENT',
+      entityId: eventId,
+      metadata: { revisionId: revision.id, remark: dto.remark },
+    });
+
+    void this.notificationsService
+      .create(
+        event.hostProfile.user.id,
+        'event_changes_rejected',
+        'Changes not approved',
+        `Your updates to "${eventTitle}" were not approved. Remark: ${dto.remark}`,
+        { eventId },
+      )
+      .catch((err) => this.logger.error('Failed to create event_changes_rejected notification', err));
+
+    return { message: 'Revision rejected' };
+  }
+
+  /**
+   * Notifies confirmed attendees that a published event's venue moved. MINOR moves (same city,
+   * ≤1km) get a soft in-app notice only; MAJOR moves (city change or >1km) also get an email so
+   * nobody shows up at the old location. No auto-refund — attendees who can't make the new venue
+   * use the standard refund policy (or an admin ADMIN_OVERRIDE for genuine hardship).
+   */
+  private async fanOutVenueChangeNotice(
+    eventId: string,
+    eventTitle: string,
+    changes: EventChanges,
+    materiality: VenueMateriality,
+  ): Promise<void> {
+    const orders = await this.prisma.order.findMany({
+      where: { eventId, status: 'CONFIRMED' },
+      select: { user: { select: { id: true, email: true, firstName: true } } },
+    });
+
+    const newVenue = changes.venueName ?? null;
+    const newAddress = changes.fullAddress ?? null;
+    const newCity = changes.city ?? null;
+    const locationLabel = [newVenue, newAddress, newCity].filter(Boolean).join(', ');
+
+    const seen = new Set<string>();
+    for (const { user } of orders) {
+      if (!user || seen.has(user.id)) continue;
+      seen.add(user.id);
+
+      void this.notificationsService
+        .create(
+          user.id,
+          'event_venue_changed',
+          'Venue updated',
+          `The venue for "${eventTitle}" has changed${locationLabel ? ` — new location: ${locationLabel}` : ''}. Please check before you head out.`,
+          { eventId, materiality },
+        )
+        .catch((err) => this.logger.error(`Failed to notify attendee ${user.id} of venue change`, err));
+
+      if (materiality === 'MAJOR' && user.email) {
+        void this.mailQueue
+          .add('event-venue-changed', {
+            to: user.email,
+            firstName: user.firstName,
+            eventTitle,
+            venueName: newVenue,
+            fullAddress: newAddress,
+            city: newCity,
+          })
+          .catch((err) => this.logger.error('Failed to queue event-venue-changed mail', err));
+      }
+    }
+
+    this.logger.log(
+      `Venue change (${materiality}) on event ${eventId} fanned out to ${seen.size} attendee(s)`,
+    );
   }
 
   async forceCancelEvent(eventId: string, adminId: string, dto: ForceCancelEventDto) {
@@ -1082,7 +1363,8 @@ export class AdminService {
 
   private async syncTotalEventsHosted(hostProfileId: string): Promise<void> {
     const count = await this.prisma.event.count({
-      where: { hostProfileId, status: 'PUBLISHED' },
+      // Count both so the tally stays stable when the completion cron flips PUBLISHED → COMPLETED.
+      where: { hostProfileId, status: { in: APPROVED_EVENT_STATUSES } },
     });
     await this.prisma.hostProfile.update({
       where: { id: hostProfileId },

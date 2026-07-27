@@ -77,6 +77,32 @@ export class StorageService {
     await this.bucket.file(key).save(buffer, { contentType, resumable: false });
   }
 
+  // Lists all objects under a prefix, with each object's GCS creation time. Used by the
+  // orphaned-media garbage collector to age-filter candidates. autoPaginates internally.
+  async listObjects(prefix: string): Promise<Array<{ key: string; timeCreated: Date }>> {
+    const [files] = await this.bucket.getFiles({ prefix });
+    return files.map((f) => ({
+      key: f.name,
+      timeCreated: f.metadata?.timeCreated ? new Date(f.metadata.timeCreated) : new Date(0),
+    }));
+  }
+
+  // Best-effort batch delete. Missing objects are ignored (idempotent); per-key failures are
+  // counted, not thrown, so one bad key never aborts a cleanup run.
+  async deleteObjects(keys: string[]): Promise<{ deleted: number; failed: number }> {
+    let deleted = 0;
+    let failed = 0;
+    for (const key of keys) {
+      try {
+        await this.bucket.file(key).delete({ ignoreNotFound: true });
+        deleted++;
+      } catch {
+        failed++;
+      }
+    }
+    return { deleted, failed };
+  }
+
   async getPresignedDownloadUrl(key: string): Promise<string> {
     // OAuth providers (Google, Apple) store a full URL directly — return as-is
     if (key.startsWith('http://') || key.startsWith('https://')) return key;

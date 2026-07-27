@@ -13,6 +13,7 @@ import { CreateScannerSessionDto } from './dto/create-scanner-session.dto';
 import { ScanTicketDto } from './dto/scan-ticket.dto';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { MailService } from '../../common/mail/mail.service';
+import { getEventEndAt, parseTimeOfDay } from '../events/event-time.util';
 
 @Injectable()
 export class CheckInService {
@@ -29,6 +30,8 @@ export class CheckInService {
       select: {
         title: true,
         eventDate: true,
+        endDate: true,
+        startTime: true,
         endTime: true,
         hostProfile: { select: { userId: true } },
       },
@@ -40,16 +43,8 @@ export class CheckInService {
       throw new BadRequestException('Event must have a date and end time set before inviting scanner staff');
     }
 
-    const expiresAt = new Date(event.eventDate);
-    const timeMatch = event.endTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
-    if (!timeMatch) throw new BadRequestException(`Unrecognised endTime format: "${event.endTime}"`);
-    let hours = parseInt(timeMatch[1], 10);
-    const minutes = parseInt(timeMatch[2], 10);
-    const meridiem = timeMatch[3]?.toUpperCase();
-    if (meridiem === 'PM' && hours !== 12) hours += 12;
-    if (meridiem === 'AM' && hours === 12) hours = 0;
-    expiresAt.setHours(hours, minutes, 0, 0);
-    expiresAt.setTime(expiresAt.getTime() + 60 * 60 * 1000); // 1-hour buffer after event ends
+    if (!parseTimeOfDay(event.endTime)) throw new BadRequestException(`Unrecognised endTime format: "${event.endTime}"`);
+    const expiresAt = new Date(getEventEndAt(event)!.getTime() + 60 * 60 * 1000); // 1-hour buffer after event ends
 
     const token = randomBytes(32).toString('hex');
 

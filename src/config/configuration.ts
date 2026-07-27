@@ -61,5 +61,14 @@ export default () => {
       address: env.COMPANY_ADDRESS,
       supportEmail: env.COMPANY_SUPPORT_EMAIL,
     },
+    houseAccount: {
+      meetdayHostProfileId: env.MEETDAY_HOST_PROFILE_ID,
+    },
+    mediaGc: {
+      enabled: env.MEDIA_GC_ENABLED,
+      dryRun: env.MEDIA_GC_DRY_RUN,
+      graceDays: env.MEDIA_GC_GRACE_DAYS,
+      maxDeletesPerRun: env.MEDIA_GC_MAX_DELETES_PER_RUN,
+    },
   };
 };
