@@ -13,6 +13,8 @@ export enum UploadContext {
   COMMUNITY_ANNOUNCEMENT = 'COMMUNITY_ANNOUNCEMENT',
   COMMUNITY_DM_MEDIA = 'COMMUNITY_DM_MEDIA',
   COMMUNITY_FEED_MEDIA = 'COMMUNITY_FEED_MEDIA',
+  SPONSORSHIP_MEDIA = 'SPONSORSHIP_MEDIA',
+  SPONSORSHIP_DOCUMENT = 'SPONSORSHIP_DOCUMENT',
 }
 
 const ALLOWED_CONTENT_TYPES = [
@@ -21,6 +23,10 @@ const ALLOWED_CONTENT_TYPES = [
   'image/webp',
   'video/mp4',
   'application/pdf', // host documents
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation', // sponsorship pitch decks
 ] as const;
 
 export class RequestUploadUrlDto {

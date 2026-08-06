@@ -52,6 +52,7 @@ import { CreateInterestDto } from './dto/create-interest.dto';
 import { UpdateInterestDto } from './dto/update-interest.dto';
 import { SetInterestCategoriesDto } from './dto/set-interest-categories.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
+import { ListSponsorshipsQueryDto } from './dto/list-sponsorships-query.dto';
 import { UpdateGstRateDto } from './dto/update-gst-rate.dto';
 import { UpdatePlanFeeRateDto } from './dto/update-plan-fee-rate.dto';
 import { CreateHostFeePromoDto } from './dto/create-host-fee-promo.dto';
@@ -1327,6 +1328,119 @@ export class AdminController {
     @Body() dto: RejectEventDto,
   ) {
     return this.adminService.rejectRevision(id, adminId, dto);
+  }
+
+  // ─── Sponsorship proposal review ───────────────────────────────────────────────
+
+  @Get('sponsorships/pending')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({
+    summary: 'List sponsorship proposals pending admin review',
+    description: 'Returns proposals in UNDER_REVIEW status, oldest submission first (FIFO).',
+  })
+  @ApiOkResponse({ description: 'Paginated list of proposals pending review.' })
+  listPendingSponsorships(@Query('page') page = 1, @Query('limit') limit = 20) {
+    return this.adminService.listPendingSponsorships(Number(page), Number(limit));
+  }
+
+  @Get('sponsorships')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({
+    summary: 'List all sponsorship proposals (admin view)',
+    description: 'Paginated list across all statuses. Filter by status, city, or hostProfileId.',
+  })
+  @ApiOkResponse({ description: 'Paginated list of proposals.' })
+  listAllSponsorships(@Query() query: ListSponsorshipsQueryDto) {
+    return this.adminService.listAllSponsorships(query);
+  }
+
+  @Get('sponsorships/revisions/pending')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({
+    summary: 'List pending sponsorship proposal revisions',
+    description: 'Proposals (UNDER_REVIEW or PUBLISHED) that have an edit awaiting review.',
+  })
+  @ApiOkResponse({ description: 'Paginated list of proposals with a pending revision.' })
+  listPendingSponsorshipRevisions(@Query('page') page = 1, @Query('limit') limit = 20) {
+    return this.adminService.listPendingSponsorshipRevisions(Number(page), Number(limit));
+  }
+
+  @Get('sponsorships/:id')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({ summary: 'Get full sponsorship proposal detail (admin view)' })
+  @ApiParam({ name: 'id', description: 'Proposal UUID' })
+  @ApiOkResponse({ description: 'Full proposal detail with presigned media URLs.' })
+  @ApiNotFoundResponse({ description: 'Proposal not found.' })
+  getSponsorshipDetail(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.getSponsorshipDetail(id);
+  }
+
+  @Post('sponsorships/:id/approve')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Approve a sponsorship proposal',
+    description: 'Approves a proposal in UNDER_REVIEW status, making it PUBLISHED. Notifies the host.',
+  })
+  @ApiParam({ name: 'id', description: 'Proposal UUID' })
+  @ApiOkResponse({ description: 'Proposal approved and published.' })
+  @ApiNotFoundResponse({ description: 'Proposal not found.' })
+  @ApiBadRequestResponse({ description: 'Proposal is not in UNDER_REVIEW status.' })
+  approveSponsorship(@Param('id', ParseUUIDPipe) id: string, @GetUser('id') adminId: string) {
+    return this.adminService.approveSponsorship(id, adminId);
+  }
+
+  @Post('sponsorships/:id/reject')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reject a sponsorship proposal',
+    description: 'Rejects a proposal in UNDER_REVIEW status. Host can edit and resubmit. Notifies the host with the remark.',
+  })
+  @ApiParam({ name: 'id', description: 'Proposal UUID' })
+  @ApiBody({ type: RejectEventDto })
+  @ApiOkResponse({ description: 'Proposal rejected.' })
+  @ApiNotFoundResponse({ description: 'Proposal not found.' })
+  @ApiBadRequestResponse({ description: 'Proposal is not in UNDER_REVIEW status.' })
+  rejectSponsorship(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') adminId: string,
+    @Body() dto: RejectEventDto,
+  ) {
+    return this.adminService.rejectSponsorship(id, adminId, dto);
+  }
+
+  @Post('sponsorships/:id/revision/approve')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Approve a sponsorship proposal revision',
+    description: 'Merges the pending revision into the proposal. Notifies the host.',
+  })
+  @ApiParam({ name: 'id', description: 'Proposal UUID' })
+  @ApiOkResponse({ description: 'Revision approved and applied.' })
+  @ApiNotFoundResponse({ description: 'Proposal not found, or no pending revision.' })
+  approveSponsorshipRevision(@Param('id', ParseUUIDPipe) id: string, @GetUser('id') adminId: string) {
+    return this.adminService.approveSponsorshipRevision(id, adminId);
+  }
+
+  @Post('sponsorships/:id/revision/reject')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reject a sponsorship proposal revision',
+    description: 'Discards the pending revision with an admin remark. Notifies the host.',
+  })
+  @ApiParam({ name: 'id', description: 'Proposal UUID' })
+  @ApiBody({ type: RejectEventDto })
+  @ApiOkResponse({ description: 'Revision rejected.' })
+  @ApiNotFoundResponse({ description: 'Proposal not found, or no pending revision.' })
+  rejectSponsorshipRevision(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') adminId: string,
+    @Body() dto: RejectEventDto,
+  ) {
+    return this.adminService.rejectSponsorshipRevision(id, adminId, dto);
   }
 
   // ─── Order management ────────────────────────────────────────────────────────

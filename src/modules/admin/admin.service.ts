@@ -29,6 +29,7 @@ import { UpdateCategoryDto } from './dto/update-category.dto';
 import { CreateInterestDto } from './dto/create-interest.dto';
 import { UpdateInterestDto } from './dto/update-interest.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
+import { ListSponsorshipsQueryDto } from './dto/list-sponsorships-query.dto';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { UpdateGstRateDto } from './dto/update-gst-rate.dto';
 import { UpdatePlanFeeRateDto } from './dto/update-plan-fee-rate.dto';
@@ -1400,6 +1401,278 @@ export class AdminService {
 
     if (confirmedOrders.length > 0)
       this.logger.log(`Initiated refunds for ${confirmedOrders.length} confirmed order(s) on event ${eventId}`);
+  }
+
+  // ─── Sponsorship proposal review ───────────────────────────────────────────────
+
+  private static readonly SPONSORSHIP_LIST_SELECT = {
+    id: true,
+    name: true,
+    city: true,
+    eventDate: true,
+    status: true,
+    submittedAt: true,
+    createdAt: true,
+    updatedAt: true,
+    pendingRevision: true,
+    hostProfile: {
+      select: {
+        id: true,
+        displayName: true,
+        user: { select: { id: true, firstName: true, lastName: true, email: true } },
+      },
+    },
+  } as const;
+
+  async listPendingSponsorships(page: number, limit: number) {
+    const where = { status: 'UNDER_REVIEW' as const };
+
+    const [proposals, total] = await Promise.all([
+      this.prisma.sponsorshipProposal.findMany({
+        where,
+        select: AdminService.SPONSORSHIP_LIST_SELECT,
+        orderBy: { submittedAt: 'asc' }, // oldest submission first (FIFO)
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.sponsorshipProposal.count({ where }),
+    ]);
+
+    return { proposals, total, page, limit };
+  }
+
+  async listAllSponsorships(query: ListSponsorshipsQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const where: any = {};
+    if (query.status) where.status = query.status;
+    if (query.city) where.city = { contains: query.city, mode: 'insensitive' };
+    if (query.hostProfileId) where.hostProfileId = query.hostProfileId;
+
+    const [proposals, total] = await Promise.all([
+      this.prisma.sponsorshipProposal.findMany({
+        where,
+        select: AdminService.SPONSORSHIP_LIST_SELECT,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.sponsorshipProposal.count({ where }),
+    ]);
+
+    return { proposals, total, page, limit };
+  }
+
+  async getSponsorshipDetail(id: string) {
+    const proposal = await this.prisma.sponsorshipProposal.findUnique({
+      where: { id },
+      include: {
+        hostProfile: {
+          select: {
+            id: true,
+            displayName: true,
+            user: { select: { id: true, firstName: true, lastName: true, email: true } },
+          },
+        },
+      },
+    });
+    if (!proposal) throw new NotFoundException('Sponsorship proposal not found');
+
+    const [imageUrl, docUrl] = await Promise.all([
+      proposal.imageKey ? this.storageService.getPresignedDownloadUrl(proposal.imageKey) : null,
+      proposal.docKey ? this.storageService.getPresignedDownloadUrl(proposal.docKey) : null,
+    ]);
+
+    return { ...proposal, imageUrl, docUrl };
+  }
+
+  async approveSponsorship(id: string, adminId: string) {
+    const proposal = await this.prisma.sponsorshipProposal.findUnique({
+      where: { id },
+      include: { hostProfile: { include: { user: { select: { id: true, email: true, firstName: true } } } } },
+    });
+    if (!proposal) throw new NotFoundException('Sponsorship proposal not found');
+    if (proposal.status !== 'UNDER_REVIEW')
+      throw new BadRequestException('Only proposals in UNDER_REVIEW status can be approved');
+
+    const { count } = await this.prisma.sponsorshipProposal.updateMany({
+      where: { id, status: 'UNDER_REVIEW' },
+      data: { status: 'PUBLISHED', reviewedBy: adminId, reviewedAt: new Date() },
+    });
+    if (count === 0)
+      throw new BadRequestException('Proposal is no longer under review — it may have just been edited');
+
+    const hostUser = proposal.hostProfile.user;
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'SPONSORSHIP_PROPOSAL_APPROVED',
+      entityType: 'SPONSORSHIP_PROPOSAL',
+      entityId: id,
+      metadata: { name: proposal.name },
+    });
+
+    void this.notificationsService
+      .create(
+        hostUser.id,
+        'sponsorship_approved',
+        'Sponsorship Proposal Approved',
+        `Your proposal "${proposal.name}" has been approved and is now published.`,
+        { proposalId: id },
+      )
+      .catch((err) => this.logger.error('Failed to create sponsorship_approved notification', err));
+
+    return { message: 'Sponsorship proposal approved successfully' };
+  }
+
+  async rejectSponsorship(id: string, adminId: string, dto: RejectEventDto) {
+    const proposal = await this.prisma.sponsorshipProposal.findUnique({
+      where: { id },
+      include: { hostProfile: { include: { user: { select: { id: true, email: true, firstName: true } } } } },
+    });
+    if (!proposal) throw new NotFoundException('Sponsorship proposal not found');
+    if (proposal.status !== 'UNDER_REVIEW')
+      throw new BadRequestException('Only proposals in UNDER_REVIEW status can be rejected');
+
+    const { count } = await this.prisma.sponsorshipProposal.updateMany({
+      where: { id, status: 'UNDER_REVIEW' },
+      data: { status: 'REJECTED', adminRejectionRemark: dto.remark, reviewedBy: adminId, reviewedAt: new Date() },
+    });
+    if (count === 0)
+      throw new BadRequestException('Proposal is no longer under review — it may have just been edited');
+
+    const hostUser = proposal.hostProfile.user;
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'SPONSORSHIP_PROPOSAL_REJECTED',
+      entityType: 'SPONSORSHIP_PROPOSAL',
+      entityId: id,
+      metadata: { name: proposal.name, remark: dto.remark },
+    });
+
+    void this.notificationsService
+      .create(
+        hostUser.id,
+        'sponsorship_rejected',
+        'Sponsorship Proposal Not Approved',
+        `Your proposal "${proposal.name}" was not approved. Remark: ${dto.remark}`,
+        { proposalId: id },
+      )
+      .catch((err) => this.logger.error('Failed to create sponsorship_rejected notification', err));
+
+    return { message: 'Sponsorship proposal rejected successfully' };
+  }
+
+  // ── Sponsorship proposal revisions (edits to UNDER_REVIEW/PUBLISHED proposals) ──
+
+  async listPendingSponsorshipRevisions(page: number, limit: number) {
+    const where = { pendingRevision: { not: Prisma.JsonNull } };
+
+    const [proposals, total] = await Promise.all([
+      this.prisma.sponsorshipProposal.findMany({
+        where,
+        select: AdminService.SPONSORSHIP_LIST_SELECT,
+        orderBy: { updatedAt: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.sponsorshipProposal.count({ where }),
+    ]);
+
+    return { proposals, total, page, limit };
+  }
+
+  async approveSponsorshipRevision(id: string, adminId: string) {
+    const proposal = await this.prisma.sponsorshipProposal.findUnique({
+      where: { id },
+      include: { hostProfile: { include: { user: { select: { id: true, email: true, firstName: true } } } } },
+    });
+    if (!proposal) throw new NotFoundException('Sponsorship proposal not found');
+    if (!proposal.pendingRevision) throw new NotFoundException('No pending revision for this proposal');
+
+    const changes = proposal.pendingRevision as Record<string, any>;
+
+    await this.prisma.sponsorshipProposal.update({
+      where: { id },
+      data: {
+        ...(changes.name !== undefined && { name: changes.name }),
+        ...(changes.about !== undefined && { about: changes.about }),
+        ...(changes.imageKey !== undefined && { imageKey: changes.imageKey }),
+        ...(changes.eventDate !== undefined && { eventDate: new Date(changes.eventDate) }),
+        ...(changes.venue !== undefined && { venue: changes.venue }),
+        ...(changes.city !== undefined && { city: changes.city }),
+        ...(changes.audienceProfile !== undefined && { audienceProfile: changes.audienceProfile }),
+        ...(changes.ageGroup !== undefined && { ageGroup: changes.ageGroup }),
+        ...(changes.guestCount !== undefined && { guestCount: changes.guestCount }),
+        ...(changes.docKey !== undefined && { docKey: changes.docKey }),
+        ...(changes.docName !== undefined && { docName: changes.docName }),
+        ...(changes.docType !== undefined && { docType: changes.docType }),
+        ...(changes.docSize !== undefined && { docSize: changes.docSize }),
+        ...(changes.sponsorTiers !== undefined && { sponsorTiers: changes.sponsorTiers }),
+        pendingRevision: Prisma.JsonNull,
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+      },
+    });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'SPONSORSHIP_PROPOSAL_REVISION_APPROVED',
+      entityType: 'SPONSORSHIP_PROPOSAL',
+      entityId: id,
+    });
+
+    void this.notificationsService
+      .create(
+        proposal.hostProfile.user.id,
+        'sponsorship_changes_approved',
+        'Your changes are live',
+        `Your updates to "${proposal.name}" have been approved and are now live.`,
+        { proposalId: id },
+      )
+      .catch((err) => this.logger.error('Failed to create sponsorship_changes_approved notification', err));
+
+    return { message: 'Revision approved and applied' };
+  }
+
+  async rejectSponsorshipRevision(id: string, adminId: string, dto: RejectEventDto) {
+    const proposal = await this.prisma.sponsorshipProposal.findUnique({
+      where: { id },
+      include: { hostProfile: { include: { user: { select: { id: true } } } } },
+    });
+    if (!proposal) throw new NotFoundException('Sponsorship proposal not found');
+    if (!proposal.pendingRevision) throw new NotFoundException('No pending revision for this proposal');
+
+    await this.prisma.sponsorshipProposal.update({
+      where: { id },
+      data: { pendingRevision: Prisma.JsonNull, reviewedBy: adminId, reviewedAt: new Date() },
+    });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'SPONSORSHIP_PROPOSAL_REVISION_REJECTED',
+      entityType: 'SPONSORSHIP_PROPOSAL',
+      entityId: id,
+      metadata: { remark: dto.remark },
+    });
+
+    void this.notificationsService
+      .create(
+        proposal.hostProfile.user.id,
+        'sponsorship_changes_rejected',
+        'Changes not approved',
+        `Your updates to "${proposal.name}" were not approved. Remark: ${dto.remark}`,
+        { proposalId: id },
+      )
+      .catch((err) => this.logger.error('Failed to create sponsorship_changes_rejected notification', err));
+
+    return { message: 'Revision rejected' };
   }
 
   // ─── Order management ────────────────────────────────────────────────────────

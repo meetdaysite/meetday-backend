@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   HttpCode,
@@ -33,6 +34,7 @@ import { GetUser } from '../../common/decorators/get-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { ApplyHostDto } from './dto/apply-host.dto';
 import { UpdateHostProfileDto } from './dto/update-host-profile.dto';
+import { ActivateCommunityDto } from './dto/activate-community.dto';
 import { VerifyBankDto } from './dto/submit-kyc.dto';
 import { BankWebhookDto } from './dto/bank-webhook.dto';
 import { UpgradeSubscriptionDto } from './dto/upgrade-subscription.dto';
@@ -337,6 +339,37 @@ export class HostsController {
   @ApiBadRequestResponse({ description: 'One or more categoryIds are invalid.' })
   updateHostProfile(@GetUser('id') userId: string, @Body() dto: UpdateHostProfileDto) {
     return this.hostsService.updateHostProfile(userId, dto);
+  }
+
+  @Get('community')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({ summary: "Get the host's community profile (for sponsorship proposals)" })
+  @ApiOkResponse({ description: 'Community profile, or null if not activated yet.' })
+  getCommunityProfile(@GetUser('id') userId: string) {
+    return this.hostsService.getCommunityProfile(userId);
+  }
+
+  @Post('community')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'Activate or update the community profile',
+    description: 'Upserts the community profile shown to potential sponsors. logoKey comes from POST /storage/upload-url (SPONSORSHIP_MEDIA context).',
+  })
+  @ApiOkResponse({ description: 'The activated/updated community profile.' })
+  @ApiBadRequestResponse({ description: 'One or more categoryIds are invalid.' })
+  activateCommunityProfile(@GetUser('id') userId: string, @Body() dto: ActivateCommunityDto) {
+    return this.hostsService.activateCommunityProfile(userId, dto);
+  }
+
+  @Delete('community')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Deactivate (delete) the community profile' })
+  deactivateCommunityProfile(@GetUser('id') userId: string) {
+    return this.hostsService.deactivateCommunityProfile(userId);
   }
 
   @Post('kyc/pan/verify')

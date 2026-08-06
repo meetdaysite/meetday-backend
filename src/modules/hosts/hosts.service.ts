@@ -21,6 +21,7 @@ import { SubscriptionService } from './subscription.service';
 import { PennyDropService } from './penny-drop.service';
 import { ApplyHostDto } from './dto/apply-host.dto';
 import { UpdateHostProfileDto } from './dto/update-host-profile.dto';
+import { ActivateCommunityDto } from './dto/activate-community.dto';
 import { VerifyBankDto } from './dto/submit-kyc.dto';
 import { BankWebhookDto } from './dto/bank-webhook.dto';
 import { deriveEventStatus } from '../events/event-time.util';
@@ -211,6 +212,69 @@ export class HostsService {
         address: true,
       },
     });
+  }
+
+  private async withCommunityLogoUrl(profile: {
+    logoKey: string;
+    categories: { category: { id: string; name: string } }[];
+    [key: string]: unknown;
+  }) {
+    const { categories, ...rest } = profile;
+    return {
+      ...rest,
+      logoUrl: await this.storageService.getPresignedDownloadUrl(profile.logoKey),
+      categories: categories.map((c) => c.category),
+    };
+  }
+
+  async getCommunityProfile(userId: string) {
+    const hostProfile = await this.prisma.hostProfile.findUnique({ where: { userId }, select: { id: true } });
+    if (!hostProfile) throw new NotFoundException('Host profile not found');
+
+    const communityProfile = await this.prisma.hostCommunityProfile.findUnique({
+      where: { hostProfileId: hostProfile.id },
+      include: { categories: { include: { category: true } } },
+    });
+    if (!communityProfile) return null;
+
+    return this.withCommunityLogoUrl(communityProfile);
+  }
+
+  async activateCommunityProfile(userId: string, dto: ActivateCommunityDto) {
+    const hostProfile = await this.prisma.hostProfile.findUnique({ where: { userId }, select: { id: true } });
+    if (!hostProfile) throw new NotFoundException('Host profile not found');
+
+    const validCategories = await this.prisma.category.findMany({
+      where: { id: { in: dto.categoryIds } },
+      select: { id: true },
+    });
+    if (validCategories.length !== dto.categoryIds.length) {
+      throw new BadRequestException('One or more category IDs are invalid');
+    }
+
+    const { categoryIds, ...fields } = dto;
+
+    const communityProfile = await this.prisma.hostCommunityProfile.upsert({
+      where: { hostProfileId: hostProfile.id },
+      create: { ...fields, hostProfileId: hostProfile.id },
+      update: fields,
+    });
+
+    await this.prisma.$transaction([
+      this.prisma.hostCommunityProfileCategory.deleteMany({ where: { hostCommunityProfileId: communityProfile.id } }),
+      this.prisma.hostCommunityProfileCategory.createMany({
+        data: categoryIds.map((categoryId) => ({ hostCommunityProfileId: communityProfile.id, categoryId })),
+      }),
+    ]);
+
+    return this.getCommunityProfile(userId);
+  }
+
+  async deactivateCommunityProfile(userId: string) {
+    const hostProfile = await this.prisma.hostProfile.findUnique({ where: { userId }, select: { id: true } });
+    if (!hostProfile) throw new NotFoundException('Host profile not found');
+
+    await this.prisma.hostCommunityProfile.deleteMany({ where: { hostProfileId: hostProfile.id } });
   }
 
   async verifyPanOnly(userId: string) {

@@ -20,9 +20,22 @@ const CONTENT_TYPE_EXT: Record<string, string> = {
   'image/webp': 'webp',
   'video/mp4': 'mp4',
   'application/pdf': 'pdf',
+  'application/msword': 'doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  'application/vnd.ms-powerpoint': 'ppt',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
 };
 
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+
+// Pitch-deck document types accepted for sponsorship proposals.
+const PITCH_DOC_TYPES = [
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+] as const;
 
 // Which content types each context accepts — narrows the DTO's global allow-list
 // so e.g. opaque blobs are only valid for DM media and PDFs only for host docs.
@@ -37,6 +50,8 @@ const CONTEXT_CONTENT_TYPES: Record<UploadContext, readonly string[]> = {
   [UploadContext.COMMUNITY_ANNOUNCEMENT]: IMAGE_TYPES,
   [UploadContext.COMMUNITY_DM_MEDIA]: IMAGE_TYPES,
   [UploadContext.COMMUNITY_FEED_MEDIA]: [...IMAGE_TYPES, 'video/mp4'],
+  [UploadContext.SPONSORSHIP_MEDIA]: IMAGE_TYPES,
+  [UploadContext.SPONSORSHIP_DOCUMENT]: PITCH_DOC_TYPES,
 };
 
 // Platform-admin roles required by the admin-only contexts.
@@ -170,6 +185,15 @@ export class StorageService {
         const hostProfile = await this.prisma.hostProfile.findUnique({ where: { userId } });
         if (!hostProfile) throw new NotFoundException('Host profile not found');
         key = `hosts/${hostProfile.id}/documents/${randomUUID()}.${ext}`;
+        break;
+      }
+
+      case UploadContext.SPONSORSHIP_MEDIA:
+      case UploadContext.SPONSORSHIP_DOCUMENT: {
+        const hostProfile = await this.prisma.hostProfile.findUnique({ where: { userId } });
+        if (!hostProfile) throw new NotFoundException('Host profile not found');
+        const folder = dto.context === UploadContext.SPONSORSHIP_MEDIA ? 'media' : 'documents';
+        key = `hosts/${hostProfile.id}/sponsorship-proposals/${folder}/${randomUUID()}.${ext}`;
         break;
       }
 

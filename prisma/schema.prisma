@@ -55,6 +55,7 @@ model User {
 
   reviewedEvents    Event[]         @relation("EventReviewedBy")
   reviewedRevisions EventRevision[] @relation("EventRevisionReviewedBy")
+  reviewedSponsorshipProposals SponsorshipProposal[] @relation("SponsorshipProposalReviewedBy")
 
   notifications Notification[]
 
@@ -280,6 +281,7 @@ model Category {
   events                   Event[]
   highlights               CategoryHighlight[]
   communities              Community[]
+  hostCommunityProfiles    HostCommunityProfileCategory[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -378,6 +380,8 @@ model HostProfile {
   events        Event[]
   payouts       HostPayout[]
   feePromos     HostFeePromo[]
+  sponsorshipProposals SponsorshipProposal[]
+  communityProfile     HostCommunityProfile?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -906,6 +910,96 @@ enum SocialStyle {
   BRINGING_GANG
 }
 
+// ─── Sponsorship Proposals ─────────────────────────────────────────────────────
+// Hosts pitch sponsorship-seeking proposals for their planned experiences; admins review and
+// publish them so brands can discover and fund them. Mirrors the Event draft/review lifecycle
+// (DRAFT → UNDER_REVIEW → PUBLISHED/REJECTED) but as a single flat row (no ticket/media sub-tables).
+
+model SponsorshipProposal {
+  id            String @id @default(uuid())
+  hostProfileId String
+
+  name            String
+  about           String   @db.Text
+  imageKey        String // GCS object key for the cover image
+  eventDate       DateTime
+  venue           String
+  city            String
+  audienceProfile String[]
+  ageGroup        String
+  guestCount      String
+
+  docKey  String // GCS object key for the pitch document (pdf/doc/ppt)
+  docName String
+  docType String
+  docSize Int
+
+  sponsorTiers Json // [{ name, price }]
+
+  status SponsorshipStatus @default(DRAFT)
+
+  // Proposed edits to a proposal that is UNDER_REVIEW or already PUBLISHED, awaiting admin
+  // approval. Shaped like the fields above; merged in on approval, discarded on rejection.
+  pendingRevision Json?
+
+  adminRejectionRemark String?
+  reviewedBy           String?
+  reviewedByUser       User?     @relation("SponsorshipProposalReviewedBy", fields: [reviewedBy], references: [id])
+  reviewedAt           DateTime?
+  submittedAt          DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  hostProfile HostProfile @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
+
+  @@index([hostProfileId])
+  @@index([status])
+  @@map("sponsorship_proposals")
+}
+
+enum SponsorshipStatus {
+  DRAFT
+  UNDER_REVIEW
+  REJECTED
+  PUBLISHED
+}
+
+// Host-facing "community profile" shown to potential sponsors on the sponsorship
+// proposal flow — distinct from the admin-managed social Community feature above.
+model HostCommunityProfile {
+  id            String      @id @default(uuid())
+  hostProfileId String      @unique
+  hostProfile   HostProfile @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
+
+  name               String
+  about              String @db.Text
+  logoKey            String // GCS object key for the community logo
+  size               String
+  avgGuestCount      String
+  experiencesPerYear String
+
+  categories HostCommunityProfileCategory[]
+
+  activatedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("host_community_profiles")
+}
+
+model HostCommunityProfileCategory {
+  hostCommunityProfileId String
+  categoryId             String
+
+  hostCommunityProfile HostCommunityProfile @relation(fields: [hostCommunityProfileId], references: [id], onDelete: Cascade)
+  category             Category             @relation(fields: [categoryId], references: [id])
+
+  @@id([hostCommunityProfileId, categoryId])
+  @@index([categoryId])
+  @@map("host_community_profile_categories")
+}
+
 // ─── Orders ───────────────────────────────────────────────────────────────────
 
 model Order {
@@ -1248,6 +1342,16 @@ enum AuditAction {
   EVENT_REVISION_SUBMITTED
   EVENT_REVISION_APPROVED
   EVENT_REVISION_REJECTED
+
+  // Sponsorship proposal lifecycle
+  SPONSORSHIP_PROPOSAL_CREATED
+  SPONSORSHIP_PROPOSAL_SUBMITTED
+  SPONSORSHIP_PROPOSAL_APPROVED
+  SPONSORSHIP_PROPOSAL_REJECTED
+  SPONSORSHIP_PROPOSAL_DELETED
+  SPONSORSHIP_PROPOSAL_REVISION_SUBMITTED
+  SPONSORSHIP_PROPOSAL_REVISION_APPROVED
+  SPONSORSHIP_PROPOSAL_REVISION_REJECTED
 
   // Orders / payments (PMLA / GST)
   ORDER_CREATED
