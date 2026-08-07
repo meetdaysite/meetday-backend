@@ -42,6 +42,7 @@ model User {
   attendeeProfile AttendeeProfile?
   hostProfile     HostProfile?     @relation("HostUser")
   adminProfile    AdminProfile?
+  brandProfile    BrandProfile?
 
   // Back-relations for admin audit trails
   approvedHostProfiles    HostProfile[]              @relation("HostApprovedBy")
@@ -389,6 +390,22 @@ model HostProfile {
   @@index([approvalStatus])
   @@index([kycStatus])
   @@map("host_profiles")
+}
+
+// Minimal profile for BRAND accounts — brands sign up with phone OTP + email + brand name to
+// browse published sponsorship proposals. Intentionally lean; extended fields (categories,
+// verification, etc.) will be added once the brand-facing product is scoped further.
+model BrandProfile {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  brandName String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("brand_profiles")
 }
 
 model HostExperienceCategory {

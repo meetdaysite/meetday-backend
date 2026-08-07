@@ -65,6 +65,17 @@ export class SponsorshipController {
     return this.sponsorshipService.getMyProposals(userId, query);
   }
 
+  @Get('published')
+  @Roles('BRAND')
+  @ApiOperation({
+    summary: 'List all published sponsorship proposals (brand view)',
+    description: 'Returns every PUBLISHED proposal across all hosts, newest first. No filters yet.',
+  })
+  @ApiOkResponse({ description: 'List of published proposals.' })
+  getAllPublished() {
+    return this.sponsorshipService.getAllPublishedProposals();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get own proposal detail' })
   @ApiOkResponse({ description: 'Proposal detail.' })

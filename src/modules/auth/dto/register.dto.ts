@@ -70,15 +70,16 @@ export class RegisterDto {
   email?: string;
 
   @ApiPropertyOptional({
-    enum: ['USER', 'HOST'],
+    enum: ['USER', 'HOST', 'BRAND'],
     default: 'USER',
     description:
-      'Choose USER for a regular attendee account, HOST to register as an event host. ' +
+      'Choose USER for a regular attendee account, HOST to register as an event host, ' +
+      'or BRAND to register as a brand/sponsor account. ' +
       'HOST role is assigned immediately but the profile must complete KYC and admin approval before going live.',
   })
   @IsOptional()
-  @IsEnum(['USER', 'HOST'], { message: 'accountType must be USER or HOST' })
-  accountType?: 'USER' | 'HOST' = 'USER';
+  @IsEnum(['USER', 'HOST', 'BRAND'], { message: 'accountType must be USER, HOST, or BRAND' })
+  accountType?: 'USER' | 'HOST' | 'BRAND' = 'USER';
 
   // ── Attendee-specific fields (only used when accountType === 'USER') ─────────
 
@@ -210,4 +211,16 @@ export class RegisterDto {
   @ValidateNested()
   @Type(() => HostAddressDto)
   address?: HostAddressDto;
+
+  // ── Brand-specific fields (only used when accountType === 'BRAND') ────────────
+
+  @ApiPropertyOptional({
+    maxLength: 100,
+    example: 'Acme Corp',
+    description: 'Required when accountType is BRAND.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  brandName?: string;
 }

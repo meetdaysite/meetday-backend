@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 const roles = [
   { name: 'USER', description: 'Standard platform user' },
   { name: 'HOST', description: 'Event host who can create and manage events' },
+  { name: 'BRAND', description: 'Brand/sponsor account that browses sponsorship proposals' },
   { name: 'MODERATOR', description: 'Moderates event activity and content' },
   { name: 'SUPPORT', description: 'Platform support staff' },
   { name: 'CITY_ADMIN', description: 'Administers events within a city' },

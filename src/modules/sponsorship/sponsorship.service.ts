@@ -185,6 +185,23 @@ export class SponsorshipService {
     return { proposals: withSignedUrls, total: withSignedUrls.length, page: 1, limit: withSignedUrls.length };
   }
 
+  // Brand-facing: every published proposal across all hosts, newest first. No filters/categorization
+  // yet — brands see the full list for now.
+  async getAllPublishedProposals() {
+    const proposals = await this.prisma.sponsorshipProposal.findMany({
+      where: { status: SponsorshipStatus.PUBLISHED },
+      include: {
+        hostProfile: {
+          select: { id: true, displayName: true, user: { select: { firstName: true, lastName: true } } },
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    const withSignedUrls = await Promise.all(proposals.map((p) => this.withSignedUrls(p)));
+    return { proposals: withSignedUrls, total: withSignedUrls.length };
+  }
+
   async getProposalDetail(userId: string, id: string) {
     const proposal = await this.getOwnedProposal(userId, id);
     return this.withSignedUrls(proposal);

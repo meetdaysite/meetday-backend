@@ -51,6 +51,8 @@ export class AuthService {
     try {
       if (dto.accountType === 'HOST') {
         result = await this.registerHost(tokenUser.uid, resolved, dto);
+      } else if (dto.accountType === 'BRAND') {
+        result = await this.registerBrand(tokenUser.uid, resolved, dto);
       } else {
         const userRole = await this.prisma.role.findUniqueOrThrow({ where: { name: 'USER' } });
 
@@ -222,6 +224,57 @@ export class AuthService {
       });
 
       return { ...user, hostProfile };
+    });
+  }
+
+  private async registerBrand(
+    firebaseUid: string,
+    resolved: ResolvedIdentity,
+    dto: RegisterDto,
+  ) {
+    if (!resolved.email) {
+      throw new BadRequestException(
+        'email is required for brand registration. Phone-OTP sign-ups must include an email in the request body.',
+      );
+    }
+    if (!dto.brandName) {
+      throw new BadRequestException('brandName is required when registering as a brand');
+    }
+
+    const brandRole = await this.prisma.role.findUniqueOrThrow({ where: { name: 'BRAND' } });
+
+    return this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          firebaseUid,
+          email: resolved.email,
+          phone: resolved.phone,
+          firstName: resolved.firstName,
+          lastName: resolved.lastName,
+          avatarUrl: resolved.avatarUrl,
+          roleId: brandRole.id,
+        },
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          firstName: true,
+          lastName: true,
+          avatarUrl: true,
+          isActive: true,
+          role: { select: { name: true } },
+          createdAt: true,
+        },
+      });
+
+      const brandProfile = await tx.brandProfile.create({
+        data: {
+          userId: user.id,
+          brandName: dto.brandName!,
+        },
+      });
+
+      return { ...user, brandProfile };
     });
   }
 

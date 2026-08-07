@@ -9,6 +9,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { HostsModule } from './modules/hosts/hosts.module';
+import { BrandsModule } from './modules/brands/brands.module';
 import { EventsModule } from './modules/events/events.module';
 import { CommunitiesModule } from './modules/communities/communities.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
@@ -68,6 +69,7 @@ import { StorageModule } from './common/storage/storage.module';
     AuthModule,
     UsersModule,
     HostsModule,
+    BrandsModule,
     EventsModule,
     TicketsModule,
     PaymentsModule,
