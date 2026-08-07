@@ -1,0 +1,84 @@
+import {
+  IsArray,
+  IsDateString,
+  IsInt,
+  IsString,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+import { ApiProperty } from '@nestjs/swagger';
+
+export class AdminSponsorTierDto {
+  @ApiProperty({ example: 'Gold Sponsor' })
+  @IsString()
+  name: string;
+
+  @ApiProperty({ example: '50000' })
+  @IsString()
+  price: string;
+}
+
+// Admin creates the proposal already-complete and published, unlike CreateProposalDto
+// (host draft flow) where every field is optional — so everything here is required.
+export class CreateAdminSponsorshipDto {
+  @ApiProperty({ example: 'Sunset Music Festival' })
+  @IsString()
+  name: string;
+
+  @ApiProperty()
+  @IsString()
+  about: string;
+
+  @ApiProperty({ description: 'GCS object key from POST /storage/upload-url (SPONSORSHIP_MEDIA context)' })
+  @IsString()
+  imageKey: string;
+
+  @ApiProperty()
+  @IsDateString()
+  eventDate: string;
+
+  @ApiProperty()
+  @IsString()
+  venue: string;
+
+  @ApiProperty()
+  @IsString()
+  city: string;
+
+  @ApiProperty({ type: [String] })
+  @IsArray()
+  @IsString({ each: true })
+  audienceProfile: string[];
+
+  @ApiProperty()
+  @IsString()
+  ageGroup: string;
+
+  @ApiProperty()
+  @IsString()
+  guestCount: string;
+
+  @ApiProperty({ description: 'GCS object key from POST /storage/upload-url (SPONSORSHIP_DOCUMENT context)' })
+  @IsString()
+  docKey: string;
+
+  @ApiProperty()
+  @IsString()
+  docName: string;
+
+  @ApiProperty()
+  @IsString()
+  docType: string;
+
+  @ApiProperty()
+  @IsInt()
+  @Min(0)
+  docSize: number;
+
+  @ApiProperty({ type: [AdminSponsorTierDto] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AdminSponsorTierDto)
+  sponsorTiers: AdminSponsorTierDto[];
+}

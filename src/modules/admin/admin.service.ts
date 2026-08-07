@@ -30,6 +30,7 @@ import { CreateInterestDto } from './dto/create-interest.dto';
 import { UpdateInterestDto } from './dto/update-interest.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
 import { ListSponsorshipsQueryDto } from './dto/list-sponsorships-query.dto';
+import { CreateAdminSponsorshipDto } from './dto/create-admin-sponsorship.dto';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { UpdateGstRateDto } from './dto/update-gst-rate.dto';
 import { UpdatePlanFeeRateDto } from './dto/update-plan-fee-rate.dto';
@@ -1482,6 +1483,61 @@ export class AdminService {
     const [imageUrl, docUrl] = await Promise.all([
       proposal.imageKey ? this.storageService.getPresignedDownloadUrl(proposal.imageKey) : null,
       proposal.docKey ? this.storageService.getPresignedDownloadUrl(proposal.docKey) : null,
+    ]);
+
+    return { ...proposal, imageUrl, docUrl };
+  }
+
+  // Admin creates a sponsorship proposal directly under the "Meetday Official" system host,
+  // published immediately — no host KYC/approval or review step involved.
+  async createSponsorshipAsAdmin(adminId: string, dto: CreateAdminSponsorshipDto) {
+    const hostProfileId = await this.storageService.getOrCreateOfficialHostProfileId();
+
+    const proposal = await this.prisma.sponsorshipProposal.create({
+      data: {
+        hostProfileId,
+        name: dto.name,
+        about: dto.about,
+        imageKey: dto.imageKey,
+        eventDate: new Date(dto.eventDate),
+        venue: dto.venue,
+        city: dto.city,
+        audienceProfile: dto.audienceProfile,
+        ageGroup: dto.ageGroup,
+        guestCount: dto.guestCount,
+        docKey: dto.docKey,
+        docName: dto.docName,
+        docType: dto.docType,
+        docSize: dto.docSize,
+        sponsorTiers: dto.sponsorTiers as unknown as Prisma.InputJsonValue,
+        status: 'PUBLISHED',
+        submittedAt: new Date(),
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+      },
+      include: {
+        hostProfile: {
+          select: {
+            id: true,
+            displayName: true,
+            user: { select: { id: true, firstName: true, lastName: true, email: true } },
+          },
+        },
+      },
+    });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'SPONSORSHIP_PROPOSAL_CREATED_BY_ADMIN',
+      entityType: 'SPONSORSHIP_PROPOSAL',
+      entityId: proposal.id,
+      metadata: { name: proposal.name },
+    });
+
+    const [imageUrl, docUrl] = await Promise.all([
+      this.storageService.getPresignedDownloadUrl(proposal.imageKey),
+      this.storageService.getPresignedDownloadUrl(proposal.docKey),
     ]);
 
     return { ...proposal, imageUrl, docUrl };

@@ -53,6 +53,7 @@ import { UpdateInterestDto } from './dto/update-interest.dto';
 import { SetInterestCategoriesDto } from './dto/set-interest-categories.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
 import { ListSponsorshipsQueryDto } from './dto/list-sponsorships-query.dto';
+import { CreateAdminSponsorshipDto } from './dto/create-admin-sponsorship.dto';
 import { UpdateGstRateDto } from './dto/update-gst-rate.dto';
 import { UpdatePlanFeeRateDto } from './dto/update-plan-fee-rate.dto';
 import { CreateHostFeePromoDto } from './dto/create-host-fee-promo.dto';
@@ -1331,6 +1332,19 @@ export class AdminController {
   }
 
   // ─── Sponsorship proposal review ───────────────────────────────────────────────
+
+  @Post('sponsorships')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @ApiOperation({
+    summary: 'Create a sponsorship proposal directly (admin)',
+    description:
+      'Creates and immediately publishes a sponsorship proposal under the "Meetday Official" system host, ' +
+      'bypassing the normal host KYC/approval and review flow.',
+  })
+  @ApiCreatedResponse({ description: 'Proposal created and published.' })
+  createSponsorship(@Body() dto: CreateAdminSponsorshipDto, @GetUser('id') adminId: string) {
+    return this.adminService.createSponsorshipAsAdmin(adminId, dto);
+  }
 
   @Get('sponsorships/pending')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')

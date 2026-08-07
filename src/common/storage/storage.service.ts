@@ -57,6 +57,11 @@ const CONTEXT_CONTENT_TYPES: Record<UploadContext, readonly string[]> = {
 // Platform-admin roles required by the admin-only contexts.
 const SUPER_ADMIN_ONLY = ['SUPER_ADMIN'];
 const COMMUNITY_ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN'];
+// Roles allowed to upload sponsorship media/documents on behalf of the "Meetday Official" host,
+// mirroring the roles that can create/review sponsorship proposals from the admin panel.
+const SPONSORSHIP_ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'];
+// Identifies the system host profile admins create sponsorship proposals under, bypassing KYC.
+const OFFICIAL_HOST_EMAIL = 'official@meetday.app';
 
 @Injectable()
 export class StorageService {
@@ -135,6 +140,49 @@ export class StorageService {
     return url;
   }
 
+  private officialHostProfileIdCache: string | null = null;
+
+  // Lazily creates (once) a system "Meetday Official" host profile so admins can publish
+  // sponsorship proposals directly, bypassing the normal host KYC/approval flow.
+  async getOrCreateOfficialHostProfileId(): Promise<string> {
+    if (this.officialHostProfileIdCache) return this.officialHostProfileIdCache;
+
+    const existing = await this.prisma.hostProfile.findFirst({
+      where: { user: { email: OFFICIAL_HOST_EMAIL } },
+      select: { id: true },
+    });
+    if (existing) {
+      this.officialHostProfileIdCache = existing.id;
+      return existing.id;
+    }
+
+    const hostRole = await this.prisma.role.findUniqueOrThrow({ where: { name: 'HOST' } });
+    const hostProfile = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          firebaseUid: `system-${randomUUID()}`,
+          email: OFFICIAL_HOST_EMAIL,
+          firstName: 'Meetday',
+          lastName: 'Official',
+          roleId: hostRole.id,
+        },
+      });
+      return tx.hostProfile.create({
+        data: {
+          userId: user.id,
+          displayName: 'Meetday',
+          legalName: 'Meetday',
+          approvalStatus: 'APPROVED',
+          kycStatus: 'NOT_SUBMITTED',
+          currentPlan: 'DISCOVER',
+        },
+      });
+    });
+
+    this.officialHostProfileIdCache = hostProfile.id;
+    return hostProfile.id;
+  }
+
   async requestUploadUrl(firebaseUid: string, dto: RequestUploadUrlDto) {
     const user = await this.prisma.user.findUnique({
       where: { firebaseUid },
@@ -191,9 +239,17 @@ export class StorageService {
       case UploadContext.SPONSORSHIP_MEDIA:
       case UploadContext.SPONSORSHIP_DOCUMENT: {
         const hostProfile = await this.prisma.hostProfile.findUnique({ where: { userId } });
-        if (!hostProfile) throw new NotFoundException('Host profile not found');
+        let sponsorshipHostProfileId: string;
+        if (hostProfile) {
+          sponsorshipHostProfileId = hostProfile.id;
+        } else if (SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '')) {
+          // Admin creating a sponsorship proposal directly — files are scoped to the system host.
+          sponsorshipHostProfileId = await this.getOrCreateOfficialHostProfileId();
+        } else {
+          throw new NotFoundException('Host profile not found');
+        }
         const folder = dto.context === UploadContext.SPONSORSHIP_MEDIA ? 'media' : 'documents';
-        key = `hosts/${hostProfile.id}/sponsorship-proposals/${folder}/${randomUUID()}.${ext}`;
+        key = `hosts/${sponsorshipHostProfileId}/sponsorship-proposals/${folder}/${randomUUID()}.${ext}`;
         break;
       }
 
