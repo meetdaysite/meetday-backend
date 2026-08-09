@@ -140,6 +140,16 @@ export class RegisterDto {
   displayName?: string;
 
   @ApiPropertyOptional({
+    maxLength: 100,
+    example: 'Bangalore Founders Circle',
+    description: 'Name of the community/experience the host runs. Collected at signup.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  communityName?: string;
+
+  @ApiPropertyOptional({
     maxLength: 200,
     example: 'Rahul Sharma',
     description: 'Full legal name or registered company name.',

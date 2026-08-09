@@ -196,6 +196,7 @@ export class AuthService {
           gender: dto.gender,
           displayName: dto.displayName,
           legalName: dto.legalName,
+          communityName: dto.communityName,
           panEncrypted: dto.pan ? this.cryptoService.encrypt(dto.pan) : undefined,
           hostBio: dto.hostBio,
           tagline: dto.tagline,

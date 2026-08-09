@@ -54,9 +54,10 @@ model User {
   createdCoupons    Coupon[]           @relation("CouponCreatedBy")
   couponRedemptions CouponRedemption[] @relation("CouponRedemptions")
 
-  reviewedEvents    Event[]         @relation("EventReviewedBy")
-  reviewedRevisions EventRevision[] @relation("EventRevisionReviewedBy")
-  reviewedSponsorshipProposals SponsorshipProposal[] @relation("SponsorshipProposalReviewedBy")
+  reviewedEvents               Event[]                @relation("EventReviewedBy")
+  reviewedRevisions            EventRevision[]        @relation("EventRevisionReviewedBy")
+  reviewedSponsorshipProposals SponsorshipProposal[]  @relation("SponsorshipProposalReviewedBy")
+  reviewedCommunityProfiles    HostCommunityProfile[] @relation("CommunityProfileReviewedBy")
 
   notifications Notification[]
 
@@ -76,23 +77,23 @@ model User {
   communityMemberships CommunityMember[]
 
   // Community chat back-relations
-  createdChannels        CommunityChannel[]          @relation("ChannelCreatedBy")
-  channelMessages        ChannelMessage[]            @relation("ChannelMessageSender")
-  pinnedMessages         ChannelMessage[]            @relation("ChannelMessagePinnedBy")
-  messageReactions       MessageReaction[]           @relation("MessageReactionUser")
-  channelMemberStates    ChannelMemberState[]        @relation("ChannelMemberStateUser")
-  dmConversationsAsP1    CommunityDmConversation[]   @relation("DmParticipant1")
-  dmConversationsAsP2    CommunityDmConversation[]   @relation("DmParticipant2")
-  sentDmMessages         CommunityDmMessage[]        @relation("DmMessageSender")
-  dmReadStates           CommunityDmReadState[]      @relation("DmReadStateUser")
-  channelMsgReports      ChannelMessageReport[]      @relation("channelMsgReporter")
-  channelMsgResolutions  ChannelMessageReport[]      @relation("channelMsgResolver")
-  communityMutes         CommunityMutedUser[]        @relation("mutedInCommunity")
-  communityMutedByUser   CommunityMutedUser[]        @relation("communityMuter")
-  chatKeywordsCreated    ChatKeywordAlert[]          @relation("ChatKeywordCreator")
-  chatBlockedLinksCreated ChatBlockedLink[]          @relation("ChatLinkCreator")
-  chatWarningsReceived   ChatContentWarning[]        @relation("warningReceived")
-  chatWarningsIssued     ChatContentWarning[]        @relation("warningIssued")
+  createdChannels         CommunityChannel[]        @relation("ChannelCreatedBy")
+  channelMessages         ChannelMessage[]          @relation("ChannelMessageSender")
+  pinnedMessages          ChannelMessage[]          @relation("ChannelMessagePinnedBy")
+  messageReactions        MessageReaction[]         @relation("MessageReactionUser")
+  channelMemberStates     ChannelMemberState[]      @relation("ChannelMemberStateUser")
+  dmConversationsAsP1     CommunityDmConversation[] @relation("DmParticipant1")
+  dmConversationsAsP2     CommunityDmConversation[] @relation("DmParticipant2")
+  sentDmMessages          CommunityDmMessage[]      @relation("DmMessageSender")
+  dmReadStates            CommunityDmReadState[]    @relation("DmReadStateUser")
+  channelMsgReports       ChannelMessageReport[]    @relation("channelMsgReporter")
+  channelMsgResolutions   ChannelMessageReport[]    @relation("channelMsgResolver")
+  communityMutes          CommunityMutedUser[]      @relation("mutedInCommunity")
+  communityMutedByUser    CommunityMutedUser[]      @relation("communityMuter")
+  chatKeywordsCreated     ChatKeywordAlert[]        @relation("ChatKeywordCreator")
+  chatBlockedLinksCreated ChatBlockedLink[]         @relation("ChatLinkCreator")
+  chatWarningsReceived    ChatContentWarning[]      @relation("warningReceived")
+  chatWarningsIssued      ChatContentWarning[]      @relation("warningIssued")
 
   // Community announcement back-relations
   authoredAnnouncements CommunityAnnouncement[] @relation("AnnouncementAuthor")
@@ -100,15 +101,15 @@ model User {
   announcementBookmarks AnnouncementBookmark[]  @relation("AnnouncementBookmarkUser")
 
   // Community feed back-relations
-  feedPosts        CommunityPost[]         @relation("FeedPostAuthor")
-  feedComments     CommunityPostComment[]  @relation("FeedCommentAuthor")
-  feedReactions    CommunityPostReaction[] @relation("FeedReactionUser")
-  feedShares       CommunityPostShare[]    @relation("FeedShareUser")
-  feedViews        CommunityPostView[]     @relation("FeedViewUser")
-  feedBookmarks    CommunityPostBookmark[] @relation("FeedBookmarkUser")
-  feedPollVotes    CommunityPostPollVote[] @relation("FeedPollVoteUser")
-  feedReports              CommunityPostReport[]   @relation("FeedReportUser")
-  communityInvitesCreated  CommunityInvite[]       @relation("CommunityInviteCreator")
+  feedPosts               CommunityPost[]         @relation("FeedPostAuthor")
+  feedComments            CommunityPostComment[]  @relation("FeedCommentAuthor")
+  feedReactions           CommunityPostReaction[] @relation("FeedReactionUser")
+  feedShares              CommunityPostShare[]    @relation("FeedShareUser")
+  feedViews               CommunityPostView[]     @relation("FeedViewUser")
+  feedBookmarks           CommunityPostBookmark[] @relation("FeedBookmarkUser")
+  feedPollVotes           CommunityPostPollVote[] @relation("FeedPollVoteUser")
+  feedReports             CommunityPostReport[]   @relation("FeedReportUser")
+  communityInvitesCreated CommunityInvite[]       @relation("CommunityInviteCreator")
 
   savedCommunities SavedCommunity[]
   savedEvents      SavedEvent[]
@@ -324,10 +325,11 @@ model HostProfile {
   user   User   @relation("HostUser", fields: [userId], references: [id], onDelete: Cascade)
 
   // Identity & Type
-  hostType    HostType?
-  displayName String? // Public-facing name shown to attendees
-  legalName   String? // Full legal name or registered company name
-  gender      Gender?
+  hostType      HostType?
+  displayName   String? // Public-facing name shown to attendees
+  legalName     String? // Full legal name or registered company name
+  communityName String? // Collected at signup — name of the community/experience the host runs
+  gender        Gender?
 
   // Legal / Compliance (encrypted or masked)
   panEncrypted String? // AES-256-GCM encrypted PAN — required for TDS on payouts
@@ -377,10 +379,10 @@ model HostProfile {
   averageRating     Float?
   totalReviews      Int    @default(0)
 
-  subscriptions HostSubscription[]
-  events        Event[]
-  payouts       HostPayout[]
-  feePromos     HostFeePromo[]
+  subscriptions        HostSubscription[]
+  events               Event[]
+  payouts              HostPayout[]
+  feePromos            HostFeePromo[]
   sponsorshipProposals SponsorshipProposal[]
   communityProfile     HostCommunityProfile?
 
@@ -401,6 +403,8 @@ model BrandProfile {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   brandName String
+
+  interests SponsorshipInterest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -968,7 +972,8 @@ model SponsorshipProposal {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  hostProfile HostProfile @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
+  hostProfile HostProfile           @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
+  interests   SponsorshipInterest[]
 
   @@index([hostProfileId])
   @@index([status])
@@ -980,6 +985,24 @@ enum SponsorshipStatus {
   UNDER_REVIEW
   REJECTED
   PUBLISHED
+}
+
+// A brand expressing interest in a published sponsorship proposal — notifies the admin team
+// and the hosting community. One row per (proposal, brand) pair.
+model SponsorshipInterest {
+  id                    String @id @default(uuid())
+  sponsorshipProposalId String
+  brandProfileId        String
+
+  sponsorshipProposal SponsorshipProposal @relation(fields: [sponsorshipProposalId], references: [id], onDelete: Cascade)
+  brandProfile        BrandProfile        @relation(fields: [brandProfileId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([sponsorshipProposalId, brandProfileId])
+  @@index([sponsorshipProposalId])
+  @@index([brandProfileId])
+  @@map("sponsorship_interests")
 }
 
 // Host-facing "community profile" shown to potential sponsors on the sponsorship
@@ -998,10 +1021,19 @@ model HostCommunityProfile {
 
   categories HostCommunityProfileCategory[]
 
+  // Every create/edit resets this to PENDING — an admin must approve before the community
+  // profile is considered live (shown to brands alongside the host's sponsorship proposals).
+  approvalStatus       HostApprovalStatus @default(PENDING)
+  adminRejectionRemark String?
+  reviewedBy           String?
+  reviewedByUser       User?              @relation("CommunityProfileReviewedBy", fields: [reviewedBy], references: [id])
+  reviewedAt           DateTime?
+
   activatedAt DateTime @default(now())
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  @@index([approvalStatus])
   @@map("host_community_profiles")
 }
 
@@ -1117,11 +1149,11 @@ model OrderAttendee {
 }
 
 enum OrderStatus {
-  PENDING_PAYMENT    // order created, awaiting payment (expires after 15 min)
-  CONFIRMED          // payment verified
+  PENDING_PAYMENT // order created, awaiting payment (expires after 15 min)
+  CONFIRMED // payment verified
   PARTIALLY_REFUNDED // some tickets cancelled and refunded; order still active
-  CANCELLED          // all tickets cancelled
-  REFUNDED           // fully cancelled and refund processed by Razorpay
+  CANCELLED // all tickets cancelled
+  REFUNDED // fully cancelled and refund processed by Razorpay
 }
 
 // ─── Refunds ──────────────────────────────────────────────────────────────────
@@ -1132,7 +1164,7 @@ model Refund {
   order   Order  @relation(fields: [orderId], references: [id])
 
   status              RefundStatus @default(PENDING)
-  totalAmount         Int          // in paise
+  totalAmount         Int // in paise
   platformFeeRefunded Boolean      @default(false)
   reason              RefundReason
   razorpayRefundId    String?
@@ -1371,6 +1403,10 @@ enum AuditAction {
   SPONSORSHIP_PROPOSAL_REVISION_APPROVED
   SPONSORSHIP_PROPOSAL_REVISION_REJECTED
 
+  // Host community profile lifecycle
+  COMMUNITY_PROFILE_APPROVED
+  COMMUNITY_PROFILE_REJECTED
+
   // Orders / payments (PMLA / GST)
   ORDER_CREATED
   ORDER_CONFIRMED
@@ -1529,11 +1565,11 @@ model Community {
   invites         CommunityInvite[]
   savedBy         SavedCommunity[]
 
-  messageReports  ChannelMessageReport[]
-  mutedUsers      CommunityMutedUser[]
-  keywordAlerts   ChatKeywordAlert[]
-  blockedLinks    ChatBlockedLink[]
-  chatWarnings    ChatContentWarning[]
+  messageReports ChannelMessageReport[]
+  mutedUsers     CommunityMutedUser[]
+  keywordAlerts  ChatKeywordAlert[]
+  blockedLinks   ChatBlockedLink[]
+  chatWarnings   ChatContentWarning[]
 
   @@index([status])
   @@index([categoryId])
@@ -1608,9 +1644,9 @@ model CommunityMember {
   messageCount        Int       @default(0) // non-deleted channel messages sent in this community
   eventsAttendedCount Int       @default(0) // distinct community events with a CONFIRMED order
   activityScore       Float     @default(0) // messageCount*1 + eventsAttendedCount*5 (recomputed on change)
-  lastActivityAt      DateTime?             // last message / join; powers "Recently Active"
+  lastActivityAt      DateTime? // last message / join; powers "Recently Active"
   bannedAt            DateTime?
-  bannedBy            String?               // userId of admin who performed the ban
+  bannedBy            String? // userId of admin who performed the ban
 
   community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1667,14 +1703,14 @@ model CommunityChannel {
   communityId String
   community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
 
-  name         String
-  slug         String
-  description  String?
-  isDefault    Boolean  @default(false)
-  isPublic     Boolean  @default(true)
-  position     Int      @default(0)
-  createdBy    String
-  creator      User     @relation("ChannelCreatedBy", fields: [createdBy], references: [id])
+  name        String
+  slug        String
+  description String?
+  isDefault   Boolean @default(false)
+  isPublic    Boolean @default(true)
+  position    Int     @default(0)
+  createdBy   String
+  creator     User    @relation("ChannelCreatedBy", fields: [createdBy], references: [id])
 
   welcomeTitle String?
   welcomeBody  String?
@@ -1684,10 +1720,10 @@ model CommunityChannel {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  messages     ChannelMessage[]
-  memberStates ChannelMemberState[]
-  reports      ChannelMessageReport[]
-  mutes        CommunityMutedUser[]
+  messages      ChannelMessage[]
+  memberStates  ChannelMemberState[]
+  reports       ChannelMessageReport[]
+  mutes         CommunityMutedUser[]
   keywordAlerts ChatKeywordAlert[]
 
   @@unique([communityId, slug])
@@ -1696,13 +1732,13 @@ model CommunityChannel {
 }
 
 model ChannelMessage {
-  id          String           @id @default(uuid())
+  id          String @id @default(uuid())
   channelId   String
   communityId String
   senderId    String
 
-  channel  CommunityChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  sender   User             @relation("ChannelMessageSender", fields: [senderId], references: [id])
+  channel CommunityChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  sender  User             @relation("ChannelMessageSender", fields: [senderId], references: [id])
 
   content      String    @db.Text
   isPinned     Boolean   @default(false)
@@ -1730,7 +1766,7 @@ model ChannelMessage {
 }
 
 model MessageReaction {
-  id        String         @id @default(uuid())
+  id        String @id @default(uuid())
   messageId String
   userId    String
   emoji     String
@@ -1746,7 +1782,7 @@ model MessageReaction {
 }
 
 model ChannelMemberState {
-  id        String           @id @default(uuid())
+  id        String @id @default(uuid())
   channelId String
   userId    String
 
@@ -1802,7 +1838,7 @@ enum DmConversationStatus {
 }
 
 model CommunityDmMessage {
-  id             String                  @id @default(uuid())
+  id             String @id @default(uuid())
   conversationId String
   senderId       String
 
@@ -1829,7 +1865,7 @@ enum DmMessageType {
 }
 
 model CommunityDmReadState {
-  id             String                  @id @default(uuid())
+  id             String @id @default(uuid())
   conversationId String
   userId         String
 
@@ -1928,7 +1964,7 @@ model CommunityPost {
   category FeedPostCategory @default(GENERAL)
   topic    String? // freeform tag (often an event name) → powers Trending Topics
   eventId  String? // optional linked event (e.g. "Attended Night Rituals")
-  event    Event?  @relation("EventFeedPosts", fields: [eventId], references: [id])
+  event    Event?           @relation("EventFeedPosts", fields: [eventId], references: [id])
 
   content   String   @db.Text // may be empty when media-only; the question for POLL
   mediaKeys String[] @default([]) // S3 keys (presigned on read)
@@ -2275,11 +2311,11 @@ model ChannelMessageReport {
   resolvedAt  DateTime?
   action      ReportAction?
 
-  message   ChannelMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  message   ChannelMessage   @relation(fields: [messageId], references: [id], onDelete: Cascade)
   channel   CommunityChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  community Community      @relation(fields: [communityId], references: [id], onDelete: Cascade)
-  reporter  User           @relation("channelMsgReporter", fields: [reporterId], references: [id])
-  resolver  User?          @relation("channelMsgResolver", fields: [resolvedBy], references: [id])
+  community Community        @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  reporter  User             @relation("channelMsgReporter", fields: [reporterId], references: [id])
+  resolver  User?            @relation("channelMsgResolver", fields: [resolvedBy], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2291,12 +2327,12 @@ model ChannelMessageReport {
 }
 
 model CommunityMutedUser {
-  id          String            @id @default(uuid())
+  id          String    @id @default(uuid())
   communityId String
   userId      String
   channelId   String?
   mutedBy     String
-  mutedAt     DateTime          @default(now())
+  mutedAt     DateTime  @default(now())
   mutedUntil  DateTime?
   reason      String?
 
@@ -2311,12 +2347,12 @@ model CommunityMutedUser {
 }
 
 model ChatKeywordAlert {
-  id          String            @id @default(uuid())
+  id          String   @id @default(uuid())
   communityId String
   keyword     String
   channelId   String?
   createdBy   String
-  createdAt   DateTime          @default(now())
+  createdAt   DateTime @default(now())
 
   community Community         @relation(fields: [communityId], references: [id], onDelete: Cascade)
   channel   CommunityChannel? @relation(fields: [channelId], references: [id])
@@ -2327,11 +2363,11 @@ model ChatKeywordAlert {
 }
 
 model ChatBlockedLink {
-  id          String    @id @default(uuid())
+  id          String   @id @default(uuid())
   communityId String
   pattern     String
   createdBy   String
-  createdAt   DateTime  @default(now())
+  createdAt   DateTime @default(now())
 
   community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
   creator   User      @relation("ChatLinkCreator", fields: [createdBy], references: [id])
@@ -2341,13 +2377,13 @@ model ChatBlockedLink {
 }
 
 model ChatContentWarning {
-  id          String          @id @default(uuid())
+  id          String    @id @default(uuid())
   communityId String
   userId      String
   messageId   String?
   reason      String
   issuedBy    String
-  issuedAt    DateTime        @default(now())
+  issuedAt    DateTime  @default(now())
   expiresAt   DateTime?
 
   community    Community       @relation(fields: [communityId], references: [id], onDelete: Cascade)
@@ -2419,12 +2455,12 @@ enum SupportTicketCategory {
 // ─── Payouts ──────────────────────────────────────────────────────────────────
 
 enum PayoutStatus {
-  PENDING     // Computed, awaiting trigger
-  PROCESSING  // Razorpay Payouts API call in flight
-  COMPLETED   // Funds transferred (webhook confirmed)
-  FAILED      // Razorpay rejected or bank bounced
-  ON_HOLD     // Admin hold (dispute / compliance / KYC lapse)
-  REVERSED    // Chargeback or reversal received from Razorpay
+  PENDING // Computed, awaiting trigger
+  PROCESSING // Razorpay Payouts API call in flight
+  COMPLETED // Funds transferred (webhook confirmed)
+  FAILED // Razorpay rejected or bank bounced
+  ON_HOLD // Admin hold (dispute / compliance / KYC lapse)
+  REVERSED // Chargeback or reversal received from Razorpay
 }
 
 enum PayoutMode {
@@ -2527,10 +2563,10 @@ model HostFeePromo {
   discountType  DiscountType
   discountValue Float
 
-  validFrom  DateTime?
-  validUntil DateTime?
-  maxEvents  Int?
-  eventsApplied Int @default(0)
+  validFrom     DateTime?
+  validUntil    DateTime?
+  maxEvents     Int?
+  eventsApplied Int       @default(0)
 
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())

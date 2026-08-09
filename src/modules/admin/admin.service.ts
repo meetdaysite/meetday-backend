@@ -1476,6 +1476,20 @@ export class AdminService {
             user: { select: { id: true, firstName: true, lastName: true, email: true } },
           },
         },
+        interests: {
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            createdAt: true,
+            brandProfile: {
+              select: {
+                id: true,
+                brandName: true,
+                user: { select: { email: true, phone: true } },
+              },
+            },
+          },
+        },
       },
     });
     if (!proposal) throw new NotFoundException('Sponsorship proposal not found');
@@ -1486,6 +1500,35 @@ export class AdminService {
     ]);
 
     return { ...proposal, imageUrl, docUrl };
+  }
+
+  // ── Brands interested in sponsorships ("Brands" section for admins) ──
+
+  async listSponsorshipInterests(page: number, limit: number) {
+    const [interests, total] = await Promise.all([
+      this.prisma.sponsorshipInterest.findMany({
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          createdAt: true,
+          brandProfile: {
+            select: { id: true, brandName: true, user: { select: { email: true, phone: true } } },
+          },
+          sponsorshipProposal: {
+            select: {
+              id: true,
+              name: true,
+              hostProfile: { select: { displayName: true, user: { select: { firstName: true, lastName: true } } } },
+            },
+          },
+        },
+      }),
+      this.prisma.sponsorshipInterest.count(),
+    ]);
+
+    return { interests, total, page, limit };
   }
 
   // Admin creates a sponsorship proposal directly under the "Meetday Official" system host,
@@ -1729,6 +1772,130 @@ export class AdminService {
       .catch((err) => this.logger.error('Failed to create sponsorship_changes_rejected notification', err));
 
     return { message: 'Revision rejected' };
+  }
+
+  // ─── Host community profile review ─────────────────────────────────────────
+
+  private static readonly COMMUNITY_PROFILE_SELECT = {
+    id: true,
+    name: true,
+    about: true,
+    logoKey: true,
+    size: true,
+    avgGuestCount: true,
+    experiencesPerYear: true,
+    approvalStatus: true,
+    adminRejectionRemark: true,
+    reviewedAt: true,
+    createdAt: true,
+    updatedAt: true,
+    categories: { select: { category: { select: { id: true, name: true } } } },
+    hostProfile: {
+      select: {
+        id: true,
+        displayName: true,
+        user: { select: { id: true, firstName: true, lastName: true, email: true } },
+      },
+    },
+  } as const;
+
+  async listPendingCommunityProfiles(page: number, limit: number) {
+    const where = { approvalStatus: 'PENDING' as const };
+
+    const [profiles, total] = await Promise.all([
+      this.prisma.hostCommunityProfile.findMany({
+        where,
+        select: AdminService.COMMUNITY_PROFILE_SELECT,
+        orderBy: { updatedAt: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.hostCommunityProfile.count({ where }),
+    ]);
+
+    return { profiles, total, page, limit };
+  }
+
+  async getCommunityProfileDetail(id: string) {
+    const profile = await this.prisma.hostCommunityProfile.findUnique({
+      where: { id },
+      select: AdminService.COMMUNITY_PROFILE_SELECT,
+    });
+    if (!profile) throw new NotFoundException('Community profile not found');
+
+    return { ...profile, logoUrl: await this.storageService.getPresignedDownloadUrl(profile.logoKey) };
+  }
+
+  async approveCommunityProfile(id: string, adminId: string) {
+    const profile = await this.prisma.hostCommunityProfile.findUnique({
+      where: { id },
+      include: { hostProfile: { include: { user: { select: { id: true } } } } },
+    });
+    if (!profile) throw new NotFoundException('Community profile not found');
+    if (profile.approvalStatus !== 'PENDING')
+      throw new BadRequestException('Only profiles in PENDING status can be approved');
+
+    await this.prisma.hostCommunityProfile.update({
+      where: { id },
+      data: { approvalStatus: 'APPROVED', reviewedBy: adminId, reviewedAt: new Date() },
+    });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'COMMUNITY_PROFILE_APPROVED',
+      entityType: 'HOST_COMMUNITY_PROFILE',
+      entityId: id,
+      metadata: { name: profile.name },
+    });
+
+    void this.notificationsService
+      .create(
+        profile.hostProfile.user.id,
+        'community_profile_approved',
+        'Community Profile Approved',
+        `Your community profile "${profile.name}" has been approved and is now visible to brands.`,
+        { hostCommunityProfileId: id },
+      )
+      .catch((err) => this.logger.error('Failed to create community_profile_approved notification', err));
+
+    return { message: 'Community profile approved successfully' };
+  }
+
+  async rejectCommunityProfile(id: string, adminId: string, dto: RejectEventDto) {
+    const profile = await this.prisma.hostCommunityProfile.findUnique({
+      where: { id },
+      include: { hostProfile: { include: { user: { select: { id: true } } } } },
+    });
+    if (!profile) throw new NotFoundException('Community profile not found');
+    if (profile.approvalStatus !== 'PENDING')
+      throw new BadRequestException('Only profiles in PENDING status can be rejected');
+
+    await this.prisma.hostCommunityProfile.update({
+      where: { id },
+      data: { approvalStatus: 'REJECTED', adminRejectionRemark: dto.remark, reviewedBy: adminId, reviewedAt: new Date() },
+    });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'COMMUNITY_PROFILE_REJECTED',
+      entityType: 'HOST_COMMUNITY_PROFILE',
+      entityId: id,
+      metadata: { name: profile.name, remark: dto.remark },
+    });
+
+    void this.notificationsService
+      .create(
+        profile.hostProfile.user.id,
+        'community_profile_rejected',
+        'Community Profile Not Approved',
+        `Your community profile "${profile.name}" was not approved. Remark: ${dto.remark}`,
+        { hostCommunityProfileId: id },
+      )
+      .catch((err) => this.logger.error('Failed to create community_profile_rejected notification', err));
+
+    return { message: 'Community profile rejected successfully' };
   }
 
   // ─── Order management ────────────────────────────────────────────────────────

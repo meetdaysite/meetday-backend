@@ -79,6 +79,7 @@ export class HostsService {
           hostType: dto.hostType,
           displayName: dto.displayName,
           legalName: dto.legalName,
+          communityName: dto.communityName,
           panEncrypted: dto.pan ? this.cryptoService.encrypt(dto.pan) : undefined,
           hostBio: dto.hostBio,
           tagline: dto.tagline,
@@ -240,8 +241,13 @@ export class HostsService {
     return this.withCommunityLogoUrl(communityProfile);
   }
 
+  // Creating or editing a community profile always resets it to PENDING — an admin must
+  // approve before it's shown to brands. Notifies admins of the (re-)submission.
   async activateCommunityProfile(userId: string, dto: ActivateCommunityDto) {
-    const hostProfile = await this.prisma.hostProfile.findUnique({ where: { userId }, select: { id: true } });
+    const hostProfile = await this.prisma.hostProfile.findUnique({
+      where: { userId },
+      select: { id: true, communityName: true },
+    });
     if (!hostProfile) throw new NotFoundException('Host profile not found');
 
     const validCategories = await this.prisma.category.findMany({
@@ -257,7 +263,13 @@ export class HostsService {
     const communityProfile = await this.prisma.hostCommunityProfile.upsert({
       where: { hostProfileId: hostProfile.id },
       create: { ...fields, hostProfileId: hostProfile.id },
-      update: fields,
+      update: {
+        ...fields,
+        approvalStatus: 'PENDING',
+        adminRejectionRemark: null,
+        reviewedBy: null,
+        reviewedAt: null,
+      },
     });
 
     await this.prisma.$transaction([
@@ -266,6 +278,22 @@ export class HostsService {
         data: categoryIds.map((categoryId) => ({ hostCommunityProfileId: communityProfile.id, categoryId })),
       }),
     ]);
+
+    const admins = await this.prisma.user.findMany({
+      where: { isActive: true, role: { name: { in: ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'] } } },
+      select: { id: true },
+    });
+    void Promise.allSettled(
+      admins.map((admin) =>
+        this.notificationsService.create(
+          admin.id,
+          'community_profile_pending_review',
+          'Community profile pending review',
+          `"${communityProfile.name}" is awaiting approval.`,
+          { hostCommunityProfileId: communityProfile.id },
+        ),
+      ),
+    );
 
     return this.getCommunityProfile(userId);
   }

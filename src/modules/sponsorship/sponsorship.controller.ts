@@ -30,6 +30,7 @@ import { SponsorshipService } from './sponsorship.service';
 import { CreateProposalDto } from './dto/create-proposal.dto';
 import { UpdateProposalDto } from './dto/update-proposal.dto';
 import { ListProposalsQueryDto } from './dto/list-proposals-query.dto';
+import { ListPublishedQueryDto } from './dto/list-published-query.dto';
 
 @ApiTags('Sponsorship Proposals')
 @ApiBearerAuth('firebase-token')
@@ -69,11 +70,38 @@ export class SponsorshipController {
   @Roles('BRAND')
   @ApiOperation({
     summary: 'List all published sponsorship proposals (brand view)',
-    description: 'Returns every PUBLISHED proposal across all hosts, newest first. No filters yet.',
+    description:
+      'Returns every PUBLISHED proposal across all hosts, newest first. Pass `categoryId` to filter ' +
+      "by the host's approved community profile category.",
   })
   @ApiOkResponse({ description: 'List of published proposals.' })
-  getAllPublished() {
-    return this.sponsorshipService.getAllPublishedProposals();
+  getAllPublished(@Query() query: ListPublishedQueryDto) {
+    return this.sponsorshipService.getAllPublishedProposals(query);
+  }
+
+  @Get('published/:id')
+  @Roles('BRAND')
+  @ApiOperation({
+    summary: 'Get a published sponsorship proposal detail (brand view)',
+    description: "Full proposal detail plus the host's community profile, for the brand 'data room' view.",
+  })
+  @ApiOkResponse({ description: 'Proposal detail with community profile.' })
+  @ApiNotFoundResponse({ description: 'Proposal not found or not published.' })
+  getPublishedDetail(@Param('id', ParseUUIDPipe) id: string) {
+    return this.sponsorshipService.getPublishedProposalDetail(id);
+  }
+
+  @Post('published/:id/interest')
+  @Roles('BRAND')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Mark interest in a published sponsorship proposal',
+    description: 'Notifies admins and the hosting community that this brand is interested. Idempotent.',
+  })
+  @ApiOkResponse({ description: 'Interest recorded.' })
+  @ApiNotFoundResponse({ description: 'Proposal not found or not published.' })
+  markInterest(@GetUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
+    return this.sponsorshipService.markInterest(userId, id);
   }
 
   @Get(':id')

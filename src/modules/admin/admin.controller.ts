@@ -1389,6 +1389,17 @@ export class AdminController {
     return this.adminService.getSponsorshipDetail(id);
   }
 
+  @Get('sponsorships/brands/interested')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({
+    summary: 'List brands interested in sponsorship proposals ("Brands" section)',
+    description: 'Every brand-proposal "I am Interested" click, across all proposals, newest first.',
+  })
+  @ApiOkResponse({ description: 'Paginated list of brand interests.' })
+  listSponsorshipInterests(@Query('page') page = 1, @Query('limit') limit = 20) {
+    return this.adminService.listSponsorshipInterests(Number(page), Number(limit));
+  }
+
   @Post('sponsorships/:id/approve')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @HttpCode(HttpStatus.OK)
@@ -1455,6 +1466,64 @@ export class AdminController {
     @Body() dto: RejectEventDto,
   ) {
     return this.adminService.rejectSponsorshipRevision(id, adminId, dto);
+  }
+
+  // ─── Host community profile review ─────────────────────────────────────────
+
+  @Get('community-profiles/pending')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({
+    summary: 'List community profiles pending admin review',
+    description: 'Returns profiles in PENDING status, oldest submission first (FIFO).',
+  })
+  @ApiOkResponse({ description: 'Paginated list of community profiles pending review.' })
+  listPendingCommunityProfiles(@Query('page') page = 1, @Query('limit') limit = 20) {
+    return this.adminService.listPendingCommunityProfiles(Number(page), Number(limit));
+  }
+
+  @Get('community-profiles/:id')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({ summary: 'Get full community profile detail (admin view)' })
+  @ApiParam({ name: 'id', description: 'Community profile UUID' })
+  @ApiOkResponse({ description: 'Full community profile detail with presigned logo URL.' })
+  @ApiNotFoundResponse({ description: 'Community profile not found.' })
+  getCommunityProfileDetail(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.getCommunityProfileDetail(id);
+  }
+
+  @Post('community-profiles/:id/approve')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Approve a community profile',
+    description: 'Approves a profile in PENDING status, making it visible to brands. Notifies the host.',
+  })
+  @ApiParam({ name: 'id', description: 'Community profile UUID' })
+  @ApiOkResponse({ description: 'Community profile approved.' })
+  @ApiNotFoundResponse({ description: 'Community profile not found.' })
+  @ApiBadRequestResponse({ description: 'Community profile is not in PENDING status.' })
+  approveCommunityProfile(@Param('id', ParseUUIDPipe) id: string, @GetUser('id') adminId: string) {
+    return this.adminService.approveCommunityProfile(id, adminId);
+  }
+
+  @Post('community-profiles/:id/reject')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reject a community profile',
+    description: 'Rejects a profile in PENDING status. Host can edit and resubmit. Notifies the host with the remark.',
+  })
+  @ApiParam({ name: 'id', description: 'Community profile UUID' })
+  @ApiBody({ type: RejectEventDto })
+  @ApiOkResponse({ description: 'Community profile rejected.' })
+  @ApiNotFoundResponse({ description: 'Community profile not found.' })
+  @ApiBadRequestResponse({ description: 'Community profile is not in PENDING status.' })
+  rejectCommunityProfile(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') adminId: string,
+    @Body() dto: RejectEventDto,
+  ) {
+    return this.adminService.rejectCommunityProfile(id, adminId, dto);
   }
 
   // ─── Order management ────────────────────────────────────────────────────────

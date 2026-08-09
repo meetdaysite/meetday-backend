@@ -94,6 +94,16 @@ export class ApplyHostDto {
   displayName?: string;
 
   @ApiPropertyOptional({
+    maxLength: 100,
+    description: 'Name of the community/experience the host runs. Shown to brands when the host later activates a community profile.',
+    example: 'Bangalore Founders Circle',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  communityName?: string;
+
+  @ApiPropertyOptional({
     maxLength: 200,
     description: 'Full legal name (individual) or registered company name (business). Used for compliance and contracts.',
     example: 'Rahul Sharma' ,

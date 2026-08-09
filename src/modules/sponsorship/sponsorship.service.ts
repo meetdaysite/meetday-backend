@@ -13,6 +13,7 @@ import { AuditLogService } from '../audit-log/audit-log.service';
 import { CreateProposalDto } from './dto/create-proposal.dto';
 import { UpdateProposalDto } from './dto/update-proposal.dto';
 import { ListProposalsQueryDto } from './dto/list-proposals-query.dto';
+import { ListPublishedQueryDto } from './dto/list-published-query.dto';
 
 const ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'];
 
@@ -185,21 +186,146 @@ export class SponsorshipService {
     return { proposals: withSignedUrls, total: withSignedUrls.length, page: 1, limit: withSignedUrls.length };
   }
 
-  // Brand-facing: every published proposal across all hosts, newest first. No filters/categorization
-  // yet — brands see the full list for now.
-  async getAllPublishedProposals() {
-    const proposals = await this.prisma.sponsorshipProposal.findMany({
-      where: { status: SponsorshipStatus.PUBLISHED },
-      include: {
-        hostProfile: {
-          select: { id: true, displayName: true, user: { select: { firstName: true, lastName: true } } },
+  // Flattens a host's community profile categories onto the proposal for brand-side filtering.
+  // Only an APPROVED community profile counts — pending/rejected ones are treated as uncategorized.
+  private static readonly PUBLISHED_INCLUDE = {
+    hostProfile: {
+      select: {
+        id: true,
+        displayName: true,
+        user: { select: { firstName: true, lastName: true } },
+        communityProfile: {
+          select: {
+            approvalStatus: true,
+            categories: { select: { category: { select: { id: true, name: true } } } },
+          },
         },
       },
+    },
+  } as const;
+
+  private flattenCategories<
+    T extends {
+      hostProfile: {
+        communityProfile: {
+          approvalStatus: string;
+          categories: { category: { id: string; name: string } }[];
+        } | null;
+      };
+    },
+  >(proposal: T) {
+    const { hostProfile, ...rest } = proposal;
+    const { communityProfile, ...hostRest } = hostProfile;
+    const categories =
+      communityProfile?.approvalStatus === 'APPROVED'
+        ? communityProfile.categories.map((c) => c.category)
+        : [];
+    return { ...rest, hostProfile: { ...hostRest, categories } };
+  }
+
+  // Brand-facing: every published proposal across all hosts, newest first. Optionally filtered by
+  // category, matched against the host's APPROVED community profile categories.
+  async getAllPublishedProposals(query: ListPublishedQueryDto) {
+    const proposals = await this.prisma.sponsorshipProposal.findMany({
+      where: {
+        status: SponsorshipStatus.PUBLISHED,
+        ...(query.categoryId && {
+          hostProfile: {
+            communityProfile: {
+              approvalStatus: 'APPROVED',
+              categories: { some: { categoryId: query.categoryId } },
+            },
+          },
+        }),
+      },
+      include: SponsorshipService.PUBLISHED_INCLUDE,
       orderBy: { updatedAt: 'desc' },
     });
 
-    const withSignedUrls = await Promise.all(proposals.map((p) => this.withSignedUrls(p)));
+    const withSignedUrls = await Promise.all(
+      proposals.map(async (p) => this.flattenCategories(await this.withSignedUrls(p))),
+    );
     return { proposals: withSignedUrls, total: withSignedUrls.length };
+  }
+
+  // Brand-facing: full detail of one published proposal, including the host's community profile
+  // (if approved) for the "data room" view.
+  async getPublishedProposalDetail(id: string) {
+    const proposal = await this.prisma.sponsorshipProposal.findUnique({
+      where: { id },
+      include: {
+        hostProfile: {
+          select: {
+            id: true,
+            displayName: true,
+            user: { select: { firstName: true, lastName: true } },
+            communityProfile: {
+              include: { categories: { include: { category: true } } },
+            },
+          },
+        },
+      },
+    });
+    if (!proposal || proposal.status !== SponsorshipStatus.PUBLISHED)
+      throw new NotFoundException('Sponsorship proposal not found');
+
+    const withUrls = await this.withSignedUrls(proposal);
+    const { hostProfile, ...rest } = withUrls;
+    const { communityProfile, ...hostRest } = hostProfile;
+
+    let community: Record<string, unknown> | null = null;
+    if (communityProfile && communityProfile.approvalStatus === 'APPROVED') {
+      const { categories, logoKey, ...communityRest } = communityProfile;
+      community = {
+        ...communityRest,
+        logoUrl: logoKey ? await this.storageService.getPresignedDownloadUrl(logoKey) : null,
+        categories: categories.map((c) => c.category),
+      };
+    }
+
+    return { ...rest, hostProfile: hostRest, community };
+  }
+
+  // Brand marks interest in a published proposal — notifies admins and the hosting community.
+  // Idempotent: calling again for the same brand+proposal is a no-op (no duplicate notifications).
+  async markInterest(userId: string, proposalId: string) {
+    const brandProfile = await this.prisma.brandProfile.findUnique({ where: { userId }, select: { id: true, brandName: true } });
+    if (!brandProfile) throw new NotFoundException('Brand profile not found');
+
+    const proposal = await this.prisma.sponsorshipProposal.findUnique({
+      where: { id: proposalId },
+      include: { hostProfile: { include: { user: { select: { id: true } } } } },
+    });
+    if (!proposal || proposal.status !== SponsorshipStatus.PUBLISHED)
+      throw new NotFoundException('Sponsorship proposal not found');
+
+    const existing = await this.prisma.sponsorshipInterest.findUnique({
+      where: { sponsorshipProposalId_brandProfileId: { sponsorshipProposalId: proposalId, brandProfileId: brandProfile.id } },
+    });
+    if (existing) return { message: 'Already marked as interested', alreadyInterested: true };
+
+    await this.prisma.sponsorshipInterest.create({
+      data: { sponsorshipProposalId: proposalId, brandProfileId: brandProfile.id },
+    });
+
+    const admins = await this.prisma.user.findMany({
+      where: { isActive: true, role: { name: { in: ADMIN_ROLES } } },
+      select: { id: true },
+    });
+    const notifyTargets = [proposal.hostProfile.user.id, ...admins.map((a) => a.id)];
+    void Promise.allSettled(
+      notifyTargets.map((targetUserId) =>
+        this.notificationsService.create(
+          targetUserId,
+          'brand_interested_in_sponsorship',
+          'A brand is interested!',
+          `${brandProfile.brandName} is interested in "${proposal.name || 'your proposal'}".`,
+          { proposalId, brandProfileId: brandProfile.id },
+        ),
+      ),
+    );
+
+    return { message: 'Interest recorded', alreadyInterested: false };
   }
 
   async getProposalDetail(userId: string, id: string) {
