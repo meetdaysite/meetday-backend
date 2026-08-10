@@ -1794,6 +1794,7 @@ export class AdminService {
       select: {
         id: true,
         displayName: true,
+        operatingCities: true,
         user: { select: { id: true, firstName: true, lastName: true, email: true } },
       },
     },
