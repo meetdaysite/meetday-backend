@@ -137,12 +137,15 @@ export class SponsorshipController {
     summary: 'Submit a proposal for admin review',
     description:
       'Validates all required fields are populated, then moves the proposal to UNDER_REVIEW. ' +
-      'Returns a 400 with the list of missing fields if incomplete.',
+      'Returns a 400 with the list of missing fields if incomplete. Requires an admin-approved ' +
+      'community profile (POST /hosts/community) first.',
   })
   @ApiOkResponse({ description: 'Proposal submitted for review.' })
   @ApiForbiddenResponse({ description: 'Not the owner, or proposal is not DRAFT/REJECTED.' })
   @ApiNotFoundResponse({ description: 'Proposal not found.' })
-  @ApiBadRequestResponse({ description: 'Proposal is incomplete. Missing: <field list>.' })
+  @ApiBadRequestResponse({
+    description: 'Proposal is incomplete, or the community profile is not yet admin-approved.',
+  })
   submitProposal(@GetUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
     return this.sponsorshipService.submitProposal(userId, id);
   }

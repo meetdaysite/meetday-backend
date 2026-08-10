@@ -338,6 +338,16 @@ export class SponsorshipService {
     if (proposal.status !== SponsorshipStatus.DRAFT && proposal.status !== SponsorshipStatus.REJECTED)
       throw new ForbiddenException('Only DRAFT or REJECTED proposals can be submitted for review');
 
+    const hostProfile = await this.prisma.hostProfile.findUnique({
+      where: { userId },
+      select: { communityProfile: { select: { approvalStatus: true } } },
+    });
+    if (hostProfile?.communityProfile?.approvalStatus !== 'APPROVED') {
+      throw new BadRequestException(
+        'Your community profile must be activated and approved by an admin before you can submit a sponsorship proposal for review.',
+      );
+    }
+
     const missing: string[] = [];
     if (!proposal.name) missing.push('name');
     if (!proposal.about) missing.push('about');
