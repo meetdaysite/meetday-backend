@@ -31,6 +31,10 @@ export default () => {
       xAccountNumber: env.RAZORPAY_X_ACCOUNT_NUMBER,
       payoutWebhookSecret: env.RAZORPAY_PAYOUT_WEBHOOK_SECRET,
     },
+    fast2sms: {
+      apiKey: env.FAST2SMS_API_KEY,
+      otpTemplateId: env.FAST2SMS_OTP_TEMPLATE_ID,
+    },
     payout: {
       holdDays: env.PAYOUT_HOLD_DAYS,
       tdsRate: env.TDS_RATE,

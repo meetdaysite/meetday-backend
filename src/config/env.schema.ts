@@ -19,6 +19,12 @@ export const envSchema = z.object({
   RAZORPAY_KEY_ID: z.string().min(1, 'RAZORPAY_KEY_ID is required'),
   RAZORPAY_KEY_SECRET: z.string().min(1, 'RAZORPAY_KEY_SECRET is required'),
 
+  // Custom phone-OTP delivery (bypasses Firebase's own phone-auth SMS, unreliable for Indian
+  // numbers without DLT registration). Omit both to fall back to logging the OTP server-side
+  // (dev only — no real SMS sent).
+  FAST2SMS_API_KEY: z.string().optional(),
+  FAST2SMS_OTP_TEMPLATE_ID: z.string().optional(), // "otp_id" of a DLT-approved OTP template from the Fast2SMS dashboard
+
   SANDBOX_HOST: z.string().url('SANDBOX_HOST must be a valid URL'),
   SANDBOX_API_KEY: z.string().min(1, 'SANDBOX_API_KEY is required'),
   SANDBOX_API_SECRET: z.string().min(1, 'SANDBOX_API_SECRET is required'),

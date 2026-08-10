@@ -7,6 +7,7 @@ import configuration from './config/configuration';
 import { validate } from './config/env.schema';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { PhoneOtpModule } from './modules/phone-otp/phone-otp.module';
 import { UsersModule } from './modules/users/users.module';
 import { HostsModule } from './modules/hosts/hosts.module';
 import { BrandsModule } from './modules/brands/brands.module';
@@ -67,6 +68,7 @@ import { StorageModule } from './common/storage/storage.module';
     MailModule,
     CryptoModule,
     AuthModule,
+    PhoneOtpModule,
     UsersModule,
     HostsModule,
     BrandsModule,
