@@ -1814,7 +1814,7 @@ export class AdminService {
       this.prisma.hostCommunityProfile.count({ where }),
     ]);
 
-    return { profiles, total, page, limit };
+    return { profiles: profiles.map((p) => AdminService.flattenCommunityProfileCategories(p)), total, page, limit };
   }
 
   async getCommunityProfileDetail(id: string) {
@@ -1824,7 +1824,18 @@ export class AdminService {
     });
     if (!profile) throw new NotFoundException('Community profile not found');
 
-    return { ...profile, logoUrl: await this.storageService.getPresignedDownloadUrl(profile.logoKey) };
+    return {
+      ...AdminService.flattenCommunityProfileCategories(profile),
+      logoUrl: await this.storageService.getPresignedDownloadUrl(profile.logoKey),
+    };
+  }
+
+  // Prisma returns the categories relation nested as { category: { id, name } }[] — flatten it
+  // to { id, name }[] to match what the frontend renders.
+  private static flattenCommunityProfileCategories<
+    T extends { categories: { category: { id: string; name: string } }[] },
+  >(profile: T) {
+    return { ...profile, categories: profile.categories.map((c) => c.category) };
   }
 
   async approveCommunityProfile(id: string, adminId: string) {
