@@ -3,6 +3,7 @@ import {
   ExecutionContext,
   ForbiddenException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -29,7 +30,14 @@ export class RolesGuard implements CanActivate {
       include: { role: true },
     });
 
-    if (!user || !user.isActive) {
+    // No DB row at all (never called /auth/register) is a different condition from "wrong
+    // role" — surface it the same way /auth/me does (404), so frontend "not registered yet"
+    // handling (→ onboarding) fires instead of the "different account type" 403 handling,
+    // which is only correct when a User row genuinely exists with a mismatched role.
+    if (!user) {
+      throw new NotFoundException('User not found. Please register first.');
+    }
+    if (!user.isActive) {
       throw new ForbiddenException('Access denied');
     }
 
