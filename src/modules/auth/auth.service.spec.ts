@@ -211,16 +211,18 @@ describe('AuthService', () => {
       );
     });
 
-    it('throws BadRequestException when categoryIds is missing', async () => {
+    it('registers successfully when categoryIds is missing (categories are optional at signup)', async () => {
+      prisma.category.findMany.mockResolvedValue([]);
       await expect(
         service.register(tokenUser, { ...hostDto, categoryIds: undefined }),
-      ).rejects.toThrow(BadRequestException);
+      ).resolves.toBeDefined();
     });
 
-    it('throws BadRequestException when categoryIds is empty', async () => {
+    it('registers successfully when categoryIds is empty', async () => {
+      prisma.category.findMany.mockResolvedValue([]);
       await expect(
         service.register(tokenUser, { ...hostDto, categoryIds: [] }),
-      ).rejects.toThrow(BadRequestException);
+      ).resolves.toBeDefined();
     });
 
     it('throws BadRequestException when hostType is missing', async () => {

@@ -44,8 +44,9 @@ export class AuthController {
       '`interests` is an array of `{ interestId, affinity }` objects — UUIDs from `GET /interests`, affinity one of `LIKED | OPEN_TO | DISLIKED`. ' +
       'All other profile fields (username, bio, city, etc.) are set later via `POST /attendee/profile`.\n\n' +
       '**accountType: HOST** — Creates the user with the HOST role and atomically creates a ' +
-      'HostProfile (kycStatus: NOT_SUBMITTED, approvalStatus: PENDING). ' +
-      '`categoryIds` and `hostType` are required. `email` is required when the Firebase token carries no email (phone-OTP sign-ups).',
+      'HostProfile (kycStatus: NOT_SUBMITTED, approvalStatus: APPROVED). ' +
+      '`hostType` is required; `categoryIds` is optional (categories can be added later via the community profile). ' +
+      '`email` is required when the Firebase token carries no email (phone-OTP sign-ups).',
   })
   @ApiBody({
     type: RegisterDto,

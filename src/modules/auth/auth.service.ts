@@ -148,18 +148,15 @@ export class AuthService {
         'email is required for host registration. Phone-OTP sign-ups must include an email in the request body.',
       );
     }
-    if (!dto.categoryIds || dto.categoryIds.length === 0) {
-      throw new BadRequestException('categoryIds is required when registering as a host');
-    }
     if (!dto.hostType) {
       throw new BadRequestException('hostType is required when registering as a host');
     }
 
     const validCategories = await this.prisma.category.findMany({
-      where: { id: { in: dto.categoryIds } },
+      where: { id: { in: dto.categoryIds ?? [] } },
       select: { id: true },
     });
-    if (validCategories.length !== dto.categoryIds.length) {
+    if (validCategories.length !== (dto.categoryIds?.length ?? 0)) {
       throw new BadRequestException('One or more categoryIds are invalid');
     }
 
@@ -214,7 +211,7 @@ export class AuthService {
           approvalStatus: 'APPROVED',
           currentPlan: 'DISCOVER',
           categories: {
-            create: dto.categoryIds.map((categoryId) => ({ categoryId })),
+            create: (dto.categoryIds ?? []).map((categoryId) => ({ categoryId })),
           },
           ...(dto.address && {
             address: { create: dto.address },
