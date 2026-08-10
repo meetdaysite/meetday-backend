@@ -7,7 +7,9 @@ import configuration from './config/configuration';
 import { validate } from './config/env.schema';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
-import { PhoneOtpModule } from './modules/phone-otp/phone-otp.module';
+// Paused until Fast2SMS DLT registration is approved — Google Sign-In is the sole signup/login
+// method in the meantime. Uncomment to re-enable phone-OTP send/verify endpoints.
+// import { PhoneOtpModule } from './modules/phone-otp/phone-otp.module';
 import { UsersModule } from './modules/users/users.module';
 import { HostsModule } from './modules/hosts/hosts.module';
 import { BrandsModule } from './modules/brands/brands.module';
@@ -68,7 +70,7 @@ import { StorageModule } from './common/storage/storage.module';
     MailModule,
     CryptoModule,
     AuthModule,
-    PhoneOtpModule,
+    // PhoneOtpModule, // paused until Fast2SMS DLT registration is approved
     UsersModule,
     HostsModule,
     BrandsModule,
