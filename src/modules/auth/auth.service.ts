@@ -209,7 +209,9 @@ export class AuthService {
             ? JSON.parse(JSON.stringify(dto.socialLinks))
             : undefined,
           kycStatus: 'NOT_SUBMITTED',
-          approvalStatus: 'PENDING',
+          // Hosts no longer require manual admin approval before they can act (e.g. raise a
+          // sponsorship proposal) — approved immediately at signup.
+          approvalStatus: 'APPROVED',
           currentPlan: 'DISCOVER',
           categories: {
             create: dto.categoryIds.map((categoryId) => ({ categoryId })),

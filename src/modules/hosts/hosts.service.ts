@@ -91,7 +91,8 @@ export class HostsService {
           socialLinks: dto.socialLinks ? JSON.parse(JSON.stringify(dto.socialLinks)) : undefined,
           gender: dto.gender,
           kycStatus: 'NOT_SUBMITTED',
-          approvalStatus: 'PENDING',
+          // Hosts no longer require manual admin approval before they can act — approved immediately.
+          approvalStatus: 'APPROVED',
           currentPlan: 'DISCOVER',
           categories: {
             create: dto.categoryIds.map((categoryId) => ({ categoryId })),

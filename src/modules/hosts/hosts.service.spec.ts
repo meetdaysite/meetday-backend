@@ -151,7 +151,7 @@ describe('HostsService', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             kycStatus: 'NOT_SUBMITTED',
-            approvalStatus: 'PENDING',
+            approvalStatus: 'APPROVED',
             currentPlan: 'DISCOVER',
           }),
         }),
