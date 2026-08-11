@@ -53,6 +53,7 @@ import { UpdateInterestDto } from './dto/update-interest.dto';
 import { SetInterestCategoriesDto } from './dto/set-interest-categories.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
 import { ListSponsorshipsQueryDto } from './dto/list-sponsorships-query.dto';
+import { ListCommunityProfilesQueryDto } from './dto/list-community-profiles-query.dto';
 import { CreateAdminSponsorshipDto } from './dto/create-admin-sponsorship.dto';
 import { UpdateGstRateDto } from './dto/update-gst-rate.dto';
 import { UpdatePlanFeeRateDto } from './dto/update-plan-fee-rate.dto';
@@ -1479,6 +1480,17 @@ export class AdminController {
   @ApiOkResponse({ description: 'Paginated list of community profiles pending review.' })
   listPendingCommunityProfiles(@Query('page') page = 1, @Query('limit') limit = 20) {
     return this.adminService.listPendingCommunityProfiles(Number(page), Number(limit));
+  }
+
+  @Get('community-profiles')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({
+    summary: 'List all community profiles',
+    description: 'Returns every community profile regardless of status. Filter by `status`.',
+  })
+  @ApiOkResponse({ description: 'Paginated list of community profiles.' })
+  listAllCommunityProfiles(@Query() query: ListCommunityProfilesQueryDto) {
+    return this.adminService.listAllCommunityProfiles(query);
   }
 
   @Get('community-profiles/:id')

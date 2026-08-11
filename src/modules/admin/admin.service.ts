@@ -30,6 +30,7 @@ import { CreateInterestDto } from './dto/create-interest.dto';
 import { UpdateInterestDto } from './dto/update-interest.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
 import { ListSponsorshipsQueryDto } from './dto/list-sponsorships-query.dto';
+import { ListCommunityProfilesQueryDto } from './dto/list-community-profiles-query.dto';
 import { CreateAdminSponsorshipDto } from './dto/create-admin-sponsorship.dto';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { UpdateGstRateDto } from './dto/update-gst-rate.dto';
@@ -1808,6 +1809,27 @@ export class AdminService {
         where,
         select: AdminService.COMMUNITY_PROFILE_SELECT,
         orderBy: { updatedAt: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.hostCommunityProfile.count({ where }),
+    ]);
+
+    return { profiles: profiles.map((p) => AdminService.flattenCommunityProfileCategories(p)), total, page, limit };
+  }
+
+  async listAllCommunityProfiles(query: ListCommunityProfilesQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const where: Prisma.HostCommunityProfileWhereInput = {};
+    if (query.status) where.approvalStatus = query.status;
+
+    const [profiles, total] = await Promise.all([
+      this.prisma.hostCommunityProfile.findMany({
+        where,
+        select: AdminService.COMMUNITY_PROFILE_SELECT,
+        orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
       }),
