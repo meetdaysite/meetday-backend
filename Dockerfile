@@ -14,8 +14,7 @@ COPY prisma ./prisma
 # npm cache is mounted externally (BuildKit cache) so it never lands on the
 # container's filesystem layer, keeping the runner disk usage minimal.
 ENV PUPPETEER_SKIP_DOWNLOAD=1
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci
+RUN npm ci
 
 # Generate Prisma client
 RUN npx prisma generate
@@ -46,8 +45,7 @@ COPY prisma ./prisma
 ENV PUPPETEER_SKIP_DOWNLOAD=1
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 ENV PRISMA_SKIP_POSTINSTALL_GENERATE=1
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci --omit=dev
+RUN npm ci --omit=dev
 
 # Copy generated Prisma client from builder (prisma generate output)
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
