@@ -135,7 +135,7 @@ export class HostsService {
         categories: { include: { category: true } },
         address: true,
         subscriptions: { orderBy: { createdAt: 'desc' }, take: 1 },
-        user: { select: { avatarUrl: true } },
+        user: { select: { avatarUrl: true, phone: true, email: true } },
       },
     });
     if (!profile) throw new NotFoundException('Host profile not found');
@@ -149,6 +149,8 @@ export class HostsService {
       ...rest,
       pan: panEncrypted ? this.cryptoService.decrypt(panEncrypted) : null,
       avatarUrl,
+      phone: user.phone,
+      email: user.email,
     };
   }
 
