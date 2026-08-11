@@ -7,8 +7,17 @@
 export function getCorsOrigin(): boolean | string[] {
   if (process.env.NODE_ENV !== 'production') return true;
 
-  return (process.env.ALLOWED_ORIGINS ?? '')
+  const defaultOrigins = [
+    'https://app.meetday.ai',
+    'https://meetday-frontend.vercel.app',
+    'https://admin.meetday.ai',
+    'https://meetday-admin.vercel.app',
+  ];
+
+  const envOrigins = (process.env.ALLOWED_ORIGINS ?? '')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
+
+  return Array.from(new Set([...defaultOrigins, ...envOrigins]));
 }
