@@ -1500,7 +1500,18 @@ export class AdminService {
       proposal.docKey ? this.storageService.getPresignedDownloadUrl(proposal.docKey) : null,
     ]);
 
-    return { ...proposal, imageUrl, docUrl };
+    let pendingRevision = proposal.pendingRevision as
+      | (Record<string, unknown> & { imageKey?: string; docKey?: string })
+      | null;
+    if (pendingRevision) {
+      const [revImageUrl, revDocUrl] = await Promise.all([
+        pendingRevision.imageKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.imageKey) : null,
+        pendingRevision.docKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.docKey) : null,
+      ]);
+      pendingRevision = { ...pendingRevision, imageUrl: revImageUrl, docUrl: revDocUrl };
+    }
+
+    return { ...proposal, imageUrl, docUrl, pendingRevision };
   }
 
   // ── Brands interested in sponsorships ("Brands" section for admins) ──
