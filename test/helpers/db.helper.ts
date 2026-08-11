@@ -10,11 +10,13 @@ export async function truncateTables(prisma: PrismaService): Promise<void> {
   await prisma.hostSubscription.deleteMany();
   await prisma.coupon.deleteMany();
   await prisma.hostExperienceCategory.deleteMany();
-  await prisma.userInterest.deleteMany();
+  await prisma.userInterestAffinity.deleteMany();
   await prisma.hostAddress.deleteMany();
   await prisma.hostProfile.deleteMany();
   await prisma.adminProfile.deleteMany();
-  await prisma.userProfile.deleteMany();
+  await prisma.attendeeProfile.deleteMany();
+  await prisma.brandProfile.deleteMany();
+  await prisma.consentRecord.deleteMany();
   // Bypass the soft-delete middleware by passing deletedAt as an explicit key.
   await (prisma.user as any).deleteMany({ where: { deletedAt: undefined } });
   await prisma.category.deleteMany();
@@ -25,6 +27,7 @@ export async function truncateTables(prisma: PrismaService): Promise<void> {
 const ROLES = [
   { name: 'USER', description: 'Regular attendee' },
   { name: 'HOST', description: 'Event host' },
+  { name: 'BRAND', description: 'Sponsorship brand' },
   { name: 'CITY_ADMIN', description: 'Manages a city' },
   { name: 'MODERATOR', description: 'Content moderator' },
   { name: 'SUPPORT', description: 'Customer support' },
