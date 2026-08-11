@@ -39,11 +39,17 @@ export class SponsorshipService {
 
     let pendingRevision = proposal.pendingRevision as (Record<string, unknown> & { imageKey?: string; docKey?: string }) | null;
     if (pendingRevision) {
+      // Only sign a URL for keys actually present in the diff — otherwise an unrelated field
+      // edit (e.g. just the date) would overwrite the still-valid live image/doc URL with null.
       const [revImageUrl, revDocUrl] = await Promise.all([
-        pendingRevision.imageKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.imageKey as string) : null,
-        pendingRevision.docKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.docKey as string) : null,
+        pendingRevision.imageKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.imageKey as string) : undefined,
+        pendingRevision.docKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.docKey as string) : undefined,
       ]);
-      pendingRevision = { ...pendingRevision, imageUrl: revImageUrl, docUrl: revDocUrl };
+      pendingRevision = {
+        ...pendingRevision,
+        ...(revImageUrl !== undefined && { imageUrl: revImageUrl }),
+        ...(revDocUrl !== undefined && { docUrl: revDocUrl }),
+      };
     }
 
     return { ...proposal, imageUrl, docUrl, pendingRevision };
@@ -245,7 +251,9 @@ export class SponsorshipService {
     const withSignedUrls = await Promise.all(
       proposals.map(async (p) => this.flattenCategories(await this.withSignedUrls(p))),
     );
-    return { proposals: withSignedUrls, total: withSignedUrls.length };
+    // Brands must never see a host's not-yet-approved pending edits.
+    const withoutPendingRevision = withSignedUrls.map(({ pendingRevision: _pendingRevision, ...p }) => p);
+    return { proposals: withoutPendingRevision, total: withoutPendingRevision.length };
   }
 
   // Brand-facing: full detail of one published proposal, including the host's community profile
@@ -283,7 +291,9 @@ export class SponsorshipService {
       };
     }
 
-    return { ...rest, hostProfile: hostRest, community };
+    // Brands must never see the host's not-yet-approved pending edits.
+    const { pendingRevision: _pendingRevision, ...restWithoutPendingRevision } = rest;
+    return { ...restWithoutPendingRevision, hostProfile: hostRest, community };
   }
 
   // Brand marks interest in a published proposal — notifies admins and the hosting community.

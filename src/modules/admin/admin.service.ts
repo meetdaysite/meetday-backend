@@ -1504,11 +1504,17 @@ export class AdminService {
       | (Record<string, unknown> & { imageKey?: string; docKey?: string })
       | null;
     if (pendingRevision) {
+      // Only sign a URL for keys actually present in the diff — otherwise an unrelated field
+      // edit (e.g. just the date) would overwrite the still-valid live image/doc URL with null.
       const [revImageUrl, revDocUrl] = await Promise.all([
-        pendingRevision.imageKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.imageKey) : null,
-        pendingRevision.docKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.docKey) : null,
+        pendingRevision.imageKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.imageKey) : undefined,
+        pendingRevision.docKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.docKey) : undefined,
       ]);
-      pendingRevision = { ...pendingRevision, imageUrl: revImageUrl, docUrl: revDocUrl };
+      pendingRevision = {
+        ...pendingRevision,
+        ...(revImageUrl !== undefined && { imageUrl: revImageUrl }),
+        ...(revDocUrl !== undefined && { docUrl: revDocUrl }),
+      };
     }
 
     return { ...proposal, imageUrl, docUrl, pendingRevision };
