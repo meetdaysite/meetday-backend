@@ -114,10 +114,51 @@ export class AdminService {
   }
 
   async inviteAdmin(dto: InviteAdminDto) {
-    // Check DB for existing user with this email
-    const existingInDb = await this.prisma.user.findFirst({ where: { email: dto.email } });
+    // Look up the role and guard against SUPER_ADMIN escalation
+    const role = await this.prisma.role.findUnique({ where: { id: dto.roleId } });
+    if (!role) {
+      throw new BadRequestException('Invalid roleId');
+    }
+    if (role.name === 'SUPER_ADMIN') {
+      throw new BadRequestException('SUPER_ADMIN cannot be granted via this endpoint');
+    }
+    if (role.name === 'CITY_ADMIN' && (!dto.managedCities || dto.managedCities.length === 0)) {
+      throw new BadRequestException('managedCities is required for CITY_ADMIN');
+    }
+
+    // Check DB for existing user with this email — e.g. someone already registered as a HOST
+    // or BRAND. Rather than rejecting, grant them admin access under the SAME login by setting
+    // a secondary `adminRoleId` (their primary HOST/BRAND role is untouched).
+    const existingInDb = await this.prisma.user.findFirst({
+      where: { email: dto.email },
+      select: { id: true, adminRoleId: true },
+    });
     if (existingInDb) {
-      throw new ConflictException(`A user with email ${dto.email} already exists`);
+      if (existingInDb.adminRoleId) {
+        throw new ConflictException(`A user with email ${dto.email} already has admin access`);
+      }
+
+      await this.prisma.user.update({
+        where: { id: existingInDb.id },
+        data: {
+          adminRole: { connect: { id: role.id } },
+          ...(role.name === 'CITY_ADMIN' && {
+            adminProfile: { create: { managedCities: dto.managedCities } },
+          }),
+        },
+      });
+
+      void this.notificationsService
+        .create(
+          existingInDb.id,
+          'admin_access_granted',
+          'Admin access granted',
+          `You've been granted ${role.name} access. Log in to the admin panel with your existing account to use it.`,
+          {},
+        )
+        .catch((err) => this.logger.error('Failed to create admin_access_granted notification', err));
+
+      return { message: 'Admin access granted to existing account' };
     }
 
     // Check Firebase for existing user
@@ -145,18 +186,6 @@ export class AdminService {
     const resetLink = await firebaseAdmin.auth().generatePasswordResetLink(dto.email, {
       url: `${frontendUrl}/reset-password`,
     });
-
-    // Look up the role and guard against SUPER_ADMIN escalation
-    const role = await this.prisma.role.findUnique({ where: { id: dto.roleId } });
-    if (!role) {
-      throw new BadRequestException('Invalid roleId');
-    }
-    if (role.name === 'SUPER_ADMIN') {
-      throw new BadRequestException('SUPER_ADMIN cannot be granted via this endpoint');
-    }
-    if (role.name === 'CITY_ADMIN' && (!dto.managedCities || dto.managedCities.length === 0)) {
-      throw new BadRequestException('managedCities is required for CITY_ADMIN');
-    }
 
     // Create DB user — inactive until they complete profile
     await this.prisma.user.create({

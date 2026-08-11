@@ -17,6 +17,7 @@ function makePrisma() {
   const prisma: any = {
     user: {
       findUnique: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
@@ -24,6 +25,7 @@ function makePrisma() {
     role: { findUniqueOrThrow: jest.fn() },
     category: { findMany: jest.fn() },
     hostProfile: { create: jest.fn() },
+    brandProfile: { create: jest.fn() },
     orderAttendee: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
   };
   prisma.$transaction = jest.fn().mockImplementation(async (fn: any) => fn(prisma));
@@ -261,6 +263,61 @@ describe('AuthService', () => {
     });
   });
 
+  // ── register() — attaching a second profile to an existing account ──────
+
+  describe('register() — cross-portal (attach second profile)', () => {
+    const brandDto = {
+      firstName: 'Priya',
+      lastName: 'Nair',
+      accountType: 'BRAND' as const,
+      brandName: 'Acme Co',
+    };
+    const hostDto2 = {
+      firstName: 'Priya',
+      lastName: 'Nair',
+      accountType: 'HOST' as const,
+      hostType: 'INDIVIDUAL' as const,
+    };
+    const existingBrandUser = { id: 'user-id', role: { name: 'BRAND' }, hostProfile: null, brandProfile: { id: 'bp-id' } };
+    const existingHostUser = { id: 'user-id', role: { name: 'HOST' }, hostProfile: { id: 'hp-id' }, brandProfile: null };
+
+    it('attaches a HostProfile onto an existing BRAND user instead of rejecting', async () => {
+      prisma.user.findUnique.mockResolvedValue(existingBrandUser);
+      prisma.category.findMany.mockResolvedValue([]);
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ ...createdUser, role: { name: 'BRAND' } });
+      prisma.hostProfile.create.mockResolvedValue({ id: 'hp-id-2', categories: [], address: null });
+
+      const result = await service.register(tokenUser, hostDto2);
+
+      expect(prisma.hostProfile.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ userId: 'user-id' }) }),
+      );
+      expect(prisma.user.create).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ role: { name: 'BRAND' }, hostProfile: expect.objectContaining({ id: 'hp-id-2' }) });
+    });
+
+    it('attaches a BrandProfile onto an existing HOST user instead of rejecting', async () => {
+      prisma.user.findUnique.mockResolvedValue(existingHostUser);
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ ...createdUser, role: { name: 'HOST' } });
+      prisma.brandProfile.create.mockResolvedValue({ id: 'bp-id-2' });
+
+      const result = await service.register(tokenUser, brandDto);
+
+      expect(prisma.brandProfile.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ userId: 'user-id', brandName: 'Acme Co' }) }),
+      );
+      expect(prisma.user.create).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ role: { name: 'HOST' }, brandProfile: expect.objectContaining({ id: 'bp-id-2' }) });
+    });
+
+    it('throws ConflictException when re-registering a profile type already held', async () => {
+      prisma.user.findUnique.mockResolvedValue(existingHostUser);
+
+      await expect(service.register(tokenUser, hostDto2)).rejects.toThrow(ConflictException);
+      expect(prisma.hostProfile.create).not.toHaveBeenCalled();
+    });
+  });
+
   // ── activateAccount() ─────────────────────────────────────────────────────
 
   describe('activateAccount()', () => {
@@ -322,12 +379,31 @@ describe('AuthService', () => {
   // ── getMe() ───────────────────────────────────────────────────────────────
 
   describe('getMe()', () => {
-    it('returns user with role and userProfile', async () => {
-      const fullUser = { ...createdUser, userProfile: null };
+    it('returns user with role, admin/host/brand access flags, and userProfile', async () => {
+      const fullUser = { ...createdUser, userProfile: null, adminRole: null, hostProfile: null, brandProfile: null };
       prisma.user.findUnique.mockResolvedValue(fullUser);
 
       const result = await service.getMe('firebase-uid');
-      expect(result).toEqual(fullUser);
+      expect(result).toEqual({
+        ...createdUser,
+        userProfile: null,
+        adminRole: null,
+        hasHostAccess: false,
+        hasBrandAccess: false,
+      });
+    });
+
+    it('reports hasHostAccess/hasBrandAccess/adminRole when those are present', async () => {
+      const fullUser = {
+        ...createdUser,
+        adminRole: { name: 'CITY_ADMIN' },
+        hostProfile: { id: 'hp-id' },
+        brandProfile: { id: 'bp-id' },
+      };
+      prisma.user.findUnique.mockResolvedValue(fullUser);
+
+      const result = await service.getMe('firebase-uid');
+      expect(result).toMatchObject({ adminRole: 'CITY_ADMIN', hasHostAccess: true, hasBrandAccess: true });
     });
 
     it('throws NotFoundException when user is not registered', async () => {

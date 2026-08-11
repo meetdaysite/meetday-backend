@@ -155,8 +155,24 @@ describe('AdminService', () => {
       expect(mockMailQueue.add).toHaveBeenCalledWith('admin-invite', expect.any(Object));
     });
 
-    it('throws ConflictException when email already exists in DB', async () => {
-      prisma.user.findFirst.mockResolvedValue({ id: 'existing' });
+    it('grants admin access to an existing user (e.g. HOST/BRAND) instead of rejecting', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'existing-user-id', adminRoleId: null });
+      prisma.user.update.mockResolvedValue({ id: 'existing-user-id' });
+
+      const result = await service.inviteAdmin(dto);
+
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'existing-user-id' },
+          data: expect.objectContaining({ adminRole: { connect: { id: cityAdminRole.id } } }),
+        }),
+      );
+      expect(mockAuth.createUser).not.toHaveBeenCalled();
+      expect(result).toEqual({ message: 'Admin access granted to existing account' });
+    });
+
+    it('throws ConflictException when the existing user already has admin access', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'existing-user-id', adminRoleId: 'some-role-id' });
       await expect(service.inviteAdmin(dto)).rejects.toThrow(ConflictException);
     });
 

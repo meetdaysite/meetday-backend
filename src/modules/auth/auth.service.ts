@@ -39,8 +39,21 @@ export class AuthService {
     // constraint at the DB level and a create would fail if we miss it.
     const existing = await this.prisma.user.findUnique({
       where: { firebaseUid: tokenUser.uid },
+      include: { hostProfile: { select: { id: true } }, brandProfile: { select: { id: true } } },
     });
+
+    // A single Firebase identity (host/brand/admin) can hold host, brand, and admin access at
+    // once — if this account already exists (e.g. as HOST or an admin), a HOST/BRAND signup
+    // attaches the missing profile onto the SAME user row instead of being rejected outright.
+    // Re-registering for a profile type they already have (or a plain USER re-register) is
+    // still a conflict.
     if (existing) {
+      if (dto.accountType === 'HOST' && !existing.hostProfile) {
+        return this.attachHostProfile(existing.id, dto);
+      }
+      if (dto.accountType === 'BRAND' && !existing.brandProfile) {
+        return this.attachBrandProfile(existing.id, dto);
+      }
       throw new ConflictException('User already registered');
     }
 
@@ -278,6 +291,109 @@ export class AuthService {
     });
   }
 
+  // Attaches a HostProfile to an EXISTING user (e.g. an already-registered BRAND or admin
+  // account) — the user's primary `role` is left untouched; HOST access is then granted via
+  // hostProfile existence (see RolesGuard).
+  private async attachHostProfile(userId: string, dto: RegisterDto) {
+    if (!dto.hostType) {
+      throw new BadRequestException('hostType is required when registering as a host');
+    }
+
+    const validCategories = await this.prisma.category.findMany({
+      where: { id: { in: dto.categoryIds ?? [] } },
+      select: { id: true },
+    });
+    if (validCategories.length !== (dto.categoryIds?.length ?? 0)) {
+      throw new BadRequestException('One or more categoryIds are invalid');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          firstName: true,
+          lastName: true,
+          avatarUrl: true,
+          isActive: true,
+          role: { select: { name: true } },
+          createdAt: true,
+        },
+      });
+
+      const hostProfile = await tx.hostProfile.create({
+        data: {
+          userId,
+          hostType: dto.hostType,
+          gender: dto.gender,
+          displayName: dto.displayName,
+          legalName: dto.legalName,
+          communityName: dto.communityName,
+          panEncrypted: dto.pan ? this.cryptoService.encrypt(dto.pan) : undefined,
+          hostBio: dto.hostBio,
+          tagline: dto.tagline,
+          languages: dto.languages ?? [],
+          yearsOfExperience: dto.yearsOfExperience,
+          totalEventsPreviouslyHosted: dto.totalEventsPreviouslyHosted,
+          operatingCities: dto.operatingCities ?? [],
+          portfolioLinks: dto.portfolioLinks ?? [],
+          socialLinks: dto.socialLinks ? JSON.parse(JSON.stringify(dto.socialLinks)) : undefined,
+          kycStatus: 'NOT_SUBMITTED',
+          approvalStatus: 'APPROVED',
+          currentPlan: 'DISCOVER',
+          categories: {
+            create: (dto.categoryIds ?? []).map((categoryId) => ({ categoryId })),
+          },
+          ...(dto.address && {
+            address: { create: dto.address },
+          }),
+        },
+        include: {
+          categories: { include: { category: true } },
+          address: true,
+        },
+      });
+
+      return { ...user, hostProfile };
+    });
+  }
+
+  // Attaches a BrandProfile to an EXISTING user (e.g. an already-registered HOST or admin
+  // account) — mirrors attachHostProfile above.
+  private async attachBrandProfile(userId: string, dto: RegisterDto) {
+    if (!dto.brandName) {
+      throw new BadRequestException('brandName is required when registering as a brand');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          firstName: true,
+          lastName: true,
+          avatarUrl: true,
+          isActive: true,
+          role: { select: { name: true } },
+          createdAt: true,
+        },
+      });
+
+      const brandProfile = await tx.brandProfile.create({
+        data: {
+          userId,
+          brandName: dto.brandName!,
+        },
+      });
+
+      return { ...user, brandProfile };
+    });
+  }
+
   /**
    * Resolves user identity from token + body.
    * Token fields are authoritative; body fills in what the token doesn't provide.
@@ -398,6 +514,9 @@ export class AuthService {
         isActive: true,
         mustCompleteProfile: true,
         role: { select: { name: true } },
+        adminRole: { select: { name: true } },
+        hostProfile: { select: { id: true } },
+        brandProfile: { select: { id: true } },
         attendeeProfile: true,
         createdAt: true,
         updatedAt: true,
@@ -408,8 +527,15 @@ export class AuthService {
       throw new NotFoundException('User not found. Please register first.');
     }
 
+    // `role` stays whichever account type was registered first (for back-compat with existing
+    // frontend checks); `hasHostAccess`/`hasBrandAccess`/`adminRole` expose the full picture for
+    // a single identity that holds host, brand, and/or admin access at once.
+    const { hostProfile, brandProfile, adminRole, ...rest } = user;
     return {
-      ...user,
+      ...rest,
+      hasHostAccess: !!hostProfile,
+      hasBrandAccess: !!brandProfile,
+      adminRole: adminRole?.name ?? null,
       avatarUrl: user.avatarUrl
         ? await this.storageService.getPresignedDownloadUrl(user.avatarUrl)
         : null,

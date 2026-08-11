@@ -27,7 +27,12 @@ export class RolesGuard implements CanActivate {
 
     const user = await this.prisma.user.findUnique({
       where: { firebaseUid: uid },
-      include: { role: true },
+      include: {
+        role: true,
+        adminRole: true,
+        hostProfile: { select: { id: true } },
+        brandProfile: { select: { id: true } },
+      },
     });
 
     // No DB row at all (never called /auth/register) is a different condition from "wrong
@@ -41,16 +46,26 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('Access denied');
     }
 
+    // A single Firebase identity can hold host, brand, and admin access at once — the primary
+    // `role` covers whichever account type was registered first, `adminRole` covers a
+    // separately-granted admin role, and `hostProfile`/`brandProfile` existence covers the
+    // other two regardless of which one is primary.
+    const effectiveRoles = new Set<string>([user.role.name]);
+    if (user.adminRole) effectiveRoles.add(user.adminRole.name);
+    if (user.hostProfile) effectiveRoles.add('HOST');
+    if (user.brandProfile) effectiveRoles.add('BRAND');
+
     // Always enrich request.user with DB profile so @GetUser('id') works
     // regardless of whether @Roles() is applied on the route.
     request.user = {
       ...request.user,
       id: user.id,
       role: user.role.name,
+      roles: Array.from(effectiveRoles),
       isActive: user.isActive,
     };
 
-    if (requiredRoles?.length && !requiredRoles.includes(user.role.name)) {
+    if (requiredRoles?.length && !requiredRoles.some((r) => effectiveRoles.has(r))) {
       throw new ForbiddenException(
         'You do not have permission to access this resource.',
       );
