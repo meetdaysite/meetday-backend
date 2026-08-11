@@ -944,6 +944,7 @@ model SponsorshipProposal {
   about           String   @db.Text
   imageKey        String // GCS object key for the cover image
   eventDate       DateTime
+  eventEndDate    DateTime?
   venue           String
   city            String
   audienceProfile String[]

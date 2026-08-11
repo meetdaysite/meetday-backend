@@ -39,6 +39,10 @@ export class CreateAdminSponsorshipDto {
   eventDate: string;
 
   @ApiProperty()
+  @IsDateString()
+  eventEndDate: string;
+
+  @ApiProperty()
   @IsString()
   venue: string;
 

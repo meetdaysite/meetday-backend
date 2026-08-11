@@ -82,6 +82,7 @@ export class SponsorshipService {
         about: dto.about ?? '',
         imageKey: dto.imageKey ?? '',
         eventDate: dto.eventDate ? new Date(dto.eventDate) : new Date(0),
+        eventEndDate: dto.eventEndDate ? new Date(dto.eventEndDate) : null,
         venue: dto.venue ?? '',
         city: dto.city ?? '',
         audienceProfile: dto.audienceProfile ?? [],
@@ -126,6 +127,9 @@ export class SponsorshipService {
             ...(dto.about !== undefined && { about: dto.about }),
             ...(dto.imageKey !== undefined && { imageKey: dto.imageKey }),
             ...(dto.eventDate !== undefined && { eventDate: new Date(dto.eventDate) }),
+            ...(dto.eventEndDate !== undefined && {
+              eventEndDate: dto.eventEndDate ? new Date(dto.eventEndDate) : null,
+            }),
             ...(dto.venue !== undefined && { venue: dto.venue }),
             ...(dto.city !== undefined && { city: dto.city }),
             ...(dto.audienceProfile !== undefined && { audienceProfile: dto.audienceProfile }),

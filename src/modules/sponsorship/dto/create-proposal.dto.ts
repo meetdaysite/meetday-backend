@@ -45,6 +45,11 @@ export class CreateProposalDto {
 
   @ApiPropertyOptional()
   @IsOptional()
+  @IsDateString()
+  eventEndDate?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsString()
   venue?: string;
 
