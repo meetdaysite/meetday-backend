@@ -83,7 +83,9 @@ export class SponsorshipService {
         imageKey: dto.imageKey ?? '',
         eventDate: dto.eventDate ? new Date(dto.eventDate) : new Date(0),
         eventEndDate: dto.eventEndDate ? new Date(dto.eventEndDate) : null,
-        venue: dto.venue ?? '',
+        // `venue` is deprecated (kept for the NOT NULL DB column) — derived from the first entry.
+        venue: dto.venues?.[0] ?? '',
+        venues: dto.venues ?? [],
         city: dto.city ?? '',
         audienceProfile: dto.audienceProfile ?? [],
         ageGroup: dto.ageGroup ?? '',
@@ -130,7 +132,10 @@ export class SponsorshipService {
             ...(dto.eventEndDate !== undefined && {
               eventEndDate: dto.eventEndDate ? new Date(dto.eventEndDate) : null,
             }),
-            ...(dto.venue !== undefined && { venue: dto.venue }),
+            ...(dto.venues !== undefined && {
+              venues: dto.venues,
+              venue: dto.venues[0] ?? '',
+            }),
             ...(dto.city !== undefined && { city: dto.city }),
             ...(dto.audienceProfile !== undefined && { audienceProfile: dto.audienceProfile }),
             ...(dto.ageGroup !== undefined && { ageGroup: dto.ageGroup }),

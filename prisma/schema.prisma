@@ -952,7 +952,8 @@ model SponsorshipProposal {
   imageKey        String // GCS object key for the cover image
   eventDate       DateTime
   eventEndDate    DateTime?
-  venue           String
+  venue           String // deprecated — first entry of `venues`, kept for backward compatibility
+  venues          String[] @default([])
   city            String
   audienceProfile String[]
   ageGroup        String

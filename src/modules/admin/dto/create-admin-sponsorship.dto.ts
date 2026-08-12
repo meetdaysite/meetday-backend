@@ -42,9 +42,10 @@ export class CreateAdminSponsorshipDto {
   @IsDateString()
   eventEndDate: string;
 
-  @ApiProperty()
-  @IsString()
-  venue: string;
+  @ApiProperty({ type: [String], description: 'Multiple venues for this sponsorship' })
+  @IsArray()
+  @IsString({ each: true })
+  venues: string[];
 
   @ApiProperty()
   @IsString()

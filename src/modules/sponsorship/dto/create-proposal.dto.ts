@@ -48,10 +48,11 @@ export class CreateProposalDto {
   @IsDateString()
   eventEndDate?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ type: [String], description: 'Multiple venues for this sponsorship' })
   @IsOptional()
-  @IsString()
-  venue?: string;
+  @IsArray()
+  @IsString({ each: true })
+  venues?: string[];
 
   @ApiPropertyOptional()
   @IsOptional()
