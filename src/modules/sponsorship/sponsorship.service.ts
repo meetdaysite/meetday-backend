@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ForbiddenException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -16,6 +17,7 @@ import { CreateProposalDto } from './dto/create-proposal.dto';
 import { UpdateProposalDto } from './dto/update-proposal.dto';
 import { ListProposalsQueryDto } from './dto/list-proposals-query.dto';
 import { ListPublishedQueryDto } from './dto/list-published-query.dto';
+import { ADMIN_ALERT_EMAILS } from '../../common/mail/admin-recipients.constant';
 
 const ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'];
 
@@ -67,6 +69,15 @@ export class SponsorshipService {
     if (proposal.hostProfile.userId !== userId)
       throw new ForbiddenException('You do not own this proposal');
     return proposal;
+  }
+
+  private notifyAdminsOfError(context: string, err: unknown) {
+    const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    for (const to of ADMIN_ALERT_EMAILS) {
+      void this.mailQueue
+        .add('error-alert', { to, context, message })
+        .catch((e) => this.logger.error('Failed to enqueue error-alert mail job', e));
+    }
   }
 
   async createProposal(userId: string, dto: CreateProposalDto) {
@@ -360,6 +371,17 @@ export class SponsorshipService {
   }
 
   async submitProposal(userId: string, id: string) {
+    try {
+      return await this.submitProposalInternal(userId, id);
+    } catch (err) {
+      if (!(err instanceof HttpException)) {
+        this.notifyAdminsOfError('Sponsorship proposal submission', err);
+      }
+      throw err;
+    }
+  }
+
+  private async submitProposalInternal(userId: string, id: string) {
     const proposal = await this.getOwnedProposal(userId, id);
     if (proposal.status !== SponsorshipStatus.DRAFT && proposal.status !== SponsorshipStatus.REJECTED)
       throw new ForbiddenException('Only DRAFT or REJECTED proposals can be submitted for review');
@@ -430,10 +452,9 @@ export class SponsorshipService {
       where: { id: userId },
       select: { firstName: true },
     });
-    for (const admin of admins) {
-      if (!admin.email) continue;
+    for (const to of ADMIN_ALERT_EMAILS) {
       void this.mailQueue
-        .add('sponsorship-submitted', { to: admin.email, hostName: submitter?.firstName, proposalName: proposal.name })
+        .add('sponsorship-submitted', { to, hostName: submitter?.firstName, proposalName: proposal.name })
         .catch((err) => this.logger.error('Failed to enqueue sponsorship-submitted mail job', err));
     }
 

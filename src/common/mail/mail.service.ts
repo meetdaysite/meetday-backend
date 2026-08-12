@@ -20,6 +20,7 @@ import { newHostSignupTemplate } from './templates/new-host-signup.template';
 import { newBrandSignupTemplate } from './templates/new-brand-signup.template';
 import { sponsorshipSubmittedTemplate } from './templates/sponsorship-submitted.template';
 import { communityProfileSubmittedTemplate } from './templates/community-profile-submitted.template';
+import { errorAlertTemplate } from './templates/error-alert.template';
 
 // Admin-facing operational alerts (new signups, pending reviews) are sent from a distinct
 // address from the regular user-facing transactional emails (host-approved, tickets, etc).
@@ -105,6 +106,10 @@ export class MailService {
       communityProfileSubmittedTemplate(hostName, communityName),
       ADMIN_NOTIFICATIONS_FROM,
     );
+  }
+
+  async sendErrorAlert(to: string, context: string, message: string): Promise<void> {
+    await this.sendMail(to, `Unexpected error in ${context} — Meetday`, errorAlertTemplate(context, message), ADMIN_NOTIFICATIONS_FROM);
   }
 
   async sendHostRejected(to: string, hostName: string, reason: string): Promise<void> {

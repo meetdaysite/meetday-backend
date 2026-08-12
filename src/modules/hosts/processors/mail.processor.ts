@@ -148,4 +148,13 @@ export class MailProcessor {
       this.logger.error(`Failed to process community-profile-submitted mail job: ${(error as Error).message}`);
     }
   }
+
+  @Process('error-alert')
+  async handleErrorAlert(job: Job<{ to: string; context: string; message: string }>) {
+    try {
+      await this.mailService.sendErrorAlert(job.data.to, job.data.context, job.data.message);
+    } catch (error) {
+      this.logger.error(`Failed to process error-alert mail job: ${(error as Error).message}`);
+    }
+  }
 }

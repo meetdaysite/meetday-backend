@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -15,6 +16,7 @@ import { CryptoService } from '../../common/crypto/crypto.service';
 import { ConsentService } from '../consent/consent.service';
 import { RegisterDto } from './dto/register.dto';
 import { CompleteProfileDto } from './dto/complete-profile.dto';
+import { ADMIN_ALERT_EMAILS } from '../../common/mail/admin-recipients.constant';
 
 export interface TokenUser {
   uid: string;
@@ -38,6 +40,17 @@ export class AuthService {
   ) {}
 
   async register(tokenUser: TokenUser, dto: RegisterDto) {
+    try {
+      return await this.registerInternal(tokenUser, dto);
+    } catch (err) {
+      if (!(err instanceof HttpException)) {
+        this.notifyAdminsOfError('User registration', err);
+      }
+      throw err;
+    }
+  }
+
+  private async registerInternal(tokenUser: TokenUser, dto: RegisterDto) {
     // Pass `deletedAt: undefined` as an explicit own property to bypass the soft-delete
     // middleware (which uses hasOwnProperty to detect the bypass signal). Prisma ignores
     // undefined values in queries, so this returns all users — active and soft-deleted.
@@ -157,20 +170,25 @@ export class AuthService {
     throw err;
   }
 
-  // Emails every active admin (SUPER_ADMIN/CITY_ADMIN/MODERATOR) about a new host/brand signup.
-  private async notifyAdminsOfNewSignup(
+  // Emails the fixed admin-alert recipient list about a new host/brand signup.
+  private notifyAdminsOfNewSignup(
     jobName: 'host-welcome' | 'brand-welcome',
     data: Record<string, string | undefined>,
   ) {
-    const admins = await this.prisma.user.findMany({
-      where: { isActive: true, role: { name: { in: ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'] } } },
-      select: { email: true },
-    });
-    for (const admin of admins) {
-      if (!admin.email) continue;
+    for (const to of ADMIN_ALERT_EMAILS) {
       void this.mailQueue
-        .add(jobName, { to: admin.email, ...data })
+        .add(jobName, { to, ...data })
         .catch((err) => this.logger.error(`Failed to enqueue ${jobName} mail job`, err));
+    }
+  }
+
+  // Alerts the fixed admin-alert recipient list about an unexpected (non-HTTP) error.
+  private notifyAdminsOfError(context: string, err: unknown) {
+    const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    for (const to of ADMIN_ALERT_EMAILS) {
+      void this.mailQueue
+        .add('error-alert', { to, context, message })
+        .catch((e) => this.logger.error('Failed to enqueue error-alert mail job', e));
     }
   }
 
