@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { BullModule } from '@nestjs/bull';
 import * as firebaseAdmin from 'firebase-admin';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { ConsentModule } from '../consent/consent.module';
 
 @Module({
-  imports: [ConsentModule],
+  imports: [ConsentModule, BullModule.registerQueue({ name: 'mail' })],
   controllers: [AuthController],
   providers: [AuthService],
 })

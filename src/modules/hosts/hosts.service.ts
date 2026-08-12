@@ -249,7 +249,7 @@ export class HostsService {
   async activateCommunityProfile(userId: string, dto: ActivateCommunityDto) {
     const hostProfile = await this.prisma.hostProfile.findUnique({
       where: { userId },
-      select: { id: true, communityName: true },
+      select: { id: true, communityName: true, user: { select: { firstName: true } } },
     });
     if (!hostProfile) throw new NotFoundException('Host profile not found');
 
@@ -284,7 +284,7 @@ export class HostsService {
 
     const admins = await this.prisma.user.findMany({
       where: { isActive: true, role: { name: { in: ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'] } } },
-      select: { id: true },
+      select: { id: true, email: true },
     });
     void Promise.allSettled(
       admins.map((admin) =>
@@ -297,6 +297,17 @@ export class HostsService {
         ),
       ),
     );
+
+    for (const admin of admins) {
+      if (!admin.email) continue;
+      void this.mailQueue
+        .add('community-profile-submitted', {
+          to: admin.email,
+          hostName: hostProfile.user.firstName,
+          communityName: communityProfile.name,
+        })
+        .catch((err) => this.logger.error('Failed to enqueue community-profile-submitted mail job', err));
+    }
 
     return this.getCommunityProfile(userId);
   }

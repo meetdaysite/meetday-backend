@@ -5,6 +5,8 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
 import { Prisma, SponsorshipStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
@@ -26,6 +28,7 @@ export class SponsorshipService {
     private readonly storageService: StorageService,
     private readonly notificationsService: NotificationsService,
     private readonly auditLogService: AuditLogService,
+    @InjectQueue('mail') private readonly mailQueue: Queue,
   ) {}
 
   // Resolves stored keys (top-level + pendingRevision, if present) to presigned download URLs.
@@ -405,7 +408,7 @@ export class SponsorshipService {
 
     const admins = await this.prisma.user.findMany({
       where: { isActive: true, role: { name: { in: ADMIN_ROLES } } },
-      select: { id: true },
+      select: { id: true, email: true },
     });
     const notifyResults = await Promise.allSettled(
       admins.map((admin) =>
@@ -422,6 +425,17 @@ export class SponsorshipService {
       if (r.status === 'rejected')
         this.logger.error(`Failed to notify admin ${admins[i].id} of pending sponsorship proposal`, r.reason);
     });
+
+    const submitter = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { firstName: true },
+    });
+    for (const admin of admins) {
+      if (!admin.email) continue;
+      void this.mailQueue
+        .add('sponsorship-submitted', { to: admin.email, hostName: submitter?.firstName, proposalName: proposal.name })
+        .catch((err) => this.logger.error('Failed to enqueue sponsorship-submitted mail job', err));
+    }
 
     return this.withSignedUrls(updated);
   }

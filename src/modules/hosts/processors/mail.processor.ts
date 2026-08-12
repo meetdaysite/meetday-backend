@@ -112,4 +112,40 @@ export class MailProcessor {
       this.logger.error(`Failed to process event-venue-changed mail job: ${(error as Error).message}`);
     }
   }
+
+  @Process('host-welcome')
+  async handleHostWelcome(job: Job<{ to: string; hostName: string; hostEmail: string }>) {
+    try {
+      await this.mailService.sendHostWelcome(job.data.to, job.data.hostName, job.data.hostEmail);
+    } catch (error) {
+      this.logger.error(`Failed to process host-welcome mail job: ${(error as Error).message}`);
+    }
+  }
+
+  @Process('brand-welcome')
+  async handleBrandWelcome(job: Job<{ to: string; brandName: string; brandEmail: string }>) {
+    try {
+      await this.mailService.sendBrandWelcome(job.data.to, job.data.brandName, job.data.brandEmail);
+    } catch (error) {
+      this.logger.error(`Failed to process brand-welcome mail job: ${(error as Error).message}`);
+    }
+  }
+
+  @Process('sponsorship-submitted')
+  async handleSponsorshipSubmitted(job: Job<{ to: string; hostName: string; proposalName: string }>) {
+    try {
+      await this.mailService.sendSponsorshipSubmitted(job.data.to, job.data.hostName, job.data.proposalName);
+    } catch (error) {
+      this.logger.error(`Failed to process sponsorship-submitted mail job: ${(error as Error).message}`);
+    }
+  }
+
+  @Process('community-profile-submitted')
+  async handleCommunityProfileSubmitted(job: Job<{ to: string; hostName: string; communityName: string }>) {
+    try {
+      await this.mailService.sendCommunityProfileSubmitted(job.data.to, job.data.hostName, job.data.communityName);
+    } catch (error) {
+      this.logger.error(`Failed to process community-profile-submitted mail job: ${(error as Error).message}`);
+    }
+  }
 }

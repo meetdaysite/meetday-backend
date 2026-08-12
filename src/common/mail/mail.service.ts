@@ -16,6 +16,10 @@ import { refundFailedTemplate } from './templates/refund-failed.template';
 import { eventCancelledAttendeeTemplate } from './templates/event-cancelled-attendee.template';
 import { eventVenueChangedTemplate } from './templates/event-venue-changed.template';
 import { ticketConfirmationTemplate } from './templates/ticket-confirmation.template';
+import { newHostSignupTemplate } from './templates/new-host-signup.template';
+import { newBrandSignupTemplate } from './templates/new-brand-signup.template';
+import { sponsorshipSubmittedTemplate } from './templates/sponsorship-submitted.template';
+import { communityProfileSubmittedTemplate } from './templates/community-profile-submitted.template';
 
 @Injectable()
 export class MailService {
@@ -71,6 +75,30 @@ export class MailService {
 
   async sendHostApproved(to: string, hostName: string): Promise<void> {
     await this.sendMail(to, "You're approved as a Meetday Host!", hostApprovedTemplate(hostName));
+  }
+
+  async sendHostWelcome(to: string, hostName: string, hostEmail: string): Promise<void> {
+    await this.sendMail(to, 'New host registered — Meetday', newHostSignupTemplate(hostName, hostEmail));
+  }
+
+  async sendBrandWelcome(to: string, brandName: string, brandEmail: string): Promise<void> {
+    await this.sendMail(to, 'New brand registered — Meetday', newBrandSignupTemplate(brandName, brandEmail));
+  }
+
+  async sendSponsorshipSubmitted(to: string, hostName: string, proposalName: string): Promise<void> {
+    await this.sendMail(
+      to,
+      'New sponsorship proposal pending review — Meetday',
+      sponsorshipSubmittedTemplate(hostName, proposalName),
+    );
+  }
+
+  async sendCommunityProfileSubmitted(to: string, hostName: string, communityName: string): Promise<void> {
+    await this.sendMail(
+      to,
+      'New community profile pending review — Meetday',
+      communityProfileSubmittedTemplate(hostName, communityName),
+    );
   }
 
   async sendHostRejected(to: string, hostName: string, reason: string): Promise<void> {

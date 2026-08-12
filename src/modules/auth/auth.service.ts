@@ -2,9 +2,12 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
 import { ConsentType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
@@ -24,11 +27,14 @@ export interface TokenUser {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storageService: StorageService,
     private readonly cryptoService: CryptoService,
     private readonly consentService: ConsentService,
+    @InjectQueue('mail') private readonly mailQueue: Queue,
   ) {}
 
   async register(tokenUser: TokenUser, dto: RegisterDto) {
@@ -151,6 +157,23 @@ export class AuthService {
     throw err;
   }
 
+  // Emails every active admin (SUPER_ADMIN/CITY_ADMIN/MODERATOR) about a new host/brand signup.
+  private async notifyAdminsOfNewSignup(
+    jobName: 'host-welcome' | 'brand-welcome',
+    data: Record<string, string | undefined>,
+  ) {
+    const admins = await this.prisma.user.findMany({
+      where: { isActive: true, role: { name: { in: ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'] } } },
+      select: { email: true },
+    });
+    for (const admin of admins) {
+      if (!admin.email) continue;
+      void this.mailQueue
+        .add(jobName, { to: admin.email, ...data })
+        .catch((err) => this.logger.error(`Failed to enqueue ${jobName} mail job`, err));
+    }
+  }
+
   private async registerHost(
     firebaseUid: string,
     resolved: ResolvedIdentity,
@@ -175,7 +198,7 @@ export class AuthService {
 
     const hostRole = await this.prisma.role.findUniqueOrThrow({ where: { name: 'HOST' } });
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
           firebaseUid,
@@ -238,6 +261,10 @@ export class AuthService {
 
       return { ...user, hostProfile };
     });
+
+    void this.notifyAdminsOfNewSignup('host-welcome', { hostName: result.firstName, hostEmail: result.email });
+
+    return result;
   }
 
   private async registerBrand(
@@ -256,7 +283,7 @@ export class AuthService {
 
     const brandRole = await this.prisma.role.findUniqueOrThrow({ where: { name: 'BRAND' } });
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
           firebaseUid,
@@ -289,6 +316,10 @@ export class AuthService {
 
       return { ...user, brandProfile };
     });
+
+    void this.notifyAdminsOfNewSignup('brand-welcome', { brandName: result.brandProfile.brandName, brandEmail: result.email });
+
+    return result;
   }
 
   // Attaches a HostProfile to an EXISTING user (e.g. an already-registered BRAND or admin
@@ -307,7 +338,7 @@ export class AuthService {
       throw new BadRequestException('One or more categoryIds are invalid');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const user = await tx.user.findUniqueOrThrow({
         where: { id: userId },
         select: {
@@ -358,6 +389,10 @@ export class AuthService {
 
       return { ...user, hostProfile };
     });
+
+    void this.notifyAdminsOfNewSignup('host-welcome', { hostName: result.firstName, hostEmail: result.email });
+
+    return result;
   }
 
   // Attaches a BrandProfile to an EXISTING user (e.g. an already-registered HOST or admin
@@ -367,7 +402,7 @@ export class AuthService {
       throw new BadRequestException('brandName is required when registering as a brand');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const user = await tx.user.findUniqueOrThrow({
         where: { id: userId },
         select: {
@@ -392,6 +427,10 @@ export class AuthService {
 
       return { ...user, brandProfile };
     });
+
+    void this.notifyAdminsOfNewSignup('brand-welcome', { brandName: result.brandProfile.brandName, brandEmail: result.email });
+
+    return result;
   }
 
   /**

@@ -5,6 +5,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { getQueueToken } from '@nestjs/bull';
 import { AuthService, TokenUser } from './auth.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
@@ -19,6 +20,7 @@ function makePrisma() {
       findUnique: jest.fn(),
       findUniqueOrThrow: jest.fn(),
       findFirst: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
       create: jest.fn(),
       update: jest.fn(),
     },
@@ -33,6 +35,7 @@ function makePrisma() {
 }
 
 const mockCrypto = { encrypt: jest.fn().mockReturnValue('enc::pan'), decrypt: jest.fn() };
+const mockMailQueue = { add: jest.fn().mockResolvedValue(undefined) };
 
 const tokenUser: TokenUser = {
   uid: 'firebase-uid-1',
@@ -70,6 +73,7 @@ describe('AuthService', () => {
         { provide: CryptoService, useValue: mockCrypto },
         { provide: ConsentService, useValue: { hasActiveConsent: jest.fn().mockResolvedValue(false), grantConsent: jest.fn().mockResolvedValue(undefined) } },
         { provide: StorageService, useValue: { getPresignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/avatar') } },
+        { provide: getQueueToken('mail'), useValue: mockMailQueue },
       ],
     }).compile();
 
