@@ -21,6 +21,10 @@ import { newBrandSignupTemplate } from './templates/new-brand-signup.template';
 import { sponsorshipSubmittedTemplate } from './templates/sponsorship-submitted.template';
 import { communityProfileSubmittedTemplate } from './templates/community-profile-submitted.template';
 
+// Admin-facing operational alerts (new signups, pending reviews) are sent from a distinct
+// address from the regular user-facing transactional emails (host-approved, tickets, etc).
+const ADMIN_NOTIFICATIONS_FROM = 'info@meetday.ai';
+
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
@@ -32,8 +36,8 @@ export class MailService {
     this.resend = new Resend(this.configService.get<string>('mail.apiKey'));
   }
 
-  private async sendMail(to: string, subject: string, html: string): Promise<void> {
-    const { error } = await this.resend.emails.send({ from: this.from, to, subject, html });
+  private async sendMail(to: string, subject: string, html: string, from: string = this.from): Promise<void> {
+    const { error } = await this.resend.emails.send({ from, to, subject, html });
     if (error) {
       this.logger.error(`Failed to send email to ${to}: ${error.message}`);
     } else {
@@ -78,11 +82,11 @@ export class MailService {
   }
 
   async sendHostWelcome(to: string, hostName: string, hostEmail: string): Promise<void> {
-    await this.sendMail(to, 'New host registered — Meetday', newHostSignupTemplate(hostName, hostEmail));
+    await this.sendMail(to, 'New host registered — Meetday', newHostSignupTemplate(hostName, hostEmail), ADMIN_NOTIFICATIONS_FROM);
   }
 
   async sendBrandWelcome(to: string, brandName: string, brandEmail: string): Promise<void> {
-    await this.sendMail(to, 'New brand registered — Meetday', newBrandSignupTemplate(brandName, brandEmail));
+    await this.sendMail(to, 'New brand registered — Meetday', newBrandSignupTemplate(brandName, brandEmail), ADMIN_NOTIFICATIONS_FROM);
   }
 
   async sendSponsorshipSubmitted(to: string, hostName: string, proposalName: string): Promise<void> {
@@ -90,6 +94,7 @@ export class MailService {
       to,
       'New sponsorship proposal pending review — Meetday',
       sponsorshipSubmittedTemplate(hostName, proposalName),
+      ADMIN_NOTIFICATIONS_FROM,
     );
   }
 
@@ -98,6 +103,7 @@ export class MailService {
       to,
       'New community profile pending review — Meetday',
       communityProfileSubmittedTemplate(hostName, communityName),
+      ADMIN_NOTIFICATIONS_FROM,
     );
   }
 
