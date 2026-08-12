@@ -47,9 +47,10 @@ export class CreateAdminSponsorshipDto {
   @IsString({ each: true })
   venues: string[];
 
-  @ApiProperty()
-  @IsString()
-  city: string;
+  @ApiProperty({ type: [String], description: 'Per-venue city, index-matched with `venues`' })
+  @IsArray()
+  @IsString({ each: true })
+  venueCities: string[];
 
   @ApiProperty({ type: [String] })
   @IsArray()

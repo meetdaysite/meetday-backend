@@ -954,7 +954,8 @@ model SponsorshipProposal {
   eventEndDate    DateTime?
   venue           String // deprecated — first entry of `venues`, kept for backward compatibility
   venues          String[] @default([])
-  city            String
+  city            String // deprecated — first entry of `venueCities`, kept for backward compatibility
+  venueCities     String[] @default([]) // per-venue city, index-matched with `venues`
   audienceProfile String[]
   ageGroup        String
   guestCount      String

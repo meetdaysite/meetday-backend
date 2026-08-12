@@ -54,10 +54,11 @@ export class CreateProposalDto {
   @IsString({ each: true })
   venues?: string[];
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ type: [String], description: 'Per-venue city, index-matched with `venues`' })
   @IsOptional()
-  @IsString()
-  city?: string;
+  @IsArray()
+  @IsString({ each: true })
+  venueCities?: string[];
 
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()
