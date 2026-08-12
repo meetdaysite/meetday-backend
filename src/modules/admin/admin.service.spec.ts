@@ -45,6 +45,7 @@ function makePrisma() {
     },
     role: { findUnique: jest.fn(), findMany: jest.fn() },
     hostProfile: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn(), count: jest.fn() },
+    hostCommunityProfile: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn(), create: jest.fn() },
     coupon: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn(), count: jest.fn() },
     category: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn() },
     event: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
@@ -606,6 +607,101 @@ describe('AdminService', () => {
       await expect(
         service.rejectHost('bad-id', adminId, { rejectionReason: 'reason' }),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ── listHostsWithoutCommunityProfile() ───────────────────────────────────
+
+  describe('listHostsWithoutCommunityProfile()', () => {
+    it('queries hosts whose communityProfile is null', async () => {
+      prisma.hostProfile.findMany.mockResolvedValue([pendingHost]);
+      prisma.hostProfile.count.mockResolvedValue(1);
+
+      const result = await service.listHostsWithoutCommunityProfile({});
+      expect(result.total).toBe(1);
+      expect(prisma.hostProfile.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ communityProfile: null }) }),
+      );
+    });
+
+    it('adds a name/email search filter when provided', async () => {
+      prisma.hostProfile.findMany.mockResolvedValue([]);
+      prisma.hostProfile.count.mockResolvedValue(0);
+
+      await service.listHostsWithoutCommunityProfile({ search: 'priya' });
+      expect(prisma.hostProfile.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ OR: expect.any(Array) }) }),
+      );
+    });
+  });
+
+  // ── createCommunityProfileAsAdmin() ──────────────────────────────────────
+
+  describe('createCommunityProfileAsAdmin()', () => {
+    const createDto = {
+      hostProfileId: 'hp-uuid',
+      name: 'Bangalore Founders Circle',
+      about: 'A community of early-stage founders.',
+      logoKey: 'logo-key',
+      size: '250',
+      avgGuestCount: '60',
+      experiencesPerYear: '12',
+      categoryIds: ['cat-1'],
+    };
+
+    it('creates an APPROVED community profile and notifies the host', async () => {
+      prisma.hostProfile.findUnique.mockResolvedValue({
+        id: 'hp-uuid',
+        communityProfile: null,
+        user: { id: 'user-id' },
+      });
+      prisma.category.findMany.mockResolvedValue([{ id: 'cat-1' }]);
+      prisma.hostCommunityProfile.create.mockResolvedValue({ id: 'profile-uuid', name: createDto.name });
+      prisma.hostCommunityProfile.findUnique.mockResolvedValue({
+        id: 'profile-uuid',
+        name: createDto.name,
+        logoKey: 'logo-key',
+        categories: [],
+      });
+
+      const result = await service.createCommunityProfileAsAdmin(adminId, createDto as any);
+
+      expect(prisma.hostCommunityProfile.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ hostProfileId: 'hp-uuid', approvalStatus: 'APPROVED', reviewedBy: adminId }),
+        }),
+      );
+      expect(result).toEqual(expect.objectContaining({ id: 'profile-uuid' }));
+    });
+
+    it('throws NotFoundException when host profile does not exist', async () => {
+      prisma.hostProfile.findUnique.mockResolvedValue(null);
+      await expect(service.createCommunityProfileAsAdmin(adminId, createDto as any)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('throws ConflictException when the host already has a community profile', async () => {
+      prisma.hostProfile.findUnique.mockResolvedValue({
+        id: 'hp-uuid',
+        communityProfile: { id: 'existing-profile' },
+        user: { id: 'user-id' },
+      });
+      await expect(service.createCommunityProfileAsAdmin(adminId, createDto as any)).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it('throws BadRequestException when a categoryId is invalid', async () => {
+      prisma.hostProfile.findUnique.mockResolvedValue({
+        id: 'hp-uuid',
+        communityProfile: null,
+        user: { id: 'user-id' },
+      });
+      prisma.category.findMany.mockResolvedValue([]);
+      await expect(service.createCommunityProfileAsAdmin(adminId, createDto as any)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 

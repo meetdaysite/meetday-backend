@@ -32,6 +32,8 @@ import { ListEventsQueryDto } from './dto/list-events-query.dto';
 import { ListSponsorshipsQueryDto } from './dto/list-sponsorships-query.dto';
 import { ListCommunityProfilesQueryDto } from './dto/list-community-profiles-query.dto';
 import { CreateAdminSponsorshipDto } from './dto/create-admin-sponsorship.dto';
+import { ListEligibleHostsQueryDto } from './dto/list-eligible-hosts-query.dto';
+import { CreateAdminCommunityProfileDto } from './dto/create-admin-community-profile.dto';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { UpdateGstRateDto } from './dto/update-gst-rate.dto';
 import { UpdatePlanFeeRateDto } from './dto/update-plan-fee-rate.dto';
@@ -1912,6 +1914,98 @@ export class AdminService {
       ...AdminService.flattenCommunityProfileCategories(profile),
       logoUrl: await this.storageService.getPresignedDownloadUrl(profile.logoKey),
     };
+  }
+
+  // Hosts eligible to have a community profile created for them by an admin — i.e. hosts that
+  // don't already have one (HostProfile.communityProfile is null).
+  async listHostsWithoutCommunityProfile(query: ListEligibleHostsQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const where: Prisma.HostProfileWhereInput = {
+      communityProfile: null,
+      ...(query.search && {
+        OR: [
+          { displayName: { contains: query.search, mode: 'insensitive' } },
+          { user: { email: { contains: query.search, mode: 'insensitive' } } },
+          { user: { firstName: { contains: query.search, mode: 'insensitive' } } },
+          { user: { lastName: { contains: query.search, mode: 'insensitive' } } },
+        ],
+      }),
+    };
+
+    const [hosts, total] = await Promise.all([
+      this.prisma.hostProfile.findMany({
+        where,
+        select: {
+          id: true,
+          displayName: true,
+          user: { select: { id: true, firstName: true, lastName: true, email: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.hostProfile.count({ where }),
+    ]);
+
+    return { hosts, total, page, limit };
+  }
+
+  // Admin creates a community profile already-approved for a host who doesn't have one yet,
+  // bypassing the normal PENDING → review flow. Notifies the host once created.
+  async createCommunityProfileAsAdmin(adminId: string, dto: CreateAdminCommunityProfileDto) {
+    const hostProfile = await this.prisma.hostProfile.findUnique({
+      where: { id: dto.hostProfileId },
+      include: { communityProfile: { select: { id: true } }, user: { select: { id: true } } },
+    });
+    if (!hostProfile) throw new NotFoundException('Host profile not found');
+    if (hostProfile.communityProfile) throw new ConflictException('This host already has a community profile');
+
+    const validCategories = await this.prisma.category.findMany({
+      where: { id: { in: dto.categoryIds } },
+      select: { id: true },
+    });
+    if (validCategories.length !== dto.categoryIds.length) {
+      throw new BadRequestException('One or more category IDs are invalid');
+    }
+
+    const communityProfile = await this.prisma.hostCommunityProfile.create({
+      data: {
+        hostProfileId: hostProfile.id,
+        name: dto.name,
+        about: dto.about,
+        logoKey: dto.logoKey,
+        size: dto.size,
+        avgGuestCount: dto.avgGuestCount,
+        experiencesPerYear: dto.experiencesPerYear,
+        approvalStatus: 'APPROVED',
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+        categories: { create: dto.categoryIds.map((categoryId) => ({ categoryId })) },
+      },
+    });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'COMMUNITY_PROFILE_APPROVED',
+      entityType: 'HOST_COMMUNITY_PROFILE',
+      entityId: communityProfile.id,
+      metadata: { name: communityProfile.name, createdByAdmin: true },
+    });
+
+    void this.notificationsService
+      .create(
+        hostProfile.user.id,
+        'community_profile_approved',
+        'Community Profile Activated',
+        `Your community profile "${communityProfile.name}" has been activated and is now visible to brands.`,
+        { hostCommunityProfileId: communityProfile.id },
+      )
+      .catch((err) => this.logger.error('Failed to create community_profile_approved notification', err));
+
+    return this.getCommunityProfileDetail(communityProfile.id);
   }
 
   // Prisma returns the categories relation nested as { category: { id, name } }[] — flatten it

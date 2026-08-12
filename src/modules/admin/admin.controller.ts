@@ -55,6 +55,8 @@ import { ListEventsQueryDto } from './dto/list-events-query.dto';
 import { ListSponsorshipsQueryDto } from './dto/list-sponsorships-query.dto';
 import { ListCommunityProfilesQueryDto } from './dto/list-community-profiles-query.dto';
 import { CreateAdminSponsorshipDto } from './dto/create-admin-sponsorship.dto';
+import { ListEligibleHostsQueryDto } from './dto/list-eligible-hosts-query.dto';
+import { CreateAdminCommunityProfileDto } from './dto/create-admin-community-profile.dto';
 import { UpdateGstRateDto } from './dto/update-gst-rate.dto';
 import { UpdatePlanFeeRateDto } from './dto/update-plan-fee-rate.dto';
 import { CreateHostFeePromoDto } from './dto/create-host-fee-promo.dto';
@@ -1480,6 +1482,32 @@ export class AdminController {
   @ApiOkResponse({ description: 'Paginated list of community profiles pending review.' })
   listPendingCommunityProfiles(@Query('page') page = 1, @Query('limit') limit = 20) {
     return this.adminService.listPendingCommunityProfiles(Number(page), Number(limit));
+  }
+
+  @Get('community-profiles/eligible-hosts')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({
+    summary: 'List hosts without a community profile',
+    description: 'Hosts eligible to have a community profile created for them directly by an admin.',
+  })
+  @ApiOkResponse({ description: 'Paginated list of hosts (name + email) without a community profile.' })
+  listHostsWithoutCommunityProfile(@Query() query: ListEligibleHostsQueryDto) {
+    return this.adminService.listHostsWithoutCommunityProfile(query);
+  }
+
+  @Post('community-profiles')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @ApiOperation({
+    summary: 'Create a community profile directly for a host (admin)',
+    description:
+      'Creates a community profile already in APPROVED status for a host who doesn\'t have one yet, ' +
+      'bypassing the normal PENDING → admin-review flow. Notifies the host.',
+  })
+  @ApiCreatedResponse({ description: 'Community profile created and activated.' })
+  @ApiNotFoundResponse({ description: 'Host profile not found.' })
+  @ApiConflictResponse({ description: 'Host already has a community profile.' })
+  createCommunityProfile(@Body() dto: CreateAdminCommunityProfileDto, @GetUser('id') adminId: string) {
+    return this.adminService.createCommunityProfileAsAdmin(adminId, dto);
   }
 
   @Get('community-profiles')
