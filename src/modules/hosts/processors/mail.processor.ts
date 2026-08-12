@@ -150,11 +150,20 @@ export class MailProcessor {
   }
 
   @Process('error-alert')
-  async handleErrorAlert(job: Job<{ to: string; context: string; message: string }>) {
+  async handleErrorAlert(job: Job<{ to: string; context: string; message: string; userLabel?: string }>) {
     try {
-      await this.mailService.sendErrorAlert(job.data.to, job.data.context, job.data.message);
+      await this.mailService.sendErrorAlert(job.data.to, job.data.context, job.data.message, job.data.userLabel);
     } catch (error) {
       this.logger.error(`Failed to process error-alert mail job: ${(error as Error).message}`);
+    }
+  }
+
+  @Process('user-action')
+  async handleUserAction(job: Job<{ to: string; userLabel: string; method: string; path: string }>) {
+    try {
+      await this.mailService.sendUserAction(job.data.to, job.data.userLabel, job.data.method, job.data.path);
+    } catch (error) {
+      this.logger.error(`Failed to process user-action mail job: ${(error as Error).message}`);
     }
   }
 }

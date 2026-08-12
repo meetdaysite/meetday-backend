@@ -3,7 +3,6 @@ import { ValidationPipe, Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
-import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { getCorsOrigin } from './common/utils/cors-origin.util';
@@ -41,8 +40,7 @@ async function bootstrap() {
     }),
   );
 
-  // Global exception filter
-  app.useGlobalFilters(new AllExceptionsFilter());
+  // Global exception filter is registered via APP_FILTER in AppModule (needs DI for mail alerts)
 
   // Global response transform + request logging
   app.useGlobalInterceptors(new TransformInterceptor(), new LoggingInterceptor());

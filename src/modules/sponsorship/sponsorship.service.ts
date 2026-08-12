@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ForbiddenException,
-  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -69,15 +68,6 @@ export class SponsorshipService {
     if (proposal.hostProfile.userId !== userId)
       throw new ForbiddenException('You do not own this proposal');
     return proposal;
-  }
-
-  private notifyAdminsOfError(context: string, err: unknown) {
-    const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
-    for (const to of ADMIN_ALERT_EMAILS) {
-      void this.mailQueue
-        .add('error-alert', { to, context, message })
-        .catch((e) => this.logger.error('Failed to enqueue error-alert mail job', e));
-    }
   }
 
   async createProposal(userId: string, dto: CreateProposalDto) {
@@ -371,17 +361,6 @@ export class SponsorshipService {
   }
 
   async submitProposal(userId: string, id: string) {
-    try {
-      return await this.submitProposalInternal(userId, id);
-    } catch (err) {
-      if (!(err instanceof HttpException)) {
-        this.notifyAdminsOfError('Sponsorship proposal submission', err);
-      }
-      throw err;
-    }
-  }
-
-  private async submitProposalInternal(userId: string, id: string) {
     const proposal = await this.getOwnedProposal(userId, id);
     if (proposal.status !== SponsorshipStatus.DRAFT && proposal.status !== SponsorshipStatus.REJECTED)
       throw new ForbiddenException('Only DRAFT or REJECTED proposals can be submitted for review');

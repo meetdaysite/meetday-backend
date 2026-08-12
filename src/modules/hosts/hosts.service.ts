@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
-  HttpException,
   Inject,
   Injectable,
   Logger,
@@ -248,27 +247,7 @@ export class HostsService {
 
   // Creating or editing a community profile always resets it to PENDING — an admin must
   // approve before it's shown to brands. Notifies admins of the (re-)submission.
-  private notifyAdminsOfError(context: string, err: unknown) {
-    const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
-    for (const to of ADMIN_ALERT_EMAILS) {
-      void this.mailQueue
-        .add('error-alert', { to, context, message })
-        .catch((e) => this.logger.error('Failed to enqueue error-alert mail job', e));
-    }
-  }
-
   async activateCommunityProfile(userId: string, dto: ActivateCommunityDto) {
-    try {
-      return await this.activateCommunityProfileInternal(userId, dto);
-    } catch (err) {
-      if (!(err instanceof HttpException)) {
-        this.notifyAdminsOfError('Community profile activation', err);
-      }
-      throw err;
-    }
-  }
-
-  private async activateCommunityProfileInternal(userId: string, dto: ActivateCommunityDto) {
     const hostProfile = await this.prisma.hostProfile.findUnique({
       where: { userId },
       select: { id: true, communityName: true, user: { select: { firstName: true } } },

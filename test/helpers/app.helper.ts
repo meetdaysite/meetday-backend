@@ -2,7 +2,6 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { getQueueToken } from '@nestjs/bull';
 import { AppModule } from '../../src/app.module';
-import { AllExceptionsFilter } from '../../src/common/filters/all-exceptions.filter';
 import { TransformInterceptor } from '../../src/common/interceptors/transform.interceptor';
 import { PrismaService } from '../../src/prisma/prisma.service';
 
@@ -43,7 +42,6 @@ export async function buildTestApp(): Promise<{
   app.useGlobalPipes(
     new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
   );
-  app.useGlobalFilters(new AllExceptionsFilter());
   app.useGlobalInterceptors(new TransformInterceptor());
 
   await app.init();

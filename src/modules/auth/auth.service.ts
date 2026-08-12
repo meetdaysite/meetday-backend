@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -40,17 +39,6 @@ export class AuthService {
   ) {}
 
   async register(tokenUser: TokenUser, dto: RegisterDto) {
-    try {
-      return await this.registerInternal(tokenUser, dto);
-    } catch (err) {
-      if (!(err instanceof HttpException)) {
-        this.notifyAdminsOfError('User registration', err);
-      }
-      throw err;
-    }
-  }
-
-  private async registerInternal(tokenUser: TokenUser, dto: RegisterDto) {
     // Pass `deletedAt: undefined` as an explicit own property to bypass the soft-delete
     // middleware (which uses hasOwnProperty to detect the bypass signal). Prisma ignores
     // undefined values in queries, so this returns all users — active and soft-deleted.
@@ -179,16 +167,6 @@ export class AuthService {
       void this.mailQueue
         .add(jobName, { to, ...data })
         .catch((err) => this.logger.error(`Failed to enqueue ${jobName} mail job`, err));
-    }
-  }
-
-  // Alerts the fixed admin-alert recipient list about an unexpected (non-HTTP) error.
-  private notifyAdminsOfError(context: string, err: unknown) {
-    const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
-    for (const to of ADMIN_ALERT_EMAILS) {
-      void this.mailQueue
-        .add('error-alert', { to, context, message })
-        .catch((e) => this.logger.error('Failed to enqueue error-alert mail job', e));
     }
   }
 

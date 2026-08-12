@@ -4,13 +4,27 @@ import {
   ArgumentsHost,
   HttpException,
   HttpStatus,
+  Injectable,
   Logger,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
 import { Request, Response } from 'express';
+import { ADMIN_ALERT_EMAILS } from '../mail/admin-recipients.constant';
+
+interface RequestUser {
+  id?: string;
+  uid?: string;
+  email?: string;
+  displayName?: string;
+}
 
 @Catch()
+@Injectable()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
+
+  constructor(@InjectQueue('mail') private readonly mailQueue: Queue) {}
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
@@ -32,6 +46,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
       exception instanceof Error ? exception.stack : JSON.stringify(exception),
     );
 
+    this.alertAdmins(request, status, exception);
+
     response.status(status).json({
       statusCode: status,
       timestamp: new Date().toISOString(),
@@ -41,5 +57,21 @@ export class AllExceptionsFilter implements ExceptionFilter {
           ? (message as { message: string }).message
           : message,
     });
+  }
+
+  // Every error a user hits is emailed to admins with the user's name/email, so admins
+  // have visibility into anything going wrong on the platform (not just server crashes).
+  private alertAdmins(request: Request, status: number, exception: unknown): void {
+    const user = (request as unknown as { user?: RequestUser }).user;
+    const errorMessage =
+      exception instanceof Error ? (exception.stack ?? exception.message) : JSON.stringify(exception);
+    const context = `${request.method} ${request.url} (${status})`;
+    const userLabel = user
+      ? `${user.displayName || user.email || user.uid || 'Unknown user'} (${user.email || user.uid || 'unknown'})`
+      : undefined;
+
+    for (const to of ADMIN_ALERT_EMAILS) {
+      void this.mailQueue.add('error-alert', { to, context, message: errorMessage, userLabel }).catch(() => {});
+    }
   }
 }
