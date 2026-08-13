@@ -410,6 +410,7 @@ export class SponsorshipService {
       where: { approvalStatus: 'APPROVED' },
       select: {
         id: true,
+        hostProfileId: true,
         name: true,
         logoKey: true,
         size: true,
