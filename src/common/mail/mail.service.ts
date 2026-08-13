@@ -130,7 +130,7 @@ export class MailService {
   ): Promise<void> {
     await this.sendMail(
       to,
-      `A brand is interested in "${proposalName}" — Meetday`,
+      `${brandName} brand is interested to sponsor ${communityName} — Meetday`,
       brandInterestTemplate(communityName, proposalName, brandName, brandEmail, categories, socialLinks),
       ADMIN_NOTIFICATIONS_FROM,
     );

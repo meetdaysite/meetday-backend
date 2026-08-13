@@ -368,7 +368,7 @@ export class SponsorshipService {
         proposal.hostProfile.user.id,
         'brand_interested_in_sponsorship',
         'Someone is interested!',
-        `A brand is interested in "${proposal.name || 'your proposal'}".`,
+        'A brand is interested in your project.',
         { proposalId },
       )
       .catch((err) => this.logger.error('Failed to notify host of brand interest', err));
@@ -380,7 +380,7 @@ export class SponsorshipService {
         userId,
         'brand_interest_confirmed',
         'Interest sent!',
-        `The community has been notified of your interest in "${proposal.name || 'this proposal'}".`,
+        'The community is notified of your interest.',
         { proposalId },
       )
       .catch((err) => this.logger.error('Failed to notify brand of confirmed interest', err));
