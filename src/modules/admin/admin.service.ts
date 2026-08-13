@@ -31,6 +31,7 @@ import { UpdateInterestDto } from './dto/update-interest.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
 import { ListSponsorshipsQueryDto } from './dto/list-sponsorships-query.dto';
 import { ListCommunityProfilesQueryDto } from './dto/list-community-profiles-query.dto';
+import { ListBrandsQueryDto, BrandProfileStatus } from './dto/list-brands-query.dto';
 import { CreateAdminSponsorshipDto } from './dto/create-admin-sponsorship.dto';
 import { ListEligibleHostsQueryDto } from './dto/list-eligible-hosts-query.dto';
 import { CreateAdminCommunityProfileDto } from './dto/create-admin-community-profile.dto';
@@ -1901,6 +1902,49 @@ export class AdminService {
     ]);
 
     return { profiles: profiles.map((p) => AdminService.flattenCommunityProfileCategories(p)), total, page, limit };
+  }
+
+  // All signed-up brands, split by profile completeness (name + categories + a social link).
+  // Completeness isn't a stored column, so filtering/pagination happens in-memory after
+  // computing it — acceptable at brand-signup volumes.
+  async listBrands(query: ListBrandsQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const profiles = await this.prisma.brandProfile.findMany({
+      select: {
+        id: true,
+        brandName: true,
+        socialLinks: true,
+        createdAt: true,
+        user: { select: { id: true, email: true, phone: true, firstName: true, lastName: true } },
+        categories: { select: { category: { select: { id: true, name: true } } } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const withCompleteness = profiles.map(({ categories, socialLinks, ...rest }) => {
+      const links = (socialLinks ?? {}) as Record<string, string | undefined>;
+      const hasSocialLink = Object.values(links).some((v) => !!v);
+      const brandCategories = categories.map((c) => c.category);
+      return {
+        ...rest,
+        socialLinks,
+        categories: brandCategories,
+        isProfileComplete: !!rest.brandName && brandCategories.length > 0 && hasSocialLink,
+      };
+    });
+
+    const filtered = query.profileStatus
+      ? withCompleteness.filter((b) =>
+          query.profileStatus === BrandProfileStatus.COMPLETE ? b.isProfileComplete : !b.isProfileComplete,
+        )
+      : withCompleteness;
+
+    const total = filtered.length;
+    const brands = filtered.slice((page - 1) * limit, (page - 1) * limit + limit);
+
+    return { brands, total, page, limit };
   }
 
   async getCommunityProfileDetail(id: string) {

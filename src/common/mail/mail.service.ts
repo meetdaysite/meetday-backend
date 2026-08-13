@@ -22,6 +22,7 @@ import { sponsorshipSubmittedTemplate } from './templates/sponsorship-submitted.
 import { communityProfileSubmittedTemplate } from './templates/community-profile-submitted.template';
 import { errorAlertTemplate } from './templates/error-alert.template';
 import { userActionTemplate } from './templates/user-action.template';
+import { brandInterestTemplate } from './templates/brand-interest.template';
 
 // Admin-facing operational alerts (new signups, pending reviews) are sent from a distinct
 // address from the regular user-facing transactional emails (host-approved, tickets, etc).
@@ -114,6 +115,23 @@ export class MailService {
       to,
       `Unexpected error in ${context} — Meetday`,
       errorAlertTemplate(context, message, userLabel),
+      ADMIN_NOTIFICATIONS_FROM,
+    );
+  }
+
+  async sendBrandInterest(
+    to: string,
+    communityName: string,
+    proposalName: string,
+    brandName: string,
+    brandEmail: string,
+    categories: string[],
+    socialLinks: Record<string, string | undefined>,
+  ): Promise<void> {
+    await this.sendMail(
+      to,
+      `A brand is interested in "${proposalName}" — Meetday`,
+      brandInterestTemplate(communityName, proposalName, brandName, brandEmail, categories, socialLinks),
       ADMIN_NOTIFICATIONS_FROM,
     );
   }

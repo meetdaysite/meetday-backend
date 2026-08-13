@@ -54,6 +54,7 @@ import { SetInterestCategoriesDto } from './dto/set-interest-categories.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
 import { ListSponsorshipsQueryDto } from './dto/list-sponsorships-query.dto';
 import { ListCommunityProfilesQueryDto } from './dto/list-community-profiles-query.dto';
+import { ListBrandsQueryDto } from './dto/list-brands-query.dto';
 import { CreateAdminSponsorshipDto } from './dto/create-admin-sponsorship.dto';
 import { ListEligibleHostsQueryDto } from './dto/list-eligible-hosts-query.dto';
 import { CreateAdminCommunityProfileDto } from './dto/create-admin-community-profile.dto';
@@ -1529,6 +1530,21 @@ export class AdminController {
   @ApiNotFoundResponse({ description: 'Community profile not found.' })
   getCommunityProfileDetail(@Param('id', ParseUUIDPipe) id: string) {
     return this.adminService.getCommunityProfileDetail(id);
+  }
+
+  // ─── Brands ─────────────────────────────────────────────────────────────
+
+  @Get('brands')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({
+    summary: 'List all signed-up brands',
+    description:
+      'Returns every brand account, newest first. Filter by `profileStatus=COMPLETE|INCOMPLETE` ' +
+      '(complete = brand name + at least one category + at least one social link).',
+  })
+  @ApiOkResponse({ description: 'Paginated list of brands, each with `isProfileComplete`.' })
+  listBrands(@Query() query: ListBrandsQueryDto) {
+    return this.adminService.listBrands(query);
   }
 
   @Post('community-profiles/:id/approve')

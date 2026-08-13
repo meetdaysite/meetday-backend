@@ -285,12 +285,13 @@ model Category {
   description String?
   isActive    Boolean @default(true)
 
-  interestMappings         InterestCategory[]
-  hostExperienceCategories HostExperienceCategory[]
-  events                   Event[]
-  highlights               CategoryHighlight[]
-  communities              Community[]
-  hostCommunityProfiles    HostCommunityProfileCategory[]
+  interestMappings          InterestCategory[]
+  hostExperienceCategories  HostExperienceCategory[]
+  brandExperienceCategories BrandExperienceCategory[]
+  events                    Event[]
+  highlights                CategoryHighlight[]
+  communities               Community[]
+  hostCommunityProfiles     HostCommunityProfileCategory[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -401,22 +402,50 @@ model HostProfile {
   @@map("host_profiles")
 }
 
-// Minimal profile for BRAND accounts — brands sign up with phone OTP + email + brand name to
-// browse published sponsorship proposals. Intentionally lean; extended fields (categories,
-// verification, etc.) will be added once the brand-facing product is scoped further.
+// Profile for BRAND accounts — brands sign up with email/Google + brand name to browse
+// published sponsorship proposals and express interest. brandName is required at signup;
+// categories and socialLinks are optional/skippable but required to be filled in for the
+// profile to count as "complete" (gates the "I'm Interested" action).
 model BrandProfile {
   id     String @id @default(uuid())
   userId String @unique
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  brandName String
+  brandName   String
+  socialLinks Json? // { instagram, linkedin, youtube, website }
 
-  interests SponsorshipInterest[]
+  // Step 2 profile creation fields — all optional/skippable.
+  workEmail     String?
+  contactPhone  String?
+  logoKey       String? // GCS object key for the company logo
+  companyType   CompanyType?
+  aboutCompany  String? @db.Text
+  industry      String? // preset dropdown value or free text ("Custom")
+
+  categories BrandExperienceCategory[]
+  interests  SponsorshipInterest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("brand_profiles")
+}
+
+enum CompanyType {
+  BRAND
+  AGENCY
+}
+
+model BrandExperienceCategory {
+  brandProfileId String
+  categoryId     String
+
+  brandProfile BrandProfile @relation(fields: [brandProfileId], references: [id], onDelete: Cascade)
+  category     Category     @relation(fields: [categoryId], references: [id])
+
+  @@id([brandProfileId, categoryId])
+  @@index([categoryId])
+  @@map("brand_experience_categories")
 }
 
 model HostExperienceCategory {

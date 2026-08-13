@@ -313,15 +313,42 @@ export class SponsorshipService {
     return { ...restWithoutPendingRevision, hostProfile: hostRest, community };
   }
 
-  // Brand marks interest in a published proposal — notifies admins and the hosting community.
+  // Brand marks interest in a published proposal — notifies admins (full brand details) and the
+  // hosting community (anonymized — the brand's identity is never revealed to the host).
+  // Requires a complete brand profile (name + categories + at least one social link).
   // Idempotent: calling again for the same brand+proposal is a no-op (no duplicate notifications).
   async markInterest(userId: string, proposalId: string) {
-    const brandProfile = await this.prisma.brandProfile.findUnique({ where: { userId }, select: { id: true, brandName: true } });
+    const brandProfile = await this.prisma.brandProfile.findUnique({
+      where: { userId },
+      select: {
+        id: true,
+        brandName: true,
+        socialLinks: true,
+        user: { select: { email: true } },
+        categories: { select: { category: { select: { name: true } } } },
+      },
+    });
     if (!brandProfile) throw new NotFoundException('Brand profile not found');
+
+    const socialLinks = (brandProfile.socialLinks ?? {}) as Record<string, string | undefined>;
+    const categoryNames = brandProfile.categories.map((c) => c.category.name);
+    const hasSocialLink = Object.values(socialLinks).some((v) => !!v);
+    if (!brandProfile.brandName || categoryNames.length === 0 || !hasSocialLink) {
+      throw new BadRequestException(
+        'Please complete your brand profile (name, categories, and social links) before expressing interest.',
+      );
+    }
 
     const proposal = await this.prisma.sponsorshipProposal.findUnique({
       where: { id: proposalId },
-      include: { hostProfile: { include: { user: { select: { id: true } } } } },
+      include: {
+        hostProfile: {
+          include: {
+            user: { select: { id: true } },
+            communityProfile: { select: { name: true } },
+          },
+        },
+      },
     });
     if (!proposal || proposal.status !== SponsorshipStatus.PUBLISHED)
       throw new NotFoundException('Sponsorship proposal not found');
@@ -335,24 +362,61 @@ export class SponsorshipService {
       data: { sponsorshipProposalId: proposalId, brandProfileId: brandProfile.id },
     });
 
-    const admins = await this.prisma.user.findMany({
-      where: { isActive: true, role: { name: { in: ADMIN_ROLES } } },
-      select: { id: true },
-    });
-    const notifyTargets = [proposal.hostProfile.user.id, ...admins.map((a) => a.id)];
-    void Promise.allSettled(
-      notifyTargets.map((targetUserId) =>
-        this.notificationsService.create(
-          targetUserId,
-          'brand_interested_in_sponsorship',
-          'A brand is interested!',
-          `${brandProfile.brandName} is interested in "${proposal.name || 'your proposal'}".`,
-          { proposalId, brandProfileId: brandProfile.id },
-        ),
-      ),
-    );
+    // Host/community notification is intentionally anonymized — never reveal the brand's identity.
+    void this.notificationsService
+      .create(
+        proposal.hostProfile.user.id,
+        'brand_interested_in_sponsorship',
+        'Someone is interested!',
+        `A brand is interested in "${proposal.name || 'your proposal'}".`,
+        { proposalId },
+      )
+      .catch((err) => this.logger.error('Failed to notify host of brand interest', err));
+
+    const communityName = proposal.hostProfile.communityProfile?.name ?? proposal.hostProfile.displayName ?? 'Unknown community';
+    for (const to of ADMIN_ALERT_EMAILS) {
+      void this.mailQueue
+        .add('brand-interest', {
+          to,
+          communityName,
+          proposalName: proposal.name || 'Untitled proposal',
+          brandName: brandProfile.brandName,
+          brandEmail: brandProfile.user.email,
+          categories: categoryNames,
+          socialLinks,
+        })
+        .catch((err) => this.logger.error('Failed to enqueue brand-interest mail job', err));
+    }
 
     return { message: 'Interest recorded', alreadyInterested: false };
+  }
+
+  // Brand-facing: every admin-approved community profile, newest first — basic info only
+  // (logo, name, size, categories) for the brand "Communities" browse page.
+  async listApprovedCommunities() {
+    const profiles = await this.prisma.hostCommunityProfile.findMany({
+      where: { approvalStatus: 'APPROVED' },
+      select: {
+        id: true,
+        name: true,
+        logoKey: true,
+        size: true,
+        avgGuestCount: true,
+        experiencesPerYear: true,
+        categories: { select: { category: { select: { id: true, name: true } } } },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    const communities = await Promise.all(
+      profiles.map(async ({ logoKey, categories, ...rest }) => ({
+        ...rest,
+        logoUrl: logoKey ? await this.storageService.getPresignedDownloadUrl(logoKey) : null,
+        categories: categories.map((c) => c.category),
+      })),
+    );
+
+    return { communities, total: communities.length };
   }
 
   async getProposalDetail(userId: string, id: string) {

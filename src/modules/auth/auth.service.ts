@@ -263,6 +263,17 @@ export class AuthService {
     return result;
   }
 
+  private async validateCategoryIds(categoryIds?: string[]) {
+    if (!categoryIds?.length) return;
+    const validCategories = await this.prisma.category.findMany({
+      where: { id: { in: categoryIds } },
+      select: { id: true },
+    });
+    if (validCategories.length !== categoryIds.length) {
+      throw new BadRequestException('One or more categoryIds are invalid');
+    }
+  }
+
   private async registerBrand(
     firebaseUid: string,
     resolved: ResolvedIdentity,
@@ -276,6 +287,7 @@ export class AuthService {
     if (!dto.brandName) {
       throw new BadRequestException('brandName is required when registering as a brand');
     }
+    await this.validateCategoryIds(dto.categoryIds);
 
     const brandRole = await this.prisma.role.findUniqueOrThrow({ where: { name: 'BRAND' } });
 
@@ -307,6 +319,10 @@ export class AuthService {
         data: {
           userId: user.id,
           brandName: dto.brandName!,
+          socialLinks: dto.socialLinks ? JSON.parse(JSON.stringify(dto.socialLinks)) : undefined,
+          categories: {
+            create: (dto.categoryIds ?? []).map((categoryId) => ({ categoryId })),
+          },
         },
       });
 
@@ -397,6 +413,7 @@ export class AuthService {
     if (!dto.brandName) {
       throw new BadRequestException('brandName is required when registering as a brand');
     }
+    await this.validateCategoryIds(dto.categoryIds);
 
     const result = await this.prisma.$transaction(async (tx) => {
       const user = await tx.user.findUniqueOrThrow({
@@ -418,6 +435,10 @@ export class AuthService {
         data: {
           userId,
           brandName: dto.brandName!,
+          socialLinks: dto.socialLinks ? JSON.parse(JSON.stringify(dto.socialLinks)) : undefined,
+          categories: {
+            create: (dto.categoryIds ?? []).map((categoryId) => ({ categoryId })),
+          },
         },
       });
 

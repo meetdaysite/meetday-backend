@@ -166,4 +166,31 @@ export class MailProcessor {
       this.logger.error(`Failed to process user-action mail job: ${(error as Error).message}`);
     }
   }
+
+  @Process('brand-interest')
+  async handleBrandInterest(
+    job: Job<{
+      to: string;
+      communityName: string;
+      proposalName: string;
+      brandName: string;
+      brandEmail: string;
+      categories: string[];
+      socialLinks: Record<string, string | undefined>;
+    }>,
+  ) {
+    try {
+      await this.mailService.sendBrandInterest(
+        job.data.to,
+        job.data.communityName,
+        job.data.proposalName,
+        job.data.brandName,
+        job.data.brandEmail,
+        job.data.categories,
+        job.data.socialLinks,
+      );
+    } catch (error) {
+      this.logger.error(`Failed to process brand-interest mail job: ${(error as Error).message}`);
+    }
+  }
 }

@@ -25,6 +25,8 @@ import {
 } from '@nestjs/swagger';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { Public } from '../../common/decorators/public.decorator';
+import { OptionalAuthGuard } from '../../common/guards/optional-auth.guard';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { SponsorshipService } from './sponsorship.service';
 import { CreateProposalDto } from './dto/create-proposal.dto';
@@ -34,13 +36,13 @@ import { ListPublishedQueryDto } from './dto/list-published-query.dto';
 
 @ApiTags('Sponsorship Proposals')
 @ApiBearerAuth('firebase-token')
-@UseGuards(RolesGuard)
-@Roles('HOST')
 @Controller('sponsorships')
 export class SponsorshipController {
   constructor(private readonly sponsorshipService: SponsorshipService) {}
 
   @Post()
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Create a new sponsorship proposal draft',
@@ -57,6 +59,8 @@ export class SponsorshipController {
   }
 
   @Get('me')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
   @ApiOperation({
     summary: "List host's own sponsorship proposals",
     description: "Returns the authenticated host's proposals. Filter by `status`.",
@@ -67,19 +71,34 @@ export class SponsorshipController {
   }
 
   @Get('published')
-  @Roles('BRAND')
+  @Public()
+  @UseGuards(OptionalAuthGuard)
   @ApiOperation({
-    summary: 'List all published sponsorship proposals (brand view)',
+    summary: 'List all published sponsorship proposals (data room — public preview)',
     description:
       'Returns every PUBLISHED proposal across all hosts, newest first. Pass `categoryId` to filter ' +
-      "by the host's approved community profile category.",
+      "by the host's approved community profile category. Accessible without login for the public " +
+      'data room link; full proposal detail still requires a BRAND account.',
   })
   @ApiOkResponse({ description: 'List of published proposals.' })
   getAllPublished(@Query() query: ListPublishedQueryDto) {
     return this.sponsorshipService.getAllPublishedProposals(query);
   }
 
+  @Get('communities')
+  @UseGuards(RolesGuard)
+  @Roles('BRAND')
+  @ApiOperation({
+    summary: 'List onboarded communities (brand view)',
+    description: 'Basic info (logo, name, size, categories) for admin-approved host community profiles.',
+  })
+  @ApiOkResponse({ description: 'List of onboarded communities.' })
+  getCommunities() {
+    return this.sponsorshipService.listApprovedCommunities();
+  }
+
   @Get('published/:id')
+  @UseGuards(RolesGuard)
   @Roles('BRAND')
   @ApiOperation({
     summary: 'Get a published sponsorship proposal detail (brand view)',
@@ -92,19 +111,25 @@ export class SponsorshipController {
   }
 
   @Post('published/:id/interest')
+  @UseGuards(RolesGuard)
   @Roles('BRAND')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Mark interest in a published sponsorship proposal',
-    description: 'Notifies admins and the hosting community that this brand is interested. Idempotent.',
+    description:
+      'Notifies admins (full brand details) and anonymously notifies the hosting community. ' +
+      'Requires a complete brand profile (name, categories, social links). Idempotent.',
   })
   @ApiOkResponse({ description: 'Interest recorded.' })
   @ApiNotFoundResponse({ description: 'Proposal not found or not published.' })
+  @ApiBadRequestResponse({ description: 'Brand profile is incomplete.' })
   markInterest(@GetUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
     return this.sponsorshipService.markInterest(userId, id);
   }
 
   @Get(':id')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
   @ApiOperation({ summary: 'Get own proposal detail' })
   @ApiOkResponse({ description: 'Proposal detail.' })
   @ApiNotFoundResponse({ description: 'Proposal not found.' })
@@ -114,6 +139,8 @@ export class SponsorshipController {
   }
 
   @Patch(':id')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
   @ApiOperation({
     summary: 'Update a sponsorship proposal',
     description:
@@ -133,6 +160,8 @@ export class SponsorshipController {
   }
 
   @Patch(':id/submit')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
   @ApiOperation({
     summary: 'Submit a proposal for admin review',
     description:
@@ -151,6 +180,8 @@ export class SponsorshipController {
   }
 
   @Delete(':id')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Delete a sponsorship proposal',
