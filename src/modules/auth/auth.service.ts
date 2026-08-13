@@ -284,9 +284,6 @@ export class AuthService {
         'email is required for brand registration. Phone-OTP sign-ups must include an email in the request body.',
       );
     }
-    if (!dto.brandName) {
-      throw new BadRequestException('brandName is required when registering as a brand');
-    }
     await this.validateCategoryIds(dto.categoryIds);
 
     const brandRole = await this.prisma.role.findUniqueOrThrow({ where: { name: 'BRAND' } });
@@ -318,7 +315,7 @@ export class AuthService {
       const brandProfile = await tx.brandProfile.create({
         data: {
           userId: user.id,
-          brandName: dto.brandName!,
+          brandName: dto.brandName ?? '',
           socialLinks: dto.socialLinks ? JSON.parse(JSON.stringify(dto.socialLinks)) : undefined,
           categories: {
             create: (dto.categoryIds ?? []).map((categoryId) => ({ categoryId })),
@@ -410,9 +407,6 @@ export class AuthService {
   // Attaches a BrandProfile to an EXISTING user (e.g. an already-registered HOST or admin
   // account) — mirrors attachHostProfile above.
   private async attachBrandProfile(userId: string, dto: RegisterDto) {
-    if (!dto.brandName) {
-      throw new BadRequestException('brandName is required when registering as a brand');
-    }
     await this.validateCategoryIds(dto.categoryIds);
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -434,7 +428,7 @@ export class AuthService {
       const brandProfile = await tx.brandProfile.create({
         data: {
           userId,
-          brandName: dto.brandName!,
+          brandName: dto.brandName ?? '',
           socialLinks: dto.socialLinks ? JSON.parse(JSON.stringify(dto.socialLinks)) : undefined,
           categories: {
             create: (dto.categoryIds ?? []).map((categoryId) => ({ categoryId })),
