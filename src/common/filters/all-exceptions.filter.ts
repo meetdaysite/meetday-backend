@@ -10,7 +10,7 @@ import {
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { Request, Response } from 'express';
-import { ADMIN_ALERT_EMAILS } from '../mail/admin-recipients.constant';
+import { ADMIN_ERROR_ALERT_EMAILS } from '../mail/admin-recipients.constant';
 
 interface RequestUser {
   id?: string;
@@ -70,7 +70,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       ? `${user.displayName || user.email || user.uid || 'Unknown user'} (${user.email || user.uid || 'unknown'})`
       : undefined;
 
-    for (const to of ADMIN_ALERT_EMAILS) {
+    for (const to of ADMIN_ERROR_ALERT_EMAILS) {
       void this.mailQueue.add('error-alert', { to, context, message: errorMessage, userLabel }).catch(() => {});
     }
   }

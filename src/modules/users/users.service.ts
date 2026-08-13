@@ -97,8 +97,8 @@ export class UsersService {
     // Soft-delete + PII anonymization (atomic).
     // Financial records (orders, payouts, refunds) are deliberately kept — required
     // by RBI/GST/IT Act for 8 years and PMLA for 5 years.
-    // firebaseUid is kept to preserve the unique constraint so re-registration
-    // with the same Firebase account is blocked while the record exists.
+    // The Firebase Auth user is deleted below (not just disabled) so the same email/phone
+    // can be reused for a fresh signup; deletion ≠ a permanent ban on that identity.
     await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id: userId },
@@ -118,9 +118,14 @@ export class UsersService {
       }),
     ]);
 
-    // Disable the Firebase account so the token can no longer be used to
-    // call any endpoint, even before the token naturally expires.
-    await firebaseAdmin.auth().updateUser(firebaseUid, { disabled: true });
+    // Disable then delete the Firebase account — deleting outright (rather than just
+    // disabling) is required so the same email/phone can be used to sign up again later;
+    // Firebase rejects sign-in for merely-disabled accounts even after our own record is
+    // anonymized. `catch` guards against a user who was already removed from Firebase.
+    await firebaseAdmin
+      .auth()
+      .deleteUser(firebaseUid)
+      .catch(() => undefined);
 
     this.auditLogService.log({
       actorId: userId,

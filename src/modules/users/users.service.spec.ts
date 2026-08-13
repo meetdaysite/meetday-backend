@@ -5,9 +5,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 
 // Mock firebase-admin before service instantiation
-const mockUpdateUser = jest.fn().mockResolvedValue(undefined);
+const mockDeleteUser = jest.fn().mockResolvedValue(undefined);
 jest.mock('firebase-admin', () => ({
-  auth: () => ({ updateUser: mockUpdateUser }),
+  auth: () => ({ deleteUser: mockDeleteUser }),
 }));
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -95,13 +95,13 @@ describe('UsersService', () => {
       expect((err.getResponse() as any).message).toHaveLength(3);
     });
 
-    it('anonymizes PII, disables Firebase, and logs audit events when no blockers', async () => {
+    it('anonymizes PII, deletes the Firebase user, and logs audit events when no blockers', async () => {
       prisma.order.findFirst.mockResolvedValue(null);
 
       const result = await service.deleteSelfAccount(userId, firebaseUid, 'USER', dto);
 
       expect(prisma.$transaction).toHaveBeenCalled();
-      expect(mockUpdateUser).toHaveBeenCalledWith(firebaseUid, { disabled: true });
+      expect(mockDeleteUser).toHaveBeenCalledWith(firebaseUid);
       expect(mockAuditLog.log).toHaveBeenCalledTimes(2);
       expect(result.message).toContain('account has been deleted');
     });

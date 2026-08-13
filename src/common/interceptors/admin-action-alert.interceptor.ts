@@ -3,7 +3,7 @@ import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { Request } from 'express';
 import { Observable, tap } from 'rxjs';
-import { ADMIN_ALERT_EMAILS } from '../mail/admin-recipients.constant';
+import { ADMIN_ERROR_ALERT_EMAILS } from '../mail/admin-recipients.constant';
 
 // High-frequency, low-value actions (chat messages, presence/typing, read-receipts) are
 // excluded to avoid flooding admin inboxes and risking the sending domain's reputation.
@@ -40,7 +40,7 @@ export class AdminActionAlertInterceptor implements NestInterceptor {
         const userLabel = `${name} (${email})`;
         const path = request.originalUrl || request.url;
 
-        for (const to of ADMIN_ALERT_EMAILS) {
+        for (const to of ADMIN_ERROR_ALERT_EMAILS) {
           void this.mailQueue
             .add('user-action', { to, userLabel, method: request.method, path })
             .catch(() => {});
