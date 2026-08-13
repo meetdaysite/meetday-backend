@@ -373,6 +373,18 @@ export class SponsorshipService {
       )
       .catch((err) => this.logger.error('Failed to notify host of brand interest', err));
 
+    // Confirms back to the brand itself that the community has been notified — persisted so it
+    // shows up in their Notifications page, not just an ephemeral success toast.
+    void this.notificationsService
+      .create(
+        userId,
+        'brand_interest_confirmed',
+        'Interest sent!',
+        `The community has been notified of your interest in "${proposal.name || 'this proposal'}".`,
+        { proposalId },
+      )
+      .catch((err) => this.logger.error('Failed to notify brand of confirmed interest', err));
+
     const communityName = proposal.hostProfile.communityProfile?.name ?? proposal.hostProfile.displayName ?? 'Unknown community';
     for (const to of ADMIN_ALERT_EMAILS) {
       void this.mailQueue
