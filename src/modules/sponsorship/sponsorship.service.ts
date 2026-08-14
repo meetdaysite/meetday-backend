@@ -283,6 +283,8 @@ export class SponsorshipService {
           select: {
             id: true,
             displayName: true,
+            operatingCities: true,
+            socialLinks: true,
             user: { select: { firstName: true, lastName: true } },
             communityProfile: {
               include: { categories: { include: { category: true } } },
@@ -417,15 +419,23 @@ export class SponsorshipService {
         avgGuestCount: true,
         experiencesPerYear: true,
         categories: { select: { category: { select: { id: true, name: true } } } },
+        hostProfile: {
+          select: {
+            operatingCities: true,
+            socialLinks: true,
+          },
+        },
       },
       orderBy: { updatedAt: 'desc' },
     });
 
     const communities = await Promise.all(
-      profiles.map(async ({ logoKey, categories, ...rest }) => ({
+      profiles.map(async ({ logoKey, categories, hostProfile, ...rest }) => ({
         ...rest,
         logoUrl: logoKey ? await this.storageService.getPresignedDownloadUrl(logoKey) : null,
         categories: categories.map((c) => c.category),
+        operatingCities: hostProfile?.operatingCities ?? [],
+        socialLinks: hostProfile?.socialLinks ?? null,
       })),
     );
 
