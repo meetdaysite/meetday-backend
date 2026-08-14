@@ -32,7 +32,6 @@ export class SponsorshipService {
     @InjectQueue('mail') private readonly mailQueue: Queue,
   ) {}
 
-  // Resolves stored keys (top-level + pendingRevision, if present) to presigned download URLs.
   private async withSignedUrls<
     T extends { imageKey: string; docKey: string; pendingRevision: Prisma.JsonValue | null },
   >(proposal: T) {
@@ -95,6 +94,7 @@ export class SponsorshipService {
         audienceProfile: dto.audienceProfile ?? [],
         ageGroup: dto.ageGroup ?? '',
         guestCount: dto.guestCount ?? '',
+        videoUrl: dto.videoUrl ?? null,
         docKey: dto.docKey ?? '',
         docName: dto.docName ?? '',
         docType: dto.docType ?? '',
@@ -151,6 +151,7 @@ export class SponsorshipService {
             ...(dto.audienceProfile !== undefined && { audienceProfile: dto.audienceProfile }),
             ...(dto.ageGroup !== undefined && { ageGroup: dto.ageGroup }),
             ...(dto.guestCount !== undefined && { guestCount: dto.guestCount }),
+            ...(dto.videoUrl !== undefined && { videoUrl: dto.videoUrl }),
             ...(dto.docKey !== undefined && { docKey: dto.docKey }),
             ...(dto.docName !== undefined && { docName: dto.docName }),
             ...(dto.docType !== undefined && { docType: dto.docType }),
@@ -329,11 +330,16 @@ export class SponsorshipService {
         id: true,
         brandName: true,
         socialLinks: true,
+        approvalStatus: true,
         user: { select: { email: true } },
         categories: { select: { category: { select: { name: true } } } },
       },
     });
     if (!brandProfile) throw new NotFoundException('Brand profile not found');
+
+    if (brandProfile.approvalStatus !== 'APPROVED') {
+      throw new BadRequestException('Your profile must be approved by an admin before you can express interest.');
+    }
 
     const socialLinks = (brandProfile.socialLinks ?? {}) as Record<string, string | undefined>;
     const categoryNames = brandProfile.categories.map((c) => c.category.name);

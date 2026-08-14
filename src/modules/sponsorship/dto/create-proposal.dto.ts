@@ -76,6 +76,16 @@ export class CreateProposalDto {
   @IsString()
   guestCount?: string;
 
+  @ApiPropertyOptional({ example: 'https://youtube.com/...', description: 'Optional video link for the proposal' })
+  @IsOptional()
+  @IsString()
+  videoUrl?: string;
+
+  @ApiPropertyOptional({ description: 'Optional GCS object key for the secondary 4:5 image' })
+  @IsOptional()
+  @IsString()
+  secondaryImageKey?: string;
+
   @ApiPropertyOptional({ description: 'GCS object key from POST /storage/upload-url (SPONSORSHIP_DOCUMENT context)' })
   @IsOptional()
   @IsString()

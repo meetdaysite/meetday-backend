@@ -221,13 +221,19 @@ export class HostsService {
 
   private async withCommunityLogoUrl(profile: {
     logoKey: string;
+    secondaryImageKey?: string | null;
     categories: { category: { id: string; name: string } }[];
     [key: string]: unknown;
   }) {
     const { categories, ...rest } = profile;
+    const [logoUrl, secondaryImageUrl] = await Promise.all([
+      profile.logoKey ? this.storageService.getPresignedDownloadUrl(profile.logoKey) : null,
+      profile.secondaryImageKey ? this.storageService.getPresignedDownloadUrl(profile.secondaryImageKey) : null,
+    ]);
     return {
       ...rest,
-      logoUrl: await this.storageService.getPresignedDownloadUrl(profile.logoKey),
+      logoUrl,
+      secondaryImageUrl,
       categories: categories.map((c) => c.category),
     };
   }

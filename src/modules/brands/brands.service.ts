@@ -13,6 +13,7 @@ const BRAND_PROFILE_SELECT = {
   companyType: true,
   aboutCompany: true,
   industry: true,
+  approvalStatus: true,
   createdAt: true,
   updatedAt: true,
   categories: { select: { category: { select: { id: true, name: true } } } },

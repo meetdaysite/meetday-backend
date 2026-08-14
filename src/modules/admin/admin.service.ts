@@ -1774,6 +1774,7 @@ export class AdminService {
         ...(changes.audienceProfile !== undefined && { audienceProfile: changes.audienceProfile }),
         ...(changes.ageGroup !== undefined && { ageGroup: changes.ageGroup }),
         ...(changes.guestCount !== undefined && { guestCount: changes.guestCount }),
+        ...(changes.videoUrl !== undefined && { videoUrl: changes.videoUrl }),
         ...(changes.docKey !== undefined && { docKey: changes.docKey }),
         ...(changes.docName !== undefined && { docName: changes.docName }),
         ...(changes.docType !== undefined && { docType: changes.docType }),
@@ -1850,6 +1851,7 @@ export class AdminService {
     name: true,
     about: true,
     logoKey: true,
+    secondaryImageKey: true,
     size: true,
     avgGuestCount: true,
     experiencesPerYear: true,
@@ -1973,6 +1975,7 @@ export class AdminService {
     return {
       ...AdminService.flattenCommunityProfileCategories(profile),
       logoUrl: await this.storageService.getPresignedDownloadUrl(profile.logoKey),
+      secondaryImageUrl: profile.secondaryImageKey ? await this.storageService.getPresignedDownloadUrl(profile.secondaryImageKey) : null,
     };
   }
 

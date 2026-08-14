@@ -1,7 +1,11 @@
-import { IsArray, IsString, IsUUID } from 'class-validator';
+import { IsArray, IsOptional, IsString, IsUUID } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class ActivateCommunityDto {
+  @ApiProperty({ description: 'Optional GCS object key for the secondary 4:5 image' })
+  @IsString()
+  @IsOptional()
+  secondaryImageKey?: string;
   @ApiProperty({ example: 'Bangalore Founders Circle' })
   @IsString()
   name: string;

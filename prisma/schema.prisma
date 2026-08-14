@@ -990,6 +990,7 @@ model SponsorshipProposal {
   audienceProfile String[]
   ageGroup        String
   guestCount      String
+  videoUrl        String?
 
   docKey  String // GCS object key for the pitch document (pdf/doc/ppt)
   docName String
@@ -1060,6 +1061,7 @@ model HostCommunityProfile {
   size               String
   avgGuestCount      String
   experiencesPerYear String
+  secondaryImageKey  String?
 
   categories HostCommunityProfileCategory[]
 
