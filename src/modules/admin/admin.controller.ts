@@ -1547,6 +1547,41 @@ export class AdminController {
     return this.adminService.listBrands(query);
   }
 
+  @Post('brands/:id/approve')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Approve a brand profile',
+    description: 'Approves a brand profile in PENDING status. Notifies the brand.',
+  })
+  @ApiParam({ name: 'id', description: 'Brand profile UUID' })
+  @ApiOkResponse({ description: 'Brand profile approved.' })
+  @ApiNotFoundResponse({ description: 'Brand profile not found.' })
+  @ApiBadRequestResponse({ description: 'Brand profile is not in PENDING status.' })
+  approveBrandProfile(@Param('id', ParseUUIDPipe) id: string, @GetUser('id') adminId: string) {
+    return this.adminService.approveBrandProfile(id, adminId);
+  }
+
+  @Post('brands/:id/reject')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reject a brand profile',
+    description: 'Rejects a brand profile in PENDING status. Notifies the brand.',
+  })
+  @ApiParam({ name: 'id', description: 'Brand profile UUID' })
+  @ApiBody({ type: RejectEventDto })
+  @ApiOkResponse({ description: 'Brand profile rejected.' })
+  @ApiNotFoundResponse({ description: 'Brand profile not found.' })
+  @ApiBadRequestResponse({ description: 'Brand profile is not in PENDING status.' })
+  rejectBrandProfile(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') adminId: string,
+    @Body() dto: RejectEventDto,
+  ) {
+    return this.adminService.rejectBrandProfile(id, adminId, dto);
+  }
+
   @Post('community-profiles/:id/approve')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @HttpCode(HttpStatus.OK)

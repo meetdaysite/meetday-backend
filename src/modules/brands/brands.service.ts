@@ -95,6 +95,7 @@ export class BrandsService {
         ...(dto.companyType !== undefined && { companyType: dto.companyType }),
         ...(dto.aboutCompany !== undefined && { aboutCompany: dto.aboutCompany }),
         ...(dto.industry !== undefined && { industry: dto.industry }),
+        approvalStatus: 'PENDING',
       },
     });
 

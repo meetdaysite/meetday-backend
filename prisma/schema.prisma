@@ -425,6 +425,8 @@ model BrandProfile {
   categories BrandExperienceCategory[]
   interests  SponsorshipInterest[]
 
+  approvalStatus HostApprovalStatus @default(PENDING)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1445,6 +1447,10 @@ enum AuditAction {
   // Host community profile lifecycle
   COMMUNITY_PROFILE_APPROVED
   COMMUNITY_PROFILE_REJECTED
+
+  // Brand profile lifecycle
+  BRAND_PROFILE_APPROVED
+  BRAND_PROFILE_REJECTED
 
   // Orders / payments (PMLA / GST)
   ORDER_CREATED

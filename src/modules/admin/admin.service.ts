@@ -1916,6 +1916,13 @@ export class AdminService {
         id: true,
         brandName: true,
         socialLinks: true,
+        workEmail: true,
+        contactPhone: true,
+        logoKey: true,
+        companyType: true,
+        aboutCompany: true,
+        industry: true,
+        approvalStatus: true,
         createdAt: true,
         user: { select: { id: true, email: true, phone: true, firstName: true, lastName: true } },
         categories: { select: { category: { select: { id: true, name: true } } } },
@@ -1923,17 +1930,22 @@ export class AdminService {
       orderBy: { createdAt: 'desc' },
     });
 
-    const withCompleteness = profiles.map(({ categories, socialLinks, ...rest }) => {
-      const links = (socialLinks ?? {}) as Record<string, string | undefined>;
-      const hasSocialLink = Object.values(links).some((v) => !!v);
-      const brandCategories = categories.map((c) => c.category);
-      return {
-        ...rest,
-        socialLinks,
-        categories: brandCategories,
-        isProfileComplete: !!rest.brandName && brandCategories.length > 0 && hasSocialLink,
-      };
-    });
+    const withCompleteness = await Promise.all(
+      profiles.map(async ({ categories, socialLinks, logoKey, ...rest }) => {
+        const links = (socialLinks ?? {}) as Record<string, string | undefined>;
+        const hasSocialLink = Object.values(links).some((v) => !!v);
+        const brandCategories = categories.map((c) => c.category);
+        const logoUrl = logoKey ? await this.storageService.getPresignedDownloadUrl(logoKey) : null;
+        return {
+          ...rest,
+          socialLinks,
+          logoKey,
+          logoUrl,
+          categories: brandCategories,
+          isProfileComplete: !!rest.brandName && brandCategories.length > 0 && hasSocialLink,
+        };
+      }),
+    );
 
     const filtered = query.profileStatus
       ? withCompleteness.filter((b) =>
@@ -2130,6 +2142,78 @@ export class AdminService {
       .catch((err) => this.logger.error('Failed to create community_profile_rejected notification', err));
 
     return { message: 'Community profile rejected successfully' };
+  }
+
+  async approveBrandProfile(id: string, adminId: string) {
+    const profile = await this.prisma.brandProfile.findUnique({
+      where: { id },
+      include: { user: { select: { id: true } } },
+    });
+    if (!profile) throw new NotFoundException('Brand profile not found');
+    if (profile.approvalStatus !== 'PENDING')
+      throw new BadRequestException('Only profiles in PENDING status can be approved');
+
+    await this.prisma.brandProfile.update({
+      where: { id },
+      data: { approvalStatus: 'APPROVED' },
+    });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'BRAND_PROFILE_APPROVED',
+      entityType: 'BRAND_PROFILE',
+      entityId: id,
+      metadata: { brandName: profile.brandName },
+    });
+
+    void this.notificationsService
+      .create(
+        profile.user.id,
+        'brand_profile_approved',
+        'Brand Profile Approved',
+        `Your brand profile "${profile.brandName}" has been approved.`,
+        { brandProfileId: id },
+      )
+      .catch((err) => this.logger.error('Failed to create brand_profile_approved notification', err));
+
+    return { message: 'Brand profile approved successfully' };
+  }
+
+  async rejectBrandProfile(id: string, adminId: string, dto: RejectEventDto) {
+    const profile = await this.prisma.brandProfile.findUnique({
+      where: { id },
+      include: { user: { select: { id: true } } },
+    });
+    if (!profile) throw new NotFoundException('Brand profile not found');
+    if (profile.approvalStatus !== 'PENDING')
+      throw new BadRequestException('Only profiles in PENDING status can be rejected');
+
+    await this.prisma.brandProfile.update({
+      where: { id },
+      data: { approvalStatus: 'REJECTED' },
+    });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'BRAND_PROFILE_REJECTED',
+      entityType: 'BRAND_PROFILE',
+      entityId: id,
+      metadata: { brandName: profile.brandName, remark: dto.remark },
+    });
+
+    void this.notificationsService
+      .create(
+        profile.user.id,
+        'brand_profile_rejected',
+        'Brand Profile Not Approved',
+        `Your brand profile "${profile.brandName}" was not approved. Remark: ${dto.remark}`,
+        { brandProfileId: id },
+      )
+      .catch((err) => this.logger.error('Failed to create brand_profile_rejected notification', err));
+
+    return { message: 'Brand profile rejected successfully' };
   }
 
   // ─── Order management ────────────────────────────────────────────────────────
