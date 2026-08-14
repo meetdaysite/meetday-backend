@@ -1383,6 +1383,8 @@ export class AdminController {
     return this.adminService.listPendingSponsorshipRevisions(Number(page), Number(limit));
   }
 
+
+
   @Get('sponsorships/:id')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({ summary: 'Get full sponsorship proposal detail (admin view)' })
@@ -1471,6 +1473,8 @@ export class AdminController {
   ) {
     return this.adminService.rejectSponsorshipRevision(id, adminId, dto);
   }
+
+
 
   // ─── Host community profile review ─────────────────────────────────────────
 

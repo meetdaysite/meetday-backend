@@ -123,7 +123,10 @@ export class SponsorshipService {
   async updateProposal(userId: string, id: string, dto: UpdateProposalDto) {
     const proposal = await this.getOwnedProposal(userId, id);
 
-    const directlyEditable = proposal.status === SponsorshipStatus.DRAFT || proposal.status === SponsorshipStatus.REJECTED;
+    const directlyEditable =
+      proposal.status === SponsorshipStatus.DRAFT ||
+      proposal.status === SponsorshipStatus.REJECTED ||
+      proposal.status === SponsorshipStatus.UNDER_REVIEW;
 
     if (directlyEditable) {
       return this.withSignedUrls(
@@ -530,9 +533,6 @@ export class SponsorshipService {
 
   async deleteProposal(userId: string, id: string) {
     const proposal = await this.getOwnedProposal(userId, id);
-    if (proposal.status !== SponsorshipStatus.DRAFT && proposal.status !== SponsorshipStatus.REJECTED)
-      throw new BadRequestException('Only DRAFT or REJECTED proposals can be deleted');
-
     await this.prisma.sponsorshipProposal.delete({ where: { id } });
 
     this.auditLogService.log({
@@ -542,5 +542,6 @@ export class SponsorshipService {
       entityType: 'SPONSORSHIP_PROPOSAL',
       entityId: id,
     });
+    return { message: 'Proposal deleted successfully', deleted: true };
   }
 }

@@ -182,15 +182,14 @@ export class SponsorshipController {
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles('HOST')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Delete a sponsorship proposal',
-    description: 'Permanently deletes a proposal. Only allowed when DRAFT or REJECTED.',
+    description: 'Permanently deletes any sponsorship proposal owned by the host.',
   })
-  @ApiNoContentResponse({ description: 'Proposal deleted.' })
+  @ApiOkResponse({ description: 'Proposal deleted successfully.' })
   @ApiForbiddenResponse({ description: 'Not the owner.' })
   @ApiNotFoundResponse({ description: 'Proposal not found.' })
-  @ApiBadRequestResponse({ description: 'Only DRAFT or REJECTED proposals can be deleted.' })
   deleteProposal(@GetUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
     return this.sponsorshipService.deleteProposal(userId, id);
   }
