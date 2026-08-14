@@ -414,6 +414,7 @@ export class SponsorshipService {
         id: true,
         hostProfileId: true,
         name: true,
+        about: true,
         logoKey: true,
         size: true,
         avgGuestCount: true,
