@@ -1526,6 +1526,17 @@ export class AdminController {
     return this.adminService.listAllCommunityProfiles(query);
   }
 
+  @Get('community-profiles/revisions/pending')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({
+    summary: 'List pending community profile revisions',
+    description: 'Already-APPROVED profiles that have an edit awaiting review.',
+  })
+  @ApiOkResponse({ description: 'Paginated list of community profiles with a pending revision.' })
+  listPendingCommunityProfileRevisions(@Query('page') page = 1, @Query('limit') limit = 20) {
+    return this.adminService.listPendingCommunityProfileRevisions(Number(page), Number(limit));
+  }
+
   @Get('community-profiles/:id')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({ summary: 'Get full community profile detail (admin view)' })
@@ -1619,6 +1630,39 @@ export class AdminController {
     @Body() dto: RejectEventDto,
   ) {
     return this.adminService.rejectCommunityProfile(id, adminId, dto);
+  }
+
+  @Post('community-profiles/:id/revision/approve')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Approve a community profile revision',
+    description: 'Merges the pending revision into the profile. Notifies the host.',
+  })
+  @ApiParam({ name: 'id', description: 'Community profile UUID' })
+  @ApiOkResponse({ description: 'Revision approved and applied.' })
+  @ApiNotFoundResponse({ description: 'Community profile not found, or no pending revision.' })
+  approveCommunityProfileRevision(@Param('id', ParseUUIDPipe) id: string, @GetUser('id') adminId: string) {
+    return this.adminService.approveCommunityProfileRevision(id, adminId);
+  }
+
+  @Post('community-profiles/:id/revision/reject')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reject a community profile revision',
+    description: 'Discards the pending revision with an admin remark. Notifies the host.',
+  })
+  @ApiParam({ name: 'id', description: 'Community profile UUID' })
+  @ApiBody({ type: RejectEventDto })
+  @ApiOkResponse({ description: 'Revision rejected.' })
+  @ApiNotFoundResponse({ description: 'Community profile not found, or no pending revision.' })
+  rejectCommunityProfileRevision(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') adminId: string,
+    @Body() dto: RejectEventDto,
+  ) {
+    return this.adminService.rejectCommunityProfileRevision(id, adminId, dto);
   }
 
   // ─── Order management ────────────────────────────────────────────────────────

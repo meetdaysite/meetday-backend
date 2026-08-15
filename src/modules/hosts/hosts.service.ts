@@ -12,7 +12,7 @@ import { createHmac } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
-import { BillingCycle, CouponTarget, DiscountType, HostPlan, SubscriptionStatus } from '@prisma/client';
+import { BillingCycle, CouponTarget, DiscountType, HostPlan, Prisma, SubscriptionStatus } from '@prisma/client';
 import { DashboardPeriod } from './dto/dashboard-query.dto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
@@ -222,6 +222,7 @@ export class HostsService {
   private async withCommunityLogoUrl(profile: {
     logoKey: string;
     secondaryImageKey?: string | null;
+    pendingRevision?: Prisma.JsonValue;
     categories: { category: { id: string; name: string } }[];
     [key: string]: unknown;
   }) {
@@ -230,10 +231,26 @@ export class HostsService {
       profile.logoKey ? this.storageService.getPresignedDownloadUrl(profile.logoKey) : null,
       profile.secondaryImageKey ? this.storageService.getPresignedDownloadUrl(profile.secondaryImageKey) : null,
     ]);
+
+    let pendingRevision = profile.pendingRevision as
+      | (Record<string, unknown> & { logoKey?: string; secondaryImageKey?: string })
+      | null
+      | undefined;
+    if (pendingRevision) {
+      const [revisionLogoUrl, revisionSecondaryImageUrl] = await Promise.all([
+        pendingRevision.logoKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.logoKey) : undefined,
+        pendingRevision.secondaryImageKey
+          ? this.storageService.getPresignedDownloadUrl(pendingRevision.secondaryImageKey)
+          : undefined,
+      ]);
+      pendingRevision = { ...pendingRevision, logoUrl: revisionLogoUrl, secondaryImageUrl: revisionSecondaryImageUrl };
+    }
+
     return {
       ...rest,
       logoUrl,
       secondaryImageUrl,
+      pendingRevision: pendingRevision ?? null,
       categories: categories.map((c) => c.category),
     };
   }
@@ -251,8 +268,10 @@ export class HostsService {
     return this.withCommunityLogoUrl(communityProfile);
   }
 
-  // Creating or editing a community profile always resets it to PENDING — an admin must
-  // approve before it's shown to brands. Notifies admins of the (re-)submission.
+  // A brand-new or not-yet-approved (PENDING/REJECTED) profile is edited directly and reset
+  // to PENDING. An already-APPROVED profile's edits are staged as a `pendingRevision` snapshot
+  // instead — the live fields (and what brands see) stay untouched until an admin approves it,
+  // mirroring the sponsorship-proposal revision flow.
   async activateCommunityProfile(userId: string, dto: ActivateCommunityDto) {
     const hostProfile = await this.prisma.hostProfile.findUnique({
       where: { userId },
@@ -268,26 +287,42 @@ export class HostsService {
       throw new BadRequestException('One or more category IDs are invalid');
     }
 
-    const { categoryIds, ...fields } = dto;
-
-    const communityProfile = await this.prisma.hostCommunityProfile.upsert({
+    const existing = await this.prisma.hostCommunityProfile.findUnique({
       where: { hostProfileId: hostProfile.id },
-      create: { ...fields, hostProfileId: hostProfile.id },
-      update: {
-        ...fields,
-        approvalStatus: 'PENDING',
-        adminRejectionRemark: null,
-        reviewedBy: null,
-        reviewedAt: null,
-      },
+      select: { id: true, approvalStatus: true },
     });
 
-    await this.prisma.$transaction([
-      this.prisma.hostCommunityProfileCategory.deleteMany({ where: { hostCommunityProfileId: communityProfile.id } }),
-      this.prisma.hostCommunityProfileCategory.createMany({
-        data: categoryIds.map((categoryId) => ({ hostCommunityProfileId: communityProfile.id, categoryId })),
-      }),
-    ]);
+    let communityProfile: { id: string; name: string };
+    let isRevision = false;
+
+    if (existing && existing.approvalStatus === 'APPROVED') {
+      // Stage the edit as a pending revision — live fields and categories are untouched.
+      isRevision = true;
+      communityProfile = await this.prisma.hostCommunityProfile.update({
+        where: { id: existing.id },
+        data: { pendingRevision: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue },
+      });
+    } else {
+      const { categoryIds, ...fields } = dto;
+      communityProfile = await this.prisma.hostCommunityProfile.upsert({
+        where: { hostProfileId: hostProfile.id },
+        create: { ...fields, hostProfileId: hostProfile.id },
+        update: {
+          ...fields,
+          approvalStatus: 'PENDING',
+          adminRejectionRemark: null,
+          reviewedBy: null,
+          reviewedAt: null,
+        },
+      });
+
+      await this.prisma.$transaction([
+        this.prisma.hostCommunityProfileCategory.deleteMany({ where: { hostCommunityProfileId: communityProfile.id } }),
+        this.prisma.hostCommunityProfileCategory.createMany({
+          data: categoryIds.map((categoryId) => ({ hostCommunityProfileId: communityProfile.id, categoryId })),
+        }),
+      ]);
+    }
 
     const admins = await this.prisma.user.findMany({
       where: { isActive: true, role: { name: { in: ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'] } } },
@@ -297,9 +332,11 @@ export class HostsService {
       admins.map((admin) =>
         this.notificationsService.create(
           admin.id,
-          'community_profile_pending_review',
-          'Community profile pending review',
-          `"${communityProfile.name}" is awaiting approval.`,
+          isRevision ? 'community_profile_revision_submitted' : 'community_profile_pending_review',
+          isRevision ? 'Community profile edit pending review' : 'Community profile pending review',
+          isRevision
+            ? `An edit to "${communityProfile.name}" is awaiting approval.`
+            : `"${communityProfile.name}" is awaiting approval.`,
           { hostCommunityProfileId: communityProfile.id },
         ),
       ),

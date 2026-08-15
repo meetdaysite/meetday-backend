@@ -1065,8 +1065,15 @@ model HostCommunityProfile {
 
   categories HostCommunityProfileCategory[]
 
-  // Every create/edit resets this to PENDING — an admin must approve before the community
-  // profile is considered live (shown to brands alongside the host's sponsorship proposals).
+  // Edits to an already-APPROVED profile are staged here instead of overwriting the live
+  // fields, so brands keep seeing the last-approved version until an admin approves the
+  // edit. Shaped like the fields above plus categoryIds; merged in on approval, discarded
+  // on rejection. Not used for a brand-new or not-yet-approved profile — those edit directly.
+  pendingRevision Json?
+
+  // Every create/edit of a not-yet-approved profile resets this to PENDING — an admin must
+  // approve before the community profile is considered live (shown to brands alongside the
+  // host's sponsorship proposals).
   approvalStatus       HostApprovalStatus @default(PENDING)
   adminRejectionRemark String?
   reviewedBy           String?
@@ -1453,6 +1460,8 @@ enum AuditAction {
   // Host community profile lifecycle
   COMMUNITY_PROFILE_APPROVED
   COMMUNITY_PROFILE_REJECTED
+  COMMUNITY_PROFILE_REVISION_APPROVED
+  COMMUNITY_PROFILE_REVISION_REJECTED
 
   // Brand profile lifecycle
   BRAND_PROFILE_APPROVED

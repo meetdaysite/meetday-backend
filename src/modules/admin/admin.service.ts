@@ -1858,6 +1858,7 @@ export class AdminService {
     approvalStatus: true,
     adminRejectionRemark: true,
     reviewedAt: true,
+    pendingRevision: true,
     createdAt: true,
     updatedAt: true,
     categories: { select: { category: { select: { id: true, name: true } } } },
@@ -1972,10 +1973,24 @@ export class AdminService {
     });
     if (!profile) throw new NotFoundException('Community profile not found');
 
+    let pendingRevision = profile.pendingRevision as
+      | (Record<string, unknown> & { logoKey?: string; secondaryImageKey?: string })
+      | null;
+    if (pendingRevision) {
+      const [revisionLogoUrl, revisionSecondaryImageUrl] = await Promise.all([
+        pendingRevision.logoKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.logoKey) : undefined,
+        pendingRevision.secondaryImageKey
+          ? this.storageService.getPresignedDownloadUrl(pendingRevision.secondaryImageKey)
+          : undefined,
+      ]);
+      pendingRevision = { ...pendingRevision, logoUrl: revisionLogoUrl, secondaryImageUrl: revisionSecondaryImageUrl };
+    }
+
     return {
       ...AdminService.flattenCommunityProfileCategories(profile),
       logoUrl: await this.storageService.getPresignedDownloadUrl(profile.logoKey),
       secondaryImageUrl: profile.secondaryImageKey ? await this.storageService.getPresignedDownloadUrl(profile.secondaryImageKey) : null,
+      pendingRevision,
     };
   }
 
@@ -2149,6 +2164,118 @@ export class AdminService {
       .catch((err) => this.logger.error('Failed to create community_profile_rejected notification', err));
 
     return { message: 'Community profile rejected successfully' };
+  }
+
+  // ── Community profile revisions (edits to an already-APPROVED profile) ─────────
+
+  async listPendingCommunityProfileRevisions(page: number, limit: number) {
+    const where = { pendingRevision: { not: Prisma.JsonNull } };
+
+    const [profiles, total] = await Promise.all([
+      this.prisma.hostCommunityProfile.findMany({
+        where,
+        select: AdminService.COMMUNITY_PROFILE_SELECT,
+        orderBy: { updatedAt: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.hostCommunityProfile.count({ where }),
+    ]);
+
+    return { profiles: profiles.map((p) => AdminService.flattenCommunityProfileCategories(p)), total, page, limit };
+  }
+
+  async approveCommunityProfileRevision(id: string, adminId: string) {
+    const profile = await this.prisma.hostCommunityProfile.findUnique({
+      where: { id },
+      include: { hostProfile: { include: { user: { select: { id: true } } } } },
+    });
+    if (!profile) throw new NotFoundException('Community profile not found');
+    if (!profile.pendingRevision) throw new NotFoundException('No pending revision for this profile');
+
+    const changes = profile.pendingRevision as Record<string, any>;
+    const { categoryIds, ...fieldChanges } = changes;
+
+    await this.prisma.$transaction([
+      this.prisma.hostCommunityProfile.update({
+        where: { id },
+        data: {
+          ...(fieldChanges.name !== undefined && { name: fieldChanges.name }),
+          ...(fieldChanges.about !== undefined && { about: fieldChanges.about }),
+          ...(fieldChanges.logoKey !== undefined && { logoKey: fieldChanges.logoKey }),
+          ...(fieldChanges.secondaryImageKey !== undefined && { secondaryImageKey: fieldChanges.secondaryImageKey }),
+          ...(fieldChanges.size !== undefined && { size: fieldChanges.size }),
+          ...(fieldChanges.avgGuestCount !== undefined && { avgGuestCount: fieldChanges.avgGuestCount }),
+          ...(fieldChanges.experiencesPerYear !== undefined && { experiencesPerYear: fieldChanges.experiencesPerYear }),
+          pendingRevision: Prisma.JsonNull,
+          reviewedBy: adminId,
+          reviewedAt: new Date(),
+        },
+      }),
+      ...(Array.isArray(categoryIds)
+        ? [
+            this.prisma.hostCommunityProfileCategory.deleteMany({ where: { hostCommunityProfileId: id } }),
+            this.prisma.hostCommunityProfileCategory.createMany({
+              data: (categoryIds as string[]).map((categoryId) => ({ hostCommunityProfileId: id, categoryId })),
+            }),
+          ]
+        : []),
+    ]);
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'COMMUNITY_PROFILE_REVISION_APPROVED',
+      entityType: 'HOST_COMMUNITY_PROFILE',
+      entityId: id,
+    });
+
+    void this.notificationsService
+      .create(
+        profile.hostProfile.user.id,
+        'community_profile_changes_approved',
+        'Your changes are live',
+        `Your updates to "${profile.name}" have been approved and are now live.`,
+        { hostCommunityProfileId: id },
+      )
+      .catch((err) => this.logger.error('Failed to create community_profile_changes_approved notification', err));
+
+    return { message: 'Revision approved and applied' };
+  }
+
+  async rejectCommunityProfileRevision(id: string, adminId: string, dto: RejectEventDto) {
+    const profile = await this.prisma.hostCommunityProfile.findUnique({
+      where: { id },
+      include: { hostProfile: { include: { user: { select: { id: true } } } } },
+    });
+    if (!profile) throw new NotFoundException('Community profile not found');
+    if (!profile.pendingRevision) throw new NotFoundException('No pending revision for this profile');
+
+    await this.prisma.hostCommunityProfile.update({
+      where: { id },
+      data: { pendingRevision: Prisma.JsonNull, reviewedBy: adminId, reviewedAt: new Date() },
+    });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'COMMUNITY_PROFILE_REVISION_REJECTED',
+      entityType: 'HOST_COMMUNITY_PROFILE',
+      entityId: id,
+      metadata: { remark: dto.remark },
+    });
+
+    void this.notificationsService
+      .create(
+        profile.hostProfile.user.id,
+        'community_profile_changes_rejected',
+        'Changes not approved',
+        `Your updates to "${profile.name}" were not approved. Remark: ${dto.remark}`,
+        { hostCommunityProfileId: id },
+      )
+      .catch((err) => this.logger.error('Failed to create community_profile_changes_rejected notification', err));
+
+    return { message: 'Revision rejected' };
   }
 
   async approveBrandProfile(id: string, adminId: string) {
