@@ -24,6 +24,11 @@ export class ListHostsQueryDto {
   @IsString()
   city?: string;
 
+  @ApiPropertyOptional({ description: 'Search by display name, email, or user name' })
+  @IsOptional()
+  @IsString()
+  search?: string;
+
   @ApiPropertyOptional({ default: 1, minimum: 1 })
   @IsOptional()
   @Type(() => Number)

@@ -1342,8 +1342,9 @@ export class AdminController {
   @ApiOperation({
     summary: 'Create a sponsorship proposal directly (admin)',
     description:
-      'Creates and immediately publishes a sponsorship proposal under the "Meetday Official" system host, ' +
-      'bypassing the normal host KYC/approval and review flow.',
+      'Creates and immediately publishes a sponsorship proposal, bypassing the normal host KYC/approval ' +
+      'and review flow. Pass `hostProfileId` to attribute it to a specific existing host; omit it to publish ' +
+      'under the "Meetday Official" system host.',
   })
   @ApiCreatedResponse({ description: 'Proposal created and published.' })
   createSponsorship(@Body() dto: CreateAdminSponsorshipDto, @GetUser('id') adminId: string) {

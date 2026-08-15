@@ -2,12 +2,14 @@ import {
   IsArray,
   IsDateString,
   IsInt,
+  IsOptional,
   IsString,
+  IsUUID,
   Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class AdminSponsorTierDto {
   @ApiProperty({ example: 'Gold Sponsor' })
@@ -22,6 +24,15 @@ export class AdminSponsorTierDto {
 // Admin creates the proposal already-complete and published, unlike CreateProposalDto
 // (host draft flow) where every field is optional — so everything here is required.
 export class CreateAdminSponsorshipDto {
+  @ApiPropertyOptional({
+    description:
+      'Attribute the proposal to a specific existing host instead of the "Meetday Official" system host. ' +
+      'Omit to publish under Meetday Official as before.',
+  })
+  @IsOptional()
+  @IsUUID()
+  hostProfileId?: string;
+
   @ApiProperty({ example: 'Sunset Music Festival' })
   @IsString()
   name: string;

@@ -309,6 +309,14 @@ export class AdminService {
     if (query.kycStatus) where.kycStatus = query.kycStatus;
     if (query.plan) where.currentPlan = query.plan;
     if (query.city) where.city = { contains: query.city, mode: 'insensitive' };
+    if (query.search) {
+      where.OR = [
+        { displayName: { contains: query.search, mode: 'insensitive' } },
+        { user: { email: { contains: query.search, mode: 'insensitive' } } },
+        { user: { firstName: { contains: query.search, mode: 'insensitive' } } },
+        { user: { lastName: { contains: query.search, mode: 'insensitive' } } },
+      ];
+    }
 
     const [hosts, total] = await Promise.all([
       this.prisma.hostProfile.findMany({
@@ -1584,10 +1592,22 @@ export class AdminService {
     return { interests, total, page, limit };
   }
 
-  // Admin creates a sponsorship proposal directly under the "Meetday Official" system host,
-  // published immediately — no host KYC/approval or review step involved.
+  // Admin creates a sponsorship proposal directly, published immediately — no host KYC/approval
+  // or review step involved. Attributed to a specific host if `dto.hostProfileId` is given
+  // (e.g. creating it on behalf of a real host who asked the team to do it for them),
+  // otherwise falls back to the "Meetday Official" system host.
   async createSponsorshipAsAdmin(adminId: string, dto: CreateAdminSponsorshipDto) {
-    const hostProfileId = await this.storageService.getOrCreateOfficialHostProfileId();
+    let hostProfileId: string;
+    if (dto.hostProfileId) {
+      const hostProfile = await this.prisma.hostProfile.findUnique({
+        where: { id: dto.hostProfileId },
+        select: { id: true },
+      });
+      if (!hostProfile) throw new NotFoundException('Host profile not found');
+      hostProfileId = hostProfile.id;
+    } else {
+      hostProfileId = await this.storageService.getOrCreateOfficialHostProfileId();
+    }
 
     const proposal = await this.prisma.sponsorshipProposal.create({
       data: {
