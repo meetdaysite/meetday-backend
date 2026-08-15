@@ -81,11 +81,6 @@ export class CreateProposalDto {
   @IsString()
   videoUrl?: string;
 
-  @ApiPropertyOptional({ description: 'Optional GCS object key for the secondary 4:5 image' })
-  @IsOptional()
-  @IsString()
-  secondaryImageKey?: string;
-
   @ApiPropertyOptional({ description: 'GCS object key from POST /storage/upload-url (SPONSORSHIP_DOCUMENT context)' })
   @IsOptional()
   @IsString()

@@ -306,10 +306,15 @@ export class SponsorshipService {
 
     let community: Record<string, unknown> | null = null;
     if (communityProfile && communityProfile.approvalStatus === 'APPROVED') {
-      const { categories, logoKey, ...communityRest } = communityProfile;
+      const { categories, logoKey, secondaryImageKey, ...communityRest } = communityProfile;
+      const [logoUrl, secondaryImageUrl] = await Promise.all([
+        logoKey ? this.storageService.getPresignedDownloadUrl(logoKey) : null,
+        secondaryImageKey ? this.storageService.getPresignedDownloadUrl(secondaryImageKey) : null,
+      ]);
       community = {
         ...communityRest,
-        logoUrl: logoKey ? await this.storageService.getPresignedDownloadUrl(logoKey) : null,
+        logoUrl,
+        secondaryImageUrl,
         categories: categories.map((c) => c.category),
       };
     }
