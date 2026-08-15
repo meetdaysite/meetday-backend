@@ -1,6 +1,7 @@
 import { IsEnum, IsInt, IsOptional, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { HostApprovalStatus } from '@prisma/client';
 
 export enum BrandProfileStatus {
   COMPLETE = 'COMPLETE',
@@ -12,6 +13,11 @@ export class ListBrandsQueryDto {
   @IsOptional()
   @IsEnum(BrandProfileStatus)
   profileStatus?: BrandProfileStatus;
+
+  @ApiPropertyOptional({ enum: HostApprovalStatus, description: 'Filter by approval status (e.g. PENDING for the review queue).' })
+  @IsOptional()
+  @IsEnum(HostApprovalStatus)
+  approvalStatus?: HostApprovalStatus;
 
   @ApiPropertyOptional({ default: 1, minimum: 1 })
   @IsOptional()

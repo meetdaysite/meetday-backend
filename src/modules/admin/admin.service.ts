@@ -1919,6 +1919,7 @@ export class AdminService {
     const limit = query.limit ?? 20;
 
     const profiles = await this.prisma.brandProfile.findMany({
+      where: query.approvalStatus ? { approvalStatus: query.approvalStatus } : undefined,
       select: {
         id: true,
         brandName: true,
@@ -1934,7 +1935,9 @@ export class AdminService {
         user: { select: { id: true, email: true, phone: true, firstName: true, lastName: true } },
         categories: { select: { category: { select: { id: true, name: true } } } },
       },
-      orderBy: { createdAt: 'desc' },
+      // The review queue (approvalStatus=PENDING) is FIFO — oldest submission first — matching
+      // the Hosts/Sponsorships/Community Profile queues; the general brands list is newest-first.
+      orderBy: { createdAt: query.approvalStatus === 'PENDING' ? 'asc' : 'desc' },
     });
 
     const withCompleteness = await Promise.all(
