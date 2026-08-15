@@ -158,15 +158,21 @@ export class StorageService {
 
     const hostRole = await this.prisma.role.findUniqueOrThrow({ where: { name: 'HOST' } });
     const hostProfile = await this.prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          firebaseUid: `system-${randomUUID()}`,
-          email: OFFICIAL_HOST_EMAIL,
-          firstName: 'Meetday',
-          lastName: 'Official',
-          roleId: hostRole.id,
-        },
-      });
+      // The system user may already exist without a host profile (e.g. the profile was
+      // deleted separately) — reuse it instead of blindly creating a new user, which would
+      // otherwise crash on the email unique constraint.
+      const user =
+        (await tx.user.findFirst({ where: { email: OFFICIAL_HOST_EMAIL } })) ??
+        (await tx.user.create({
+          data: {
+            firebaseUid: `system-${randomUUID()}`,
+            email: OFFICIAL_HOST_EMAIL,
+            firstName: 'Meetday',
+            lastName: 'Official',
+            roleId: hostRole.id,
+          },
+        }));
+
       return tx.hostProfile.create({
         data: {
           userId: user.id,
