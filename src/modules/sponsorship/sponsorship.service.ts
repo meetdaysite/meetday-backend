@@ -430,6 +430,7 @@ export class SponsorshipService {
         name: true,
         about: true,
         logoKey: true,
+        secondaryImageKey: true,
         size: true,
         avgGuestCount: true,
         experiencesPerYear: true,
@@ -445,9 +446,10 @@ export class SponsorshipService {
     });
 
     const communities = await Promise.all(
-      profiles.map(async ({ logoKey, categories, hostProfile, ...rest }) => ({
+      profiles.map(async ({ logoKey, secondaryImageKey, categories, hostProfile, ...rest }) => ({
         ...rest,
         logoUrl: logoKey ? await this.storageService.getPresignedDownloadUrl(logoKey) : null,
+        secondaryImageUrl: secondaryImageKey ? await this.storageService.getPresignedDownloadUrl(secondaryImageKey) : null,
         categories: categories.map((c) => c.category),
         operatingCities: hostProfile?.operatingCities ?? [],
         socialLinks: hostProfile?.socialLinks ?? null,
