@@ -2153,7 +2153,8 @@ export class AdminService {
       },
     });
 
-    if (dto.socialLinks) {
+    // Guards against an empty/all-blank object wiping the host's existing social links.
+    if (dto.socialLinks && Object.values(dto.socialLinks).some(Boolean)) {
       await this.prisma.hostProfile.update({
         where: { id: hostProfile.id },
         data: { socialLinks: JSON.parse(JSON.stringify(dto.socialLinks)) },
@@ -2221,7 +2222,8 @@ export class AdminService {
       },
     });
 
-    if (dto.socialLinks !== undefined) {
+    // Guards against an empty/all-blank object wiping the host's existing social links.
+    if (dto.socialLinks && Object.values(dto.socialLinks).some(Boolean)) {
       await this.prisma.hostProfile.update({
         where: { id: existing.hostProfileId },
         data: { socialLinks: JSON.parse(JSON.stringify(dto.socialLinks)) },
