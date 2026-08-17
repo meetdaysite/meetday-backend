@@ -2153,6 +2153,13 @@ export class AdminService {
       },
     });
 
+    if (dto.socialLinks) {
+      await this.prisma.hostProfile.update({
+        where: { id: hostProfile.id },
+        data: { socialLinks: JSON.parse(JSON.stringify(dto.socialLinks)) },
+      });
+    }
+
     this.auditLogService.log({
       actorId: adminId,
       actorRole: 'ADMIN',
@@ -2179,7 +2186,10 @@ export class AdminService {
   // (no pendingRevision staging), unlike the host-side edit flow which stages changes for
   // review once a profile is already APPROVED.
   async updateCommunityProfileAsAdmin(id: string, adminId: string, dto: UpdateAdminCommunityProfileDto) {
-    const existing = await this.prisma.hostCommunityProfile.findUnique({ where: { id }, select: { id: true } });
+    const existing = await this.prisma.hostCommunityProfile.findUnique({
+      where: { id },
+      select: { id: true, hostProfileId: true },
+    });
     if (!existing) throw new NotFoundException('Community profile not found');
 
     if (dto.categoryIds) {
@@ -2210,6 +2220,13 @@ export class AdminService {
         }),
       },
     });
+
+    if (dto.socialLinks !== undefined) {
+      await this.prisma.hostProfile.update({
+        where: { id: existing.hostProfileId },
+        data: { socialLinks: JSON.parse(JSON.stringify(dto.socialLinks)) },
+      });
+    }
 
     this.auditLogService.log({
       actorId: adminId,

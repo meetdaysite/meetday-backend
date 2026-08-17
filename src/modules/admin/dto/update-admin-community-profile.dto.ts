@@ -1,5 +1,7 @@
-import { IsArray, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsArray, IsOptional, IsString, IsUUID, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { SocialLinksDto } from '../../hosts/dto/apply-host.dto';
 
 // Full admin edit of an existing community profile — every field optional, only the fields
 // provided are updated. Writes directly (no pendingRevision staging) and works regardless of
@@ -46,4 +48,12 @@ export class UpdateAdminCommunityProfileDto {
   @IsArray()
   @IsUUID('4', { each: true })
   categoryIds?: string[];
+
+  // Written onto the host's own profile (not the community profile row) — same shape as the
+  // host-side ApplyHostDto/UpdateHostProfileDto socialLinks field.
+  @ApiPropertyOptional({ type: SocialLinksDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SocialLinksDto)
+  socialLinks?: SocialLinksDto;
 }
