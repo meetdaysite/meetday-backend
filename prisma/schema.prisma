@@ -415,12 +415,12 @@ model BrandProfile {
   socialLinks Json? // { instagram, linkedin, youtube, website }
 
   // Step 2 profile creation fields — all optional/skippable.
-  workEmail     String?
-  contactPhone  String?
-  logoKey       String? // GCS object key for the company logo
-  companyType   CompanyType?
-  aboutCompany  String? @db.Text
-  industry      String? // preset dropdown value or free text ("Custom")
+  workEmail    String?
+  contactPhone String?
+  logoKey      String? // GCS object key for the company logo
+  companyType  CompanyType?
+  aboutCompany String?      @db.Text
+  industry     String? // preset dropdown value or free text ("Custom")
 
   categories BrandExperienceCategory[]
   interests  SponsorshipInterest[]
@@ -979,14 +979,14 @@ model SponsorshipProposal {
   hostProfileId String
 
   name            String
-  about           String   @db.Text
+  about           String    @db.Text
   imageKey        String // GCS object key for the cover image
   eventDate       DateTime
   eventEndDate    DateTime?
   venue           String // deprecated — first entry of `venues`, kept for backward compatibility
-  venues          String[] @default([])
+  venues          String[]  @default([])
   city            String // deprecated — first entry of `venueCities`, kept for backward compatibility
-  venueCities     String[] @default([]) // per-venue city, index-matched with `venues`
+  venueCities     String[]  @default([]) // per-venue city, index-matched with `venues`
   audienceProfile String[]
   ageGroup        String
   guestCount      String
@@ -1056,7 +1056,7 @@ model HostCommunityProfile {
   hostProfile   HostProfile @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
 
   name               String
-  about              String @db.Text
+  about              String  @db.Text
   logoKey            String // GCS object key for the community logo
   size               String
   avgGuestCount      String
@@ -1446,6 +1446,7 @@ enum AuditAction {
   // Sponsorship proposal lifecycle
   SPONSORSHIP_PROPOSAL_CREATED
   SPONSORSHIP_PROPOSAL_CREATED_BY_ADMIN
+  SPONSORSHIP_PROPOSAL_EDITED_BY_ADMIN
   SPONSORSHIP_PROPOSAL_SUBMITTED
   SPONSORSHIP_PROPOSAL_APPROVED
   SPONSORSHIP_PROPOSAL_REJECTED
@@ -1459,6 +1460,7 @@ enum AuditAction {
 
   // Host community profile lifecycle
   COMMUNITY_PROFILE_APPROVED
+  COMMUNITY_PROFILE_EDITED_BY_ADMIN
   COMMUNITY_PROFILE_REJECTED
   COMMUNITY_PROFILE_REVISION_APPROVED
   COMMUNITY_PROFILE_REVISION_REJECTED

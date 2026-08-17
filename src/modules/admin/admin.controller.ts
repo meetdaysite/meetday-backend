@@ -56,8 +56,10 @@ import { ListSponsorshipsQueryDto } from './dto/list-sponsorships-query.dto';
 import { ListCommunityProfilesQueryDto } from './dto/list-community-profiles-query.dto';
 import { ListBrandsQueryDto } from './dto/list-brands-query.dto';
 import { CreateAdminSponsorshipDto } from './dto/create-admin-sponsorship.dto';
+import { UpdateAdminSponsorshipDto } from './dto/update-admin-sponsorship.dto';
 import { ListEligibleHostsQueryDto } from './dto/list-eligible-hosts-query.dto';
 import { CreateAdminCommunityProfileDto } from './dto/create-admin-community-profile.dto';
+import { UpdateAdminCommunityProfileDto } from './dto/update-admin-community-profile.dto';
 import { UpdateGstRateDto } from './dto/update-gst-rate.dto';
 import { UpdatePlanFeeRateDto } from './dto/update-plan-fee-rate.dto';
 import { CreateHostFeePromoDto } from './dto/create-host-fee-promo.dto';
@@ -1396,6 +1398,25 @@ export class AdminController {
     return this.adminService.getSponsorshipDetail(id);
   }
 
+  @Patch('sponsorships/:id')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @ApiOperation({
+    summary: 'Edit a sponsorship proposal directly (admin)',
+    description:
+      'Updates any/all fields on a proposal, regardless of who created it or its current status. ' +
+      'Writes directly — no review/approval step, unlike the host-side edit flow.',
+  })
+  @ApiParam({ name: 'id', description: 'Proposal UUID' })
+  @ApiOkResponse({ description: 'Proposal updated.' })
+  @ApiNotFoundResponse({ description: 'Proposal not found.' })
+  updateSponsorship(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateAdminSponsorshipDto,
+    @GetUser('id') adminId: string,
+  ) {
+    return this.adminService.updateSponsorshipAsAdmin(id, adminId, dto);
+  }
+
   @Get('sponsorships/brands/interested')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({
@@ -1546,6 +1567,25 @@ export class AdminController {
   @ApiNotFoundResponse({ description: 'Community profile not found.' })
   getCommunityProfileDetail(@Param('id', ParseUUIDPipe) id: string) {
     return this.adminService.getCommunityProfileDetail(id);
+  }
+
+  @Patch('community-profiles/:id')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @ApiOperation({
+    summary: 'Edit a community profile directly (admin)',
+    description:
+      'Updates any/all fields on a community profile, regardless of who created it or its current ' +
+      'approvalStatus. Writes directly — no review/approval step, unlike the host-side edit flow.',
+  })
+  @ApiParam({ name: 'id', description: 'Community profile UUID' })
+  @ApiOkResponse({ description: 'Community profile updated.' })
+  @ApiNotFoundResponse({ description: 'Community profile not found.' })
+  updateCommunityProfile(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateAdminCommunityProfileDto,
+    @GetUser('id') adminId: string,
+  ) {
+    return this.adminService.updateCommunityProfileAsAdmin(id, adminId, dto);
   }
 
   // ─── Brands ─────────────────────────────────────────────────────────────

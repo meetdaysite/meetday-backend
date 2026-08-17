@@ -33,8 +33,10 @@ import { ListSponsorshipsQueryDto } from './dto/list-sponsorships-query.dto';
 import { ListCommunityProfilesQueryDto } from './dto/list-community-profiles-query.dto';
 import { ListBrandsQueryDto, BrandProfileStatus } from './dto/list-brands-query.dto';
 import { CreateAdminSponsorshipDto } from './dto/create-admin-sponsorship.dto';
+import { UpdateAdminSponsorshipDto } from './dto/update-admin-sponsorship.dto';
 import { ListEligibleHostsQueryDto } from './dto/list-eligible-hosts-query.dto';
 import { CreateAdminCommunityProfileDto } from './dto/create-admin-community-profile.dto';
+import { UpdateAdminCommunityProfileDto } from './dto/update-admin-community-profile.dto';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { UpdateGstRateDto } from './dto/update-gst-rate.dto';
 import { UpdatePlanFeeRateDto } from './dto/update-plan-fee-rate.dto';
@@ -1662,6 +1664,69 @@ export class AdminService {
     return { ...proposal, imageUrl, docUrl };
   }
 
+  // Full admin edit of an existing proposal, any status — writes directly (no
+  // pendingRevision staging), unlike the host-side edit flow which stages changes for
+  // review once a proposal is UNDER_REVIEW or PUBLISHED.
+  async updateSponsorshipAsAdmin(id: string, adminId: string, dto: UpdateAdminSponsorshipDto) {
+    const existing = await this.prisma.sponsorshipProposal.findUnique({ where: { id }, select: { id: true } });
+    if (!existing) throw new NotFoundException('Sponsorship proposal not found');
+
+    if (dto.hostProfileId) {
+      const hostProfile = await this.prisma.hostProfile.findUnique({
+        where: { id: dto.hostProfileId },
+        select: { id: true },
+      });
+      if (!hostProfile) throw new NotFoundException('Host profile not found');
+    }
+
+    const proposal = await this.prisma.sponsorshipProposal.update({
+      where: { id },
+      data: {
+        ...(dto.hostProfileId !== undefined && { hostProfileId: dto.hostProfileId }),
+        ...(dto.name !== undefined && { name: dto.name }),
+        ...(dto.about !== undefined && { about: dto.about }),
+        ...(dto.imageKey !== undefined && { imageKey: dto.imageKey }),
+        ...(dto.eventDate !== undefined && { eventDate: new Date(dto.eventDate) }),
+        ...(dto.eventEndDate !== undefined && { eventEndDate: new Date(dto.eventEndDate) }),
+        ...(dto.venues !== undefined && { venues: dto.venues, venue: dto.venues[0] ?? '' }),
+        ...(dto.venueCities !== undefined && { venueCities: dto.venueCities, city: dto.venueCities[0] ?? '' }),
+        ...(dto.audienceProfile !== undefined && { audienceProfile: dto.audienceProfile }),
+        ...(dto.ageGroup !== undefined && { ageGroup: dto.ageGroup }),
+        ...(dto.guestCount !== undefined && { guestCount: dto.guestCount }),
+        ...(dto.docKey !== undefined && { docKey: dto.docKey }),
+        ...(dto.docName !== undefined && { docName: dto.docName }),
+        ...(dto.docType !== undefined && { docType: dto.docType }),
+        ...(dto.docSize !== undefined && { docSize: dto.docSize }),
+        ...(dto.sponsorTiers !== undefined && { sponsorTiers: dto.sponsorTiers as unknown as Prisma.InputJsonValue }),
+      },
+      include: {
+        hostProfile: {
+          select: {
+            id: true,
+            displayName: true,
+            user: { select: { id: true, firstName: true, lastName: true, email: true } },
+          },
+        },
+      },
+    });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'SPONSORSHIP_PROPOSAL_EDITED_BY_ADMIN',
+      entityType: 'SPONSORSHIP_PROPOSAL',
+      entityId: proposal.id,
+      metadata: { name: proposal.name },
+    });
+
+    const [imageUrl, docUrl] = await Promise.all([
+      this.storageService.getPresignedDownloadUrl(proposal.imageKey),
+      this.storageService.getPresignedDownloadUrl(proposal.docKey),
+    ]);
+
+    return { ...proposal, imageUrl, docUrl };
+  }
+
   async approveSponsorship(id: string, adminId: string) {
     const proposal = await this.prisma.sponsorshipProposal.findUnique({
       where: { id },
@@ -2077,6 +2142,7 @@ export class AdminService {
         name: dto.name,
         about: dto.about,
         logoKey: dto.logoKey,
+        secondaryImageKey: dto.secondaryImageKey,
         size: dto.size,
         avgGuestCount: dto.avgGuestCount,
         experiencesPerYear: dto.experiencesPerYear,
@@ -2107,6 +2173,54 @@ export class AdminService {
       .catch((err) => this.logger.error('Failed to create community_profile_approved notification', err));
 
     return this.getCommunityProfileDetail(communityProfile.id);
+  }
+
+  // Full admin edit of an existing community profile, any approvalStatus — writes directly
+  // (no pendingRevision staging), unlike the host-side edit flow which stages changes for
+  // review once a profile is already APPROVED.
+  async updateCommunityProfileAsAdmin(id: string, adminId: string, dto: UpdateAdminCommunityProfileDto) {
+    const existing = await this.prisma.hostCommunityProfile.findUnique({ where: { id }, select: { id: true } });
+    if (!existing) throw new NotFoundException('Community profile not found');
+
+    if (dto.categoryIds) {
+      const validCategories = await this.prisma.category.findMany({
+        where: { id: { in: dto.categoryIds } },
+        select: { id: true },
+      });
+      if (validCategories.length !== dto.categoryIds.length) {
+        throw new BadRequestException('One or more category IDs are invalid');
+      }
+    }
+
+    await this.prisma.hostCommunityProfile.update({
+      where: { id },
+      data: {
+        ...(dto.name !== undefined && { name: dto.name }),
+        ...(dto.about !== undefined && { about: dto.about }),
+        ...(dto.logoKey !== undefined && { logoKey: dto.logoKey }),
+        ...(dto.secondaryImageKey !== undefined && { secondaryImageKey: dto.secondaryImageKey || null }),
+        ...(dto.size !== undefined && { size: dto.size }),
+        ...(dto.avgGuestCount !== undefined && { avgGuestCount: dto.avgGuestCount }),
+        ...(dto.experiencesPerYear !== undefined && { experiencesPerYear: dto.experiencesPerYear }),
+        ...(dto.categoryIds !== undefined && {
+          categories: {
+            deleteMany: {},
+            create: dto.categoryIds.map((categoryId) => ({ categoryId })),
+          },
+        }),
+      },
+    });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'COMMUNITY_PROFILE_EDITED_BY_ADMIN',
+      entityType: 'HOST_COMMUNITY_PROFILE',
+      entityId: id,
+      metadata: { name: dto.name },
+    });
+
+    return this.getCommunityProfileDetail(id);
   }
 
   // Prisma returns the categories relation nested as { category: { id, name } }[] — flatten it

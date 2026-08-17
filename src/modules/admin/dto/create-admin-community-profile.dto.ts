@@ -1,5 +1,5 @@
-import { IsArray, IsString, IsUUID } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsArray, IsOptional, IsString, IsUUID } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 // Admin creates the community profile already-approved for a host who doesn't have one yet,
 // bypassing the normal PENDING → admin-review flow (see ActivateCommunityDto for the host-side
@@ -21,9 +21,15 @@ export class CreateAdminCommunityProfileDto {
   @IsString()
   logoKey: string;
 
+  @ApiPropertyOptional({ description: 'Optional GCS object key for the secondary 4:5 image' })
+  @IsOptional()
+  @IsString()
+  secondaryImageKey?: string;
+
   @ApiProperty({ example: '250' })
   @IsString()
   size: string;
+
 
   @ApiProperty({ example: '60' })
   @IsString()
