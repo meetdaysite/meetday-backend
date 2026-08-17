@@ -120,11 +120,13 @@ export class SponsorshipController {
   }
 
   @Get('published/:id')
-  @UseGuards(RolesGuard)
-  @Roles('BRAND')
+  @Public()
+  @UseGuards(OptionalAuthGuard)
   @ApiOperation({
     summary: 'Get a published sponsorship proposal detail (brand view)',
-    description: "Full proposal detail plus the host's community profile, for the brand 'data room' view.",
+    description:
+      "Full proposal detail plus the host's community profile. Accessible without login so a " +
+      "host's shareable proposal link can render a preview before gating on brand sign-in.",
   })
   @ApiOkResponse({ description: 'Proposal detail with community profile.' })
   @ApiNotFoundResponse({ description: 'Proposal not found or not published.' })
