@@ -35,4 +35,14 @@ export class SendAnnouncementDto {
   @MinLength(1)
   @MaxLength(5000)
   message: string;
+
+  @ApiPropertyOptional({
+    example: 'All Brands, 3 Host(s)',
+    description: 'Human-readable recipient summary for the Past Announcements history list.',
+    maxLength: 200,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  recipientsSummary?: string;
 }

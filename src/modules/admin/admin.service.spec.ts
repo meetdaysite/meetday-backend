@@ -47,6 +47,7 @@ function makePrisma() {
     hostProfile: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn(), count: jest.fn() },
     hostCommunityProfile: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn(), create: jest.fn() },
     brandProfile: { findMany: jest.fn() },
+    adminAnnouncement: { create: jest.fn().mockResolvedValue({ id: 'announcement-uuid' }), findMany: jest.fn(), count: jest.fn() },
     coupon: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn(), count: jest.fn() },
     category: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn() },
     event: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
@@ -674,6 +675,21 @@ describe('AdminService', () => {
     it('throws BadRequestException when no recipients match', async () => {
       await expect(service.sendAnnouncement({ message: 'Hi' }, adminId)).rejects.toThrow(BadRequestException);
       expect(mockMailQueue.add).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── listAnnouncements() ──────────────────────────────────────────────────
+
+  describe('listAnnouncements()', () => {
+    it('returns a paginated, newest-first list', async () => {
+      prisma.adminAnnouncement.findMany.mockResolvedValue([{ id: 'a1', subject: 'Hi', recipientCount: 3 }]);
+      prisma.adminAnnouncement.count.mockResolvedValue(1);
+
+      const result = await service.listAnnouncements({});
+      expect(result).toEqual({ announcements: [{ id: 'a1', subject: 'Hi', recipientCount: 3 }], total: 1, page: 1, limit: 20 });
+      expect(prisma.adminAnnouncement.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ orderBy: { createdAt: 'desc' } }),
+      );
     });
   });
 

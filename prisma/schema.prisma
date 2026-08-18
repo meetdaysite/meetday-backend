@@ -80,6 +80,8 @@ model User {
   auditLogs      AuditLog[]      @relation("AuditLogActor")
   consentRecords ConsentRecord[]
 
+  sentAdminAnnouncements AdminAnnouncement[] @relation("AdminAnnouncementSentBy")
+
   createdCommunities   Community[]       @relation("CommunityCreatedBy")
   communityMemberships CommunityMember[]
 
@@ -1391,6 +1393,24 @@ model AuditLog {
   @@index([action])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+// One row per admin "Send Announcement" broadcast — real mail already went out (queued) by the
+// time this is written; this is purely a history record for the admin panel's Past Announcements list.
+model AdminAnnouncement {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  subject           String
+  message           String
+  recipientCount    Int
+  recipientsSummary String // human-readable, e.g. "All Brands, 3 Host(s)" — precomputed by the caller
+
+  sentById String
+  sentBy   User   @relation("AdminAnnouncementSentBy", fields: [sentById], references: [id])
+
+  @@index([createdAt])
+  @@map("admin_announcements")
 }
 
 model ConsentRecord {

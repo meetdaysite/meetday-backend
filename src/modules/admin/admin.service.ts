@@ -44,6 +44,7 @@ import { CreateHostFeePromoDto } from './dto/create-host-fee-promo.dto';
 import { UpdateHostFeePromoDto } from './dto/update-host-fee-promo.dto';
 import { UpdateAdminProfileDto } from './dto/update-admin-profile.dto';
 import { SendAnnouncementDto } from './dto/send-announcement.dto';
+import { ListAnnouncementsQueryDto } from './dto/list-announcements-query.dto';
 import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RedisService } from '../../common/redis/redis.service';
@@ -2084,16 +2085,52 @@ export class AdminService {
         .catch((err) => this.logger.error('Failed to queue announcement mail', err));
     }
 
+    const recipientsSummary =
+      dto.recipientsSummary?.trim() ||
+      [
+        dto.allBrands ? 'All Brands' : dto.brandIds?.length ? `${dto.brandIds.length} Brand(s)` : null,
+        dto.allCommunity ? 'All Community' : dto.hostIds?.length ? `${dto.hostIds.length} Host(s)` : null,
+      ]
+        .filter(Boolean)
+        .join(', ');
+
+    const record = await this.prisma.adminAnnouncement.create({
+      data: {
+        subject,
+        message: dto.message,
+        recipientCount: emails.length,
+        recipientsSummary,
+        sentById: adminId,
+      },
+    });
+
     this.auditLogService.log({
       actorId: adminId,
       actorRole: 'ADMIN',
       action: 'ADMIN_ANNOUNCEMENT_SENT',
       entityType: 'ANNOUNCEMENT',
-      entityId: adminId,
+      entityId: record.id,
       metadata: { recipientCount: emails.length, subject, allBrands: !!dto.allBrands, allCommunity: !!dto.allCommunity },
     });
 
     return { queued: emails.length };
+  }
+
+  async listAnnouncements(query: ListAnnouncementsQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const [announcements, total] = await Promise.all([
+      this.prisma.adminAnnouncement.findMany({
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: { sentBy: { select: { firstName: true, lastName: true, email: true } } },
+      }),
+      this.prisma.adminAnnouncement.count(),
+    ]);
+
+    return { announcements, total, page, limit };
   }
 
   async getCommunityProfileDetail(id: string) {

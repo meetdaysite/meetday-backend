@@ -66,6 +66,7 @@ import { CreateHostFeePromoDto } from './dto/create-host-fee-promo.dto';
 import { UpdateHostFeePromoDto } from './dto/update-host-fee-promo.dto';
 import { UpdateAdminProfileDto } from './dto/update-admin-profile.dto';
 import { SendAnnouncementDto } from './dto/send-announcement.dto';
+import { ListAnnouncementsQueryDto } from './dto/list-announcements-query.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth('firebase-token')
@@ -1621,6 +1622,17 @@ export class AdminController {
   @ApiBadRequestResponse({ description: 'No recipients matched the given selection.' })
   sendAnnouncement(@Body() dto: SendAnnouncementDto, @GetUser('id') adminId: string) {
     return this.adminService.sendAnnouncement(dto, adminId);
+  }
+
+  @Get('announcements')
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({
+    summary: 'List past announcements sent to brands/hosts',
+    description: 'Paginated history of mass-emails sent via `POST /admin/announcements/send`, newest first.',
+  })
+  @ApiOkResponse({ description: 'Paginated list of past announcements.' })
+  listAnnouncements(@Query() query: ListAnnouncementsQueryDto) {
+    return this.adminService.listAnnouncements(query);
   }
 
   @Post('brands/:id/approve')
