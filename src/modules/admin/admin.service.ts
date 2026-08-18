@@ -76,10 +76,12 @@ export class AdminService {
   async listAdmins(query: ListAdminsQueryDto) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
-    const END_USER_ROLES = ['USER', 'HOST'];
+    // Include-list, not exclude-list — an exclude-list (e.g. just USER/HOST) silently
+    // lets any other non-admin role (BRAND, etc.) leak into this list as new roles are added.
+    const ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT'];
 
     const where: any = {
-      role: { name: { notIn: END_USER_ROLES } },
+      role: { name: { in: ADMIN_ROLES } },
     };
 
     if (query.role) where.role = { name: query.role };
