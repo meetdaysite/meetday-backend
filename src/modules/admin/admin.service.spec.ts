@@ -182,11 +182,11 @@ describe('AdminService', () => {
       await expect(service.inviteAdmin(dto)).rejects.toThrow(ConflictException);
     });
 
-    it('throws BadRequestException when trying to grant SUPER_ADMIN', async () => {
+    it('allows granting SUPER_ADMIN via invite', async () => {
       prisma.role.findUnique.mockResolvedValue(superAdminRole);
-      await expect(service.inviteAdmin({ ...dto, roleId: superAdminRole.id })).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        service.inviteAdmin({ ...dto, roleId: superAdminRole.id }),
+      ).resolves.toEqual({ message: 'Invitation sent' });
     });
 
     it('throws BadRequestException for CITY_ADMIN without managedCities', async () => {

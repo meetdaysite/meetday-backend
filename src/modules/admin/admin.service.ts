@@ -109,7 +109,7 @@ export class AdminService {
   }
 
   async getRoles(query: ListRolesQueryDto) {
-    const END_USER_ROLES = ['USER', 'HOST', 'SUPER_ADMIN'];
+    const END_USER_ROLES = ['USER', 'HOST'];
 
     return this.prisma.role.findMany({
       where: query.adminOnly ? { name: { notIn: END_USER_ROLES } } : undefined,
@@ -119,13 +119,10 @@ export class AdminService {
   }
 
   async inviteAdmin(dto: InviteAdminDto) {
-    // Look up the role and guard against SUPER_ADMIN escalation
+    // Look up the role
     const role = await this.prisma.role.findUnique({ where: { id: dto.roleId } });
     if (!role) {
       throw new BadRequestException('Invalid roleId');
-    }
-    if (role.name === 'SUPER_ADMIN') {
-      throw new BadRequestException('SUPER_ADMIN cannot be granted via this endpoint');
     }
     if (role.name === 'CITY_ADMIN' && (!dto.managedCities || dto.managedCities.length === 0)) {
       throw new BadRequestException('managedCities is required for CITY_ADMIN');

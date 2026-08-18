@@ -21,8 +21,7 @@ export class InviteAdminDto {
   @ApiProperty({
     example: 'a3f2c1d4-0000-0000-0000-000000000001',
     description:
-      'UUID of the role to assign. Fetch available roles from GET /admin/roles?adminOnly=true. ' +
-      'SUPER_ADMIN cannot be granted via this endpoint.',
+      'UUID of the role to assign. Fetch available roles from GET /admin/roles?adminOnly=true.',
   })
   @IsUUID('4')
   roleId: string;

@@ -184,7 +184,7 @@ export class AdminController {
       'The invited admin **cannot log in** until they click the link and set a password. ' +
       'After setting their password they must call `POST /auth/complete-profile` to fill in ' +
       'their name and activate their account.\n\n' +
-      '**Assignable roles:** `CITY_ADMIN`, `MODERATOR`, `SUPPORT` — `SUPER_ADMIN` cannot be granted here.\n\n' +
+      '**Assignable roles:** `SUPER_ADMIN`, `CITY_ADMIN`, `MODERATOR`, `SUPPORT`.\n\n' +
       'Only `SUPER_ADMIN` can call this endpoint.',
   })
   @ApiBody({
