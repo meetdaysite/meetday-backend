@@ -82,6 +82,8 @@ model User {
 
   sentAdminAnnouncements AdminAnnouncement[] @relation("AdminAnnouncementSentBy")
 
+  sponsorshipChatMessages SponsorshipChatMessage[] @relation("SponsorshipChatSender")
+
   createdCommunities   Community[]       @relation("CommunityCreatedBy")
   communityMemberships CommunityMember[]
 
@@ -1044,10 +1046,49 @@ model SponsorshipInterest {
 
   createdAt DateTime @default(now())
 
+  // TriChat — Host ↔ Brand (+ Admin observing/participating) conversation tied to this interest.
+  // REQUESTED: brand has expressed interest, host hasn't accepted yet (shows in host's "Requests").
+  // ACCEPTED: host accepted, chat window is open both sides (shows in "General"/"Accepted").
+  chatStatus     SponsorshipChatStatus     @default(REQUESTED)
+  chatAcceptedAt DateTime?
+  chatMessages   SponsorshipChatMessage[]
+  lastMessageAt  DateTime?
+
   @@unique([sponsorshipProposalId, brandProfileId])
   @@index([sponsorshipProposalId])
   @@index([brandProfileId])
+  @@index([chatStatus])
   @@map("sponsorship_interests")
+}
+
+enum SponsorshipChatStatus {
+  REQUESTED
+  ACCEPTED
+}
+
+enum ChatSenderType {
+  HOST
+  BRAND
+  ADMIN
+}
+
+// One message in a TriChat thread. senderId is always a real User (host's user, brand's user,
+// or the admin who sent it) — senderType disambiguates which "hat" they sent it as.
+model SponsorshipChatMessage {
+  id                    String              @id @default(uuid())
+  sponsorshipInterestId String
+  sponsorshipInterest   SponsorshipInterest @relation(fields: [sponsorshipInterestId], references: [id], onDelete: Cascade)
+
+  senderType ChatSenderType
+  senderId   String
+  sender     User           @relation("SponsorshipChatSender", fields: [senderId], references: [id])
+
+  content String @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@index([sponsorshipInterestId, createdAt])
+  @@map("sponsorship_chat_messages")
 }
 
 // Host-facing "community profile" shown to potential sponsors on the sponsorship

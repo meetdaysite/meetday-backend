@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
-import { Prisma, SponsorshipStatus } from '@prisma/client';
+import { Prisma, SponsorshipStatus, SponsorshipChatStatus, ChatSenderType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -16,6 +16,8 @@ import { CreateProposalDto } from './dto/create-proposal.dto';
 import { UpdateProposalDto } from './dto/update-proposal.dto';
 import { ListProposalsQueryDto } from './dto/list-proposals-query.dto';
 import { ListPublishedQueryDto } from './dto/list-published-query.dto';
+import { ListSponsorshipChatsQueryDto } from './dto/list-sponsorship-chats-query.dto';
+import { SendChatMessageDto } from './dto/send-chat-message.dto';
 import { ADMIN_ALERT_EMAILS } from '../../common/mail/admin-recipients.constant';
 
 const ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'];
@@ -378,13 +380,14 @@ export class SponsorshipService {
       data: { sponsorshipProposalId: proposalId, brandProfileId: brandProfile.id },
     });
 
-    // Host/community notification is intentionally anonymized — never reveal the brand's identity.
+    // Host/community notification now reveals the brand's name — TriChat needs the host to know
+    // who is interested so they can decide whether to accept and start chatting.
     void this.notificationsService
       .create(
         proposal.hostProfile.user.id,
         'brand_interested_in_sponsorship',
-        'Someone is interested!',
-        'A brand is interested in your project.',
+        `${brandProfile.brandName} is interested!`,
+        'This brand is interested in your proposal. Check your Chats to respond.',
         { proposalId },
       )
       .catch((err) => this.logger.error('Failed to notify host of brand interest', err));
@@ -556,5 +559,151 @@ export class SponsorshipService {
       entityId: id,
     });
     return { message: 'Proposal deleted successfully', deleted: true };
+  }
+
+  // ── TriChat: Host \u2194 Brand chat tied to a SponsorshipInterest ────────────────
+  // "Requests" (chatStatus=REQUESTED) vs "General"/"Accepted" (chatStatus=ACCEPTED) is purely
+  // this status field \u2014 the frontend segments the same list by it, no separate query needed.
+
+  private async getOwnProfiles(userId: string) {
+    const [hostProfile, brandProfile] = await Promise.all([
+      this.prisma.hostProfile.findUnique({ where: { userId }, select: { id: true } }),
+      this.prisma.brandProfile.findUnique({ where: { userId }, select: { id: true } }),
+    ]);
+    return { hostProfile, brandProfile };
+  }
+
+  async listMyChats(userId: string, query: ListSponsorshipChatsQueryDto) {
+    const { hostProfile, brandProfile } = await this.getOwnProfiles(userId);
+    if (!hostProfile && !brandProfile) throw new NotFoundException('No host or brand profile found for this account');
+
+    const where: Prisma.SponsorshipInterestWhereInput = {
+      ...(query.status && { chatStatus: query.status }),
+      ...(hostProfile ? { sponsorshipProposal: { hostProfileId: hostProfile.id } } : { brandProfileId: brandProfile!.id }),
+    };
+
+    const interests = await this.prisma.sponsorshipInterest.findMany({
+      where,
+      include: {
+        sponsorshipProposal: {
+          select: {
+            id: true,
+            name: true,
+            hostProfile: { select: { displayName: true, communityProfile: { select: { name: true } } } },
+          },
+        },
+        brandProfile: { select: { id: true, brandName: true } },
+        chatMessages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true, senderType: true, createdAt: true } },
+      },
+      orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    return interests.map((i) => ({
+      id: i.id,
+      proposalId: i.sponsorshipProposal.id,
+      proposalName: i.sponsorshipProposal.name,
+      chatStatus: i.chatStatus,
+      createdAt: i.createdAt,
+      chatAcceptedAt: i.chatAcceptedAt,
+      lastMessageAt: i.lastMessageAt,
+      lastMessagePreview: i.chatMessages[0]?.content.slice(0, 120) ?? null,
+      // From the host's side, the counterpart is the brand; from the brand's side, it's the community.
+      counterpartName: hostProfile
+        ? i.brandProfile.brandName
+        : i.sponsorshipProposal.hostProfile.communityProfile?.name ?? i.sponsorshipProposal.hostProfile.displayName ?? 'Community',
+    }));
+  }
+
+  // Verifies the caller is either the host or the brand on this interest and returns which "hat"
+  // they're wearing, for use as senderType when they post a message.
+  private async getInterestForParticipant(userId: string, interestId: string) {
+    const interest = await this.prisma.sponsorshipInterest.findUnique({
+      where: { id: interestId },
+      include: {
+        sponsorshipProposal: {
+          select: { id: true, name: true, hostProfile: { select: { id: true, userId: true } } },
+        },
+        brandProfile: { select: { id: true, userId: true } },
+      },
+    });
+    if (!interest) throw new NotFoundException('Chat thread not found');
+
+    const isHost = interest.sponsorshipProposal.hostProfile.userId === userId;
+    const isBrand = interest.brandProfile.userId === userId;
+    if (!isHost && !isBrand) throw new ForbiddenException('You do not have access to this chat');
+
+    return { interest, senderType: isHost ? ChatSenderType.HOST : ChatSenderType.BRAND };
+  }
+
+  async listChatMessages(userId: string, interestId: string) {
+    const { interest } = await this.getInterestForParticipant(userId, interestId);
+    const messages = await this.prisma.sponsorshipChatMessage.findMany({
+      where: { sponsorshipInterestId: interest.id },
+      orderBy: { createdAt: 'asc' },
+      take: 200,
+      select: { id: true, senderType: true, senderId: true, content: true, createdAt: true },
+    });
+    return { messages, chatStatus: interest.chatStatus };
+  }
+
+  async sendChatMessage(userId: string, interestId: string, dto: SendChatMessageDto) {
+    const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
+    if (interest.chatStatus !== SponsorshipChatStatus.ACCEPTED) {
+      throw new BadRequestException('The community must accept this request before you can chat.');
+    }
+
+    const message = await this.prisma.sponsorshipChatMessage.create({
+      data: { sponsorshipInterestId: interest.id, senderType, senderId: userId, content: dto.content },
+    });
+    await this.prisma.sponsorshipInterest.update({
+      where: { id: interest.id },
+      data: { lastMessageAt: message.createdAt },
+    });
+
+    const recipientUserId =
+      senderType === ChatSenderType.HOST ? interest.brandProfile.userId : interest.sponsorshipProposal.hostProfile.userId;
+    const senderLabel = senderType === ChatSenderType.HOST ? 'The community' : 'The brand';
+    void this.notificationsService
+      .create(recipientUserId, 'sponsorship_chat_message', 'New message', `${senderLabel} sent you a message.`, {
+        sponsorshipInterestId: interest.id,
+      })
+      .catch((err) => this.logger.error('Failed to notify of new chat message', err));
+
+    return message;
+  }
+
+  // Host accepts a brand's interest \u2014 opens the chat window both sides ("Requests" \u2192 "General").
+  async acceptChatRequest(userId: string, interestId: string) {
+    const interest = await this.prisma.sponsorshipInterest.findUnique({
+      where: { id: interestId },
+      include: {
+        sponsorshipProposal: { select: { hostProfile: { select: { userId: true } } } },
+        brandProfile: { select: { userId: true, brandName: true } },
+      },
+    });
+    if (!interest) throw new NotFoundException('Chat thread not found');
+    if (interest.sponsorshipProposal.hostProfile.userId !== userId) {
+      throw new ForbiddenException('Only the host can accept this request');
+    }
+    if (interest.chatStatus === SponsorshipChatStatus.ACCEPTED) {
+      return { message: 'Already accepted', chatStatus: interest.chatStatus };
+    }
+
+    const updated = await this.prisma.sponsorshipInterest.update({
+      where: { id: interestId },
+      data: { chatStatus: SponsorshipChatStatus.ACCEPTED, chatAcceptedAt: new Date() },
+    });
+
+    void this.notificationsService
+      .create(
+        interest.brandProfile.userId,
+        'sponsorship_chat_accepted',
+        'Request accepted!',
+        'The community accepted your interest — you can now chat with them.',
+        { sponsorshipInterestId: interestId },
+      )
+      .catch((err) => this.logger.error('Failed to notify brand of accepted chat request', err));
+
+    return { message: 'Request accepted', chatStatus: updated.chatStatus };
   }
 }

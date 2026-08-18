@@ -35,6 +35,8 @@ import { UpdateProposalDto } from './dto/update-proposal.dto';
 import { ListProposalsQueryDto } from './dto/list-proposals-query.dto';
 import { ListPublishedQueryDto } from './dto/list-published-query.dto';
 import { GenerateProposalDraftDto } from './dto/generate-proposal-draft.dto';
+import { ListSponsorshipChatsQueryDto } from './dto/list-sponsorship-chats-query.dto';
+import { SendChatMessageDto } from './dto/send-chat-message.dto';
 
 @ApiTags('Sponsorship Proposals')
 @ApiBearerAuth('firebase-token')
@@ -149,6 +151,69 @@ export class SponsorshipController {
   @ApiBadRequestResponse({ description: 'Brand profile is incomplete.' })
   markInterest(@GetUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
     return this.sponsorshipService.markInterest(userId, id);
+  }
+
+  // ── TriChat ──────────────────────────────────────────────────────────────
+  // Registered before the generic ':id' route below so 'chats' isn't swallowed as a proposal id.
+
+  @Get('chats')
+  @UseGuards(RolesGuard)
+  @Roles('HOST', 'BRAND')
+  @ApiOperation({
+    summary: 'List my sponsorship chat threads',
+    description:
+      'Host sees one thread per interested brand on their proposals; a brand sees one thread per ' +
+      'proposal they expressed interest in. Filter by `status=REQUESTED` (not yet accepted) or ' +
+      '`status=ACCEPTED` (chat open) — omit for both.',
+  })
+  @ApiOkResponse({ description: 'List of chat threads.' })
+  listMyChats(@GetUser('id') userId: string, @Query() query: ListSponsorshipChatsQueryDto) {
+    return this.sponsorshipService.listMyChats(userId, query);
+  }
+
+  @Get('chats/:interestId/messages')
+  @UseGuards(RolesGuard)
+  @Roles('HOST', 'BRAND')
+  @ApiOperation({ summary: 'List messages in a chat thread' })
+  @ApiOkResponse({ description: 'Messages, oldest first.' })
+  @ApiForbiddenResponse({ description: 'Not a participant in this chat.' })
+  @ApiNotFoundResponse({ description: 'Chat thread not found.' })
+  listChatMessages(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string) {
+    return this.sponsorshipService.listChatMessages(userId, interestId);
+  }
+
+  @Post('chats/:interestId/messages')
+  @UseGuards(RolesGuard)
+  @Roles('HOST', 'BRAND')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Send a chat message',
+    description: 'Only allowed once the host has accepted the request (chatStatus=ACCEPTED).',
+  })
+  @ApiOkResponse({ description: 'Message sent.' })
+  @ApiForbiddenResponse({ description: 'Not a participant in this chat.' })
+  @ApiBadRequestResponse({ description: 'Request not yet accepted.' })
+  sendChatMessage(
+    @GetUser('id') userId: string,
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Body() dto: SendChatMessageDto,
+  ) {
+    return this.sponsorshipService.sendChatMessage(userId, interestId, dto);
+  }
+
+  @Post('chats/:interestId/accept')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Accept a brand's interest and open the chat",
+    description: 'Moves the thread from "Requests" to "General"/"Accepted" on both sides.',
+  })
+  @ApiOkResponse({ description: 'Request accepted.' })
+  @ApiForbiddenResponse({ description: 'Not the host who owns this proposal.' })
+  @ApiNotFoundResponse({ description: 'Chat thread not found.' })
+  acceptChatRequest(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string) {
+    return this.sponsorshipService.acceptChatRequest(userId, interestId);
   }
 
   @Get(':id')

@@ -48,6 +48,8 @@ function makePrisma() {
     hostCommunityProfile: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn(), create: jest.fn() },
     brandProfile: { findMany: jest.fn() },
     adminAnnouncement: { create: jest.fn().mockResolvedValue({ id: 'announcement-uuid' }), findMany: jest.fn(), count: jest.fn() },
+    sponsorshipInterest: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
+    sponsorshipChatMessage: { findMany: jest.fn(), create: jest.fn() },
     coupon: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn(), count: jest.fn() },
     category: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn() },
     event: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
@@ -1196,6 +1198,50 @@ describe('AdminService', () => {
     it('throws NotFoundException when interest not found', async () => {
       prisma.interest.findUnique.mockResolvedValue(null);
       await expect(service.updateInterest('bad-id', { name: 'X' })).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // \u2500\u2500 TriChat (admin) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+  describe('sponsorship chats (TriChat)', () => {
+    it('listSponsorshipChats() maps threads with a counterpart summary', async () => {
+      prisma.sponsorshipInterest.findMany.mockResolvedValue([
+        {
+          id: 'interest-1',
+          chatStatus: 'REQUESTED',
+          createdAt: new Date(),
+          chatAcceptedAt: null,
+          lastMessageAt: null,
+          sponsorshipProposal: { id: 'prop-1', name: 'Summer Fest', hostProfile: { displayName: 'Host', communityProfile: null } },
+          brandProfile: { id: 'brand-1', brandName: 'Acme' },
+          chatMessages: [],
+        },
+      ]);
+
+      const result = await service.listSponsorshipChats({});
+      expect(result).toEqual([
+        expect.objectContaining({ id: 'interest-1', proposalName: 'Summer Fest', brandName: 'Acme', communityName: 'Host' }),
+      ]);
+    });
+
+    it('sendSponsorshipChatMessage() posts as ADMIN and notifies both host and brand', async () => {
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue({
+        id: 'interest-1',
+        sponsorshipProposal: { hostProfile: { userId: 'host-user' } },
+        brandProfile: { userId: 'brand-user' },
+      });
+      prisma.sponsorshipChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
+
+      await service.sendSponsorshipChatMessage('interest-1', 'admin-uuid', { content: 'Hi from Meetday' });
+
+      expect(prisma.sponsorshipChatMessage.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ senderType: 'ADMIN', senderId: 'admin-uuid' }) }),
+      );
+    });
+
+    it('getSponsorshipChatMessages() throws NotFoundException for an unknown thread', async () => {
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue(null);
+      await expect(service.getSponsorshipChatMessages('bad-id')).rejects.toThrow(NotFoundException);
     });
   });
 });

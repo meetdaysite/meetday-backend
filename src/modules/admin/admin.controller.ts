@@ -67,6 +67,8 @@ import { UpdateHostFeePromoDto } from './dto/update-host-fee-promo.dto';
 import { UpdateAdminProfileDto } from './dto/update-admin-profile.dto';
 import { SendAnnouncementDto } from './dto/send-announcement.dto';
 import { ListAnnouncementsQueryDto } from './dto/list-announcements-query.dto';
+import { ListSponsorshipChatsQueryDto } from '../sponsorship/dto/list-sponsorship-chats-query.dto';
+import { SendChatMessageDto } from '../sponsorship/dto/send-chat-message.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth('firebase-token')
@@ -1633,6 +1635,45 @@ export class AdminController {
   @ApiOkResponse({ description: 'Paginated list of past announcements.' })
   listAnnouncements(@Query() query: ListAnnouncementsQueryDto) {
     return this.adminService.listAnnouncements(query);
+  }
+
+  // ─── TriChat (admin oversight) ──────────────────────────────────────────
+
+  @Get('sponsorship-chats')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({
+    summary: 'List every Host \u2194 Brand chat thread',
+    description: 'Admin "Ongoing Chats" view \u2014 every sponsorship interest across all hosts/brands, newest activity first.',
+  })
+  @ApiOkResponse({ description: 'List of chat threads.' })
+  listSponsorshipChats(@Query() query: ListSponsorshipChatsQueryDto) {
+    return this.adminService.listSponsorshipChats(query);
+  }
+
+  @Get('sponsorship-chats/:interestId/messages')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({ summary: 'List messages in a Host \u2194 Brand chat thread' })
+  @ApiOkResponse({ description: 'Messages, oldest first.' })
+  @ApiNotFoundResponse({ description: 'Chat thread not found.' })
+  getSponsorshipChatMessages(@Param('interestId', ParseUUIDPipe) interestId: string) {
+    return this.adminService.getSponsorshipChatMessages(interestId);
+  }
+
+  @Post('sponsorship-chats/:interestId/messages')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Send a message into a Host \u2194 Brand chat thread as Meetday',
+    description: 'Posted as "Meetday" to both the host and the brand \u2014 usable any time, regardless of accept status.',
+  })
+  @ApiOkResponse({ description: 'Message sent.' })
+  @ApiNotFoundResponse({ description: 'Chat thread not found.' })
+  sendSponsorshipChatMessage(
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Body() dto: SendChatMessageDto,
+    @GetUser('id') adminId: string,
+  ) {
+    return this.adminService.sendSponsorshipChatMessage(interestId, adminId, dto);
   }
 
   @Post('brands/:id/approve')

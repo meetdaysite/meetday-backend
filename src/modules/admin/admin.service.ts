@@ -45,6 +45,8 @@ import { UpdateHostFeePromoDto } from './dto/update-host-fee-promo.dto';
 import { UpdateAdminProfileDto } from './dto/update-admin-profile.dto';
 import { SendAnnouncementDto } from './dto/send-announcement.dto';
 import { ListAnnouncementsQueryDto } from './dto/list-announcements-query.dto';
+import { ListSponsorshipChatsQueryDto } from '../sponsorship/dto/list-sponsorship-chats-query.dto';
+import { SendChatMessageDto } from '../sponsorship/dto/send-chat-message.dto';
 import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RedisService } from '../../common/redis/redis.service';
@@ -2131,6 +2133,74 @@ export class AdminService {
     ]);
 
     return { announcements, total, page, limit };
+  }
+
+  // ── TriChat: admin observes/participates in every Host \u2194 Brand chat thread ─────
+
+  async listSponsorshipChats(query: ListSponsorshipChatsQueryDto) {
+    const threads = await this.prisma.sponsorshipInterest.findMany({
+      where: query.status ? { chatStatus: query.status } : undefined,
+      include: {
+        sponsorshipProposal: {
+          select: { id: true, name: true, hostProfile: { select: { displayName: true, communityProfile: { select: { name: true } } } } },
+        },
+        brandProfile: { select: { id: true, brandName: true } },
+        chatMessages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true, senderType: true, createdAt: true } },
+      },
+      orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    return threads.map((t) => ({
+      id: t.id,
+      proposalId: t.sponsorshipProposal.id,
+      proposalName: t.sponsorshipProposal.name,
+      communityName: t.sponsorshipProposal.hostProfile.communityProfile?.name ?? t.sponsorshipProposal.hostProfile.displayName ?? 'Community',
+      brandName: t.brandProfile.brandName,
+      chatStatus: t.chatStatus,
+      createdAt: t.createdAt,
+      chatAcceptedAt: t.chatAcceptedAt,
+      lastMessageAt: t.lastMessageAt,
+      lastMessagePreview: t.chatMessages[0]?.content.slice(0, 120) ?? null,
+    }));
+  }
+
+  async getSponsorshipChatMessages(interestId: string) {
+    const interest = await this.prisma.sponsorshipInterest.findUnique({ where: { id: interestId } });
+    if (!interest) throw new NotFoundException('Chat thread not found');
+
+    const messages = await this.prisma.sponsorshipChatMessage.findMany({
+      where: { sponsorshipInterestId: interestId },
+      orderBy: { createdAt: 'asc' },
+      take: 200,
+      select: { id: true, senderType: true, senderId: true, content: true, createdAt: true },
+    });
+    return { messages, chatStatus: interest.chatStatus };
+  }
+
+  async sendSponsorshipChatMessage(interestId: string, adminId: string, dto: SendChatMessageDto) {
+    const interest = await this.prisma.sponsorshipInterest.findUnique({
+      where: { id: interestId },
+      include: {
+        sponsorshipProposal: { select: { hostProfile: { select: { userId: true } } } },
+        brandProfile: { select: { userId: true } },
+      },
+    });
+    if (!interest) throw new NotFoundException('Chat thread not found');
+
+    const message = await this.prisma.sponsorshipChatMessage.create({
+      data: { sponsorshipInterestId: interestId, senderType: 'ADMIN', senderId: adminId, content: dto.content },
+    });
+    await this.prisma.sponsorshipInterest.update({ where: { id: interestId }, data: { lastMessageAt: message.createdAt } });
+
+    for (const to of [interest.sponsorshipProposal.hostProfile.userId, interest.brandProfile.userId]) {
+      void this.notificationsService
+        .create(to, 'sponsorship_chat_message', 'New message from Meetday', 'Meetday sent a message in your chat.', {
+          sponsorshipInterestId: interestId,
+        })
+        .catch((err) => this.logger.error('Failed to notify of admin chat message', err));
+    }
+
+    return message;
   }
 
   async getCommunityProfileDetail(id: string) {
