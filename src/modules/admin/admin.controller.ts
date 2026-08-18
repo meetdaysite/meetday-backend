@@ -65,6 +65,7 @@ import { UpdatePlanFeeRateDto } from './dto/update-plan-fee-rate.dto';
 import { CreateHostFeePromoDto } from './dto/create-host-fee-promo.dto';
 import { UpdateHostFeePromoDto } from './dto/update-host-fee-promo.dto';
 import { UpdateAdminProfileDto } from './dto/update-admin-profile.dto';
+import { SendAnnouncementDto } from './dto/send-announcement.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth('firebase-token')
@@ -1601,6 +1602,25 @@ export class AdminController {
   @ApiOkResponse({ description: 'Paginated list of brands, each with `isProfileComplete`.' })
   listBrands(@Query() query: ListBrandsQueryDto) {
     return this.adminService.listBrands(query);
+  }
+
+  @Post('announcements/send')
+  @Roles('SUPER_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Send a mass announcement email to brands and/or hosts',
+    description:
+      'Queues one email per matched recipient (real brand/host account emails). ' +
+      'Select `allBrands`/`allCommunity` for every account in that group, or pass specific ' +
+      '`brandIds`/`hostIds` to target a subset. Only `SUPER_ADMIN` can call this endpoint.',
+  })
+  @ApiOkResponse({
+    description: 'Announcement queued.',
+    schema: { example: { success: true, timestamp: '2026-04-08T10:00:00.000Z', data: { queued: 42 } } },
+  })
+  @ApiBadRequestResponse({ description: 'No recipients matched the given selection.' })
+  sendAnnouncement(@Body() dto: SendAnnouncementDto, @GetUser('id') adminId: string) {
+    return this.adminService.sendAnnouncement(dto, adminId);
   }
 
   @Post('brands/:id/approve')

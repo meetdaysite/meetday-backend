@@ -46,6 +46,7 @@ function makePrisma() {
     role: { findUnique: jest.fn(), findMany: jest.fn() },
     hostProfile: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn(), count: jest.fn() },
     hostCommunityProfile: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn(), create: jest.fn() },
+    brandProfile: { findMany: jest.fn() },
     coupon: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn(), count: jest.fn() },
     category: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn() },
     event: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
@@ -632,6 +633,47 @@ describe('AdminService', () => {
       expect(prisma.hostProfile.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: expect.objectContaining({ OR: expect.any(Array) }) }),
       );
+    });
+  });
+
+  // ── sendAnnouncement() ───────────────────────────────────────────────────
+
+  describe('sendAnnouncement()', () => {
+    it('queues one mail job per unique recipient email when allBrands+allCommunity are selected', async () => {
+      prisma.brandProfile.findMany.mockResolvedValue([
+        { user: { email: 'brand1@test.com' } },
+        { user: { email: 'brand2@test.com' } },
+      ]);
+      prisma.hostProfile.findMany.mockResolvedValue([{ user: { email: 'host1@test.com' } }]);
+
+      const result = await service.sendAnnouncement(
+        { allBrands: true, allCommunity: true, message: 'Hello everyone' },
+        adminId,
+      );
+
+      expect(result).toEqual({ queued: 3 });
+      expect(mockMailQueue.add).toHaveBeenCalledTimes(3);
+      expect(mockMailQueue.add).toHaveBeenCalledWith(
+        'announcement',
+        expect.objectContaining({ to: 'brand1@test.com', message: 'Hello everyone' }),
+      );
+    });
+
+    it('only queries specific brandIds/hostIds when allBrands/allCommunity are false', async () => {
+      prisma.brandProfile.findMany.mockResolvedValue([{ user: { email: 'brand1@test.com' } }]);
+      prisma.hostProfile.findMany.mockResolvedValue([]);
+
+      await service.sendAnnouncement({ brandIds: ['brand-1'], message: 'Hi' }, adminId);
+
+      expect(prisma.brandProfile.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: { in: ['brand-1'] } } }),
+      );
+      expect(prisma.hostProfile.findMany).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when no recipients match', async () => {
+      await expect(service.sendAnnouncement({ message: 'Hi' }, adminId)).rejects.toThrow(BadRequestException);
+      expect(mockMailQueue.add).not.toHaveBeenCalled();
     });
   });
 

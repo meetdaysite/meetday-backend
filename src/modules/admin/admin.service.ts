@@ -43,6 +43,7 @@ import { UpdatePlanFeeRateDto } from './dto/update-plan-fee-rate.dto';
 import { CreateHostFeePromoDto } from './dto/create-host-fee-promo.dto';
 import { UpdateHostFeePromoDto } from './dto/update-host-fee-promo.dto';
 import { UpdateAdminProfileDto } from './dto/update-admin-profile.dto';
+import { SendAnnouncementDto } from './dto/send-announcement.dto';
 import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RedisService } from '../../common/redis/redis.service';
@@ -2051,6 +2052,48 @@ export class AdminService {
     const brands = filtered.slice((page - 1) * limit, (page - 1) * limit + limit);
 
     return { brands, total, page, limit };
+  }
+
+  // Mass-emails real brand/host accounts — queues one mail job per recipient rather than
+  // sending inline so a bad Resend response for one recipient can't block/fail the rest.
+  async sendAnnouncement(dto: SendAnnouncementDto, adminId: string) {
+    const [brands, hosts] = await Promise.all([
+      dto.allBrands || (dto.brandIds && dto.brandIds.length > 0)
+        ? this.prisma.brandProfile.findMany({
+            where: dto.allBrands ? undefined : { id: { in: dto.brandIds } },
+            select: { user: { select: { email: true } } },
+          })
+        : Promise.resolve([]),
+      dto.allCommunity || (dto.hostIds && dto.hostIds.length > 0)
+        ? this.prisma.hostProfile.findMany({
+            where: dto.allCommunity ? undefined : { id: { in: dto.hostIds } },
+            select: { user: { select: { email: true } } },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const emails = Array.from(
+      new Set([...brands.map((b) => b.user.email), ...hosts.map((h) => h.user.email)].filter(Boolean)),
+    );
+    if (emails.length === 0) throw new BadRequestException('No recipients matched');
+
+    const subject = dto.subject?.trim() || 'An update from Meetday';
+    for (const to of emails) {
+      void this.mailQueue
+        .add('announcement', { to, subject, message: dto.message })
+        .catch((err) => this.logger.error('Failed to queue announcement mail', err));
+    }
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'ADMIN_ANNOUNCEMENT_SENT',
+      entityType: 'ANNOUNCEMENT',
+      entityId: adminId,
+      metadata: { recipientCount: emails.length, subject, allBrands: !!dto.allBrands, allCommunity: !!dto.allCommunity },
+    });
+
+    return { queued: emails.length };
   }
 
   async getCommunityProfileDetail(id: string) {

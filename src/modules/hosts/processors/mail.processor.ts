@@ -167,6 +167,15 @@ export class MailProcessor {
     }
   }
 
+  @Process('announcement')
+  async handleAnnouncement(job: Job<{ to: string; subject: string; message: string }>) {
+    try {
+      await this.mailService.sendAnnouncement(job.data.to, job.data.subject, job.data.message);
+    } catch (error) {
+      this.logger.error(`Failed to process announcement mail job: ${(error as Error).message}`);
+    }
+  }
+
   @Process('brand-interest')
   async handleBrandInterest(
     job: Job<{

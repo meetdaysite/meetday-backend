@@ -23,6 +23,7 @@ import { communityProfileSubmittedTemplate } from './templates/community-profile
 import { errorAlertTemplate } from './templates/error-alert.template';
 import { userActionTemplate } from './templates/user-action.template';
 import { brandInterestTemplate } from './templates/brand-interest.template';
+import { announcementTemplate } from './templates/announcement.template';
 
 // Admin-facing operational alerts (new signups, pending reviews) are sent from a distinct
 // address from the regular user-facing transactional emails (host-approved, tickets, etc).
@@ -138,6 +139,10 @@ export class MailService {
 
   async sendUserAction(to: string, userLabel: string, method: string, path: string): Promise<void> {
     await this.sendMail(to, `User action: ${method} ${path} — Meetday`, userActionTemplate(userLabel, method, path), ADMIN_NOTIFICATIONS_FROM);
+  }
+
+  async sendAnnouncement(to: string, subject: string, message: string): Promise<void> {
+    await this.sendMail(to, subject, announcementTemplate(subject, message));
   }
 
   async sendHostRejected(to: string, hostName: string, reason: string): Promise<void> {
