@@ -69,6 +69,7 @@ import { SendAnnouncementDto } from './dto/send-announcement.dto';
 import { ListAnnouncementsQueryDto } from './dto/list-announcements-query.dto';
 import { ListSponsorshipChatsQueryDto } from '../sponsorship/dto/list-sponsorship-chats-query.dto';
 import { SendChatMessageDto } from '../sponsorship/dto/send-chat-message.dto';
+import { ListSponsorshipDealsQueryDto } from '../sponsorship/dto/list-sponsorship-deals-query.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth('firebase-token')
@@ -1682,6 +1683,17 @@ export class AdminController {
     @GetUser('id') adminId: string,
   ) {
     return this.adminService.sendSponsorshipChatMessage(interestId, adminId, dto);
+  }
+
+  @Get('sponsorship-deals')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({
+    summary: 'List negotiated/locked sponsorship deals',
+    description: 'Filter by `status` (PENDING_APPROVAL, CHANGES_REQUESTED, APPROVED) to see e.g. only locked deals. Omit for all.',
+  })
+  @ApiOkResponse({ description: 'List of deals.' })
+  listSponsorshipDeals(@Query() query: ListSponsorshipDealsQueryDto) {
+    return this.adminService.listSponsorshipDeals(query.status);
   }
 
   // ─── "Talk to Meetday" general support chat ────────────────────────────

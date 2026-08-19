@@ -37,6 +37,8 @@ import { ListPublishedQueryDto } from './dto/list-published-query.dto';
 import { GenerateProposalDraftDto } from './dto/generate-proposal-draft.dto';
 import { ListSponsorshipChatsQueryDto } from './dto/list-sponsorship-chats-query.dto';
 import { SendChatMessageDto } from './dto/send-chat-message.dto';
+import { UpsertSponsorshipDealDto } from './dto/upsert-sponsorship-deal.dto';
+import { RequestDealChangesDto } from './dto/request-deal-changes.dto';
 
 @ApiTags('Sponsorship Proposals')
 @ApiBearerAuth('firebase-token')
@@ -214,6 +216,82 @@ export class SponsorshipController {
   @ApiNotFoundResponse({ description: 'Chat thread not found.' })
   acceptChatRequest(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string) {
     return this.sponsorshipService.acceptChatRequest(userId, interestId);
+  }
+
+  // ── Deal Lock ────────────────────────────────────────────────────────────
+
+  @Get('chats/:interestId/deal')
+  @UseGuards(RolesGuard)
+  @Roles('HOST', 'BRAND')
+  @ApiOperation({ summary: 'Get the negotiated deal for a chat thread, if one exists' })
+  @ApiOkResponse({ description: 'Deal, or null if none has been locked/proposed yet.' })
+  @ApiForbiddenResponse({ description: 'Not a participant in this chat.' })
+  getDeal(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string) {
+    return this.sponsorshipService.getDeal(userId, interestId);
+  }
+
+  @Post('chats/:interestId/deal')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Lock the deal — community submits the final negotiated terms',
+    description: 'Only the community can do this, and only once per chat — use PATCH to edit afterwards.',
+  })
+  @ApiOkResponse({ description: 'Deal created.' })
+  @ApiForbiddenResponse({ description: 'Not the host, or chat not yet accepted.' })
+  @ApiBadRequestResponse({ description: 'A deal already exists for this chat.' })
+  createDeal(
+    @GetUser('id') userId: string,
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Body() dto: UpsertSponsorshipDealDto,
+  ) {
+    return this.sponsorshipService.createDeal(userId, interestId, dto);
+  }
+
+  @Patch('chats/:interestId/deal')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'Edit the deal',
+    description: 'Resets status to PENDING_APPROVAL and bumps the version. Not allowed once APPROVED.',
+  })
+  @ApiOkResponse({ description: 'Deal updated.' })
+  @ApiNotFoundResponse({ description: 'No deal exists yet for this chat.' })
+  @ApiBadRequestResponse({ description: 'Deal is already locked/approved.' })
+  updateDeal(
+    @GetUser('id') userId: string,
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Body() dto: UpsertSponsorshipDealDto,
+  ) {
+    return this.sponsorshipService.updateDeal(userId, interestId, dto);
+  }
+
+  @Post('chats/:interestId/deal/approve')
+  @UseGuards(RolesGuard)
+  @Roles('BRAND')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Approve and lock the deal — brand only' })
+  @ApiOkResponse({ description: 'Deal locked.' })
+  @ApiNotFoundResponse({ description: 'No deal exists yet for this chat.' })
+  approveDeal(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string) {
+    return this.sponsorshipService.approveDeal(userId, interestId);
+  }
+
+  @Post('chats/:interestId/deal/request-changes')
+  @UseGuards(RolesGuard)
+  @Roles('BRAND')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Request changes to the proposed deal — brand only' })
+  @ApiOkResponse({ description: 'Deal marked as changes requested.' })
+  @ApiNotFoundResponse({ description: 'No deal exists yet for this chat.' })
+  @ApiBadRequestResponse({ description: 'Deal is already locked/approved.' })
+  requestDealChanges(
+    @GetUser('id') userId: string,
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Body() dto: RequestDealChangesDto,
+  ) {
+    return this.sponsorshipService.requestDealChanges(userId, interestId, dto);
   }
 
   @Get(':id')

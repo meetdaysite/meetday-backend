@@ -2178,7 +2178,7 @@ export class AdminService {
       where: { sponsorshipInterestId: interestId },
       orderBy: { createdAt: 'asc' },
       take: 200,
-      select: { id: true, senderType: true, senderId: true, content: true, mediaKey: true, createdAt: true },
+      select: { id: true, senderType: true, senderId: true, messageType: true, content: true, mediaKey: true, createdAt: true },
     });
     const withMediaUrls = await Promise.all(
       messages.map(async ({ mediaKey, ...m }) => ({
@@ -2218,6 +2218,52 @@ export class AdminService {
 
     const mediaUrl = dto.mediaKey ? await this.storageService.getPresignedDownloadUrl(dto.mediaKey) : null;
     return { ...message, mediaUrl };
+  }
+
+  // ── Deal Lock: admin oversight of negotiated & locked sponsorship deals ────────
+
+  async listSponsorshipDeals(status?: 'PENDING_APPROVAL' | 'CHANGES_REQUESTED' | 'APPROVED') {
+    const deals = await this.prisma.sponsorshipDeal.findMany({
+      where: status ? { status } : undefined,
+      include: {
+        sponsorshipInterest: {
+          select: {
+            id: true,
+            sponsorshipProposal: {
+              select: { id: true, name: true, hostProfile: { select: { displayName: true, communityProfile: { select: { name: true } } } } },
+            },
+            brandProfile: { select: { id: true, brandName: true } },
+          },
+        },
+      },
+      orderBy: [{ approvedAt: 'desc' }, { updatedAt: 'desc' }],
+    });
+
+    return deals.map((d) => ({
+      id: d.id,
+      sponsorshipInterestId: d.sponsorshipInterest.id,
+      proposalId: d.sponsorshipInterest.sponsorshipProposal.id,
+      proposalName: d.sponsorshipInterest.sponsorshipProposal.name,
+      communityName:
+        d.sponsorshipInterest.sponsorshipProposal.hostProfile.communityProfile?.name ??
+        d.sponsorshipInterest.sponsorshipProposal.hostProfile.displayName ??
+        'Community',
+      brandName: d.sponsorshipInterest.brandProfile.brandName,
+      eventName: d.eventName,
+      eventDate: d.eventDate,
+      eventTime: d.eventTime,
+      venue: d.venue,
+      finalAmount: d.finalAmount,
+      deliverables: d.deliverables,
+      otherTerms: d.otherTerms,
+      additionalNotes: d.additionalNotes,
+      status: d.status,
+      version: d.version,
+      changeRequestNote: d.changeRequestNote,
+      approvedAt: d.approvedAt,
+      createdAt: d.createdAt,
+      updatedAt: d.updatedAt,
+    }));
   }
 
   // ── "Talk to Meetday" general support chat (separate from TriChat) ──────

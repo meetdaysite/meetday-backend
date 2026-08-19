@@ -49,6 +49,7 @@ function makePrisma() {
     brandProfile: { findMany: jest.fn() },
     adminAnnouncement: { create: jest.fn().mockResolvedValue({ id: 'announcement-uuid' }), findMany: jest.fn(), count: jest.fn() },
     sponsorshipInterest: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn(), count: jest.fn() },
+    sponsorshipDeal: { findMany: jest.fn() },
     sponsorshipChatMessage: { findMany: jest.fn(), create: jest.fn() },
     meetdayChatThread: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}) },
     meetdayChatMessage: { findMany: jest.fn(), create: jest.fn(), count: jest.fn() },
@@ -1251,6 +1252,44 @@ describe('AdminService', () => {
       const result = await service.countPendingSponsorshipChats();
       expect(prisma.sponsorshipInterest.count).toHaveBeenCalledWith({ where: { chatStatus: 'REQUESTED' } });
       expect(result).toBe(4);
+    });
+  });
+
+  describe('sponsorship deals (Deal Lock)', () => {
+    it('listSponsorshipDeals() maps deals with community/brand names, optionally filtered by status', async () => {
+      prisma.sponsorshipDeal.findMany.mockResolvedValue([
+        {
+          id: 'deal-1',
+          eventName: 'Summer Fest',
+          eventDate: new Date(),
+          eventTime: '6pm',
+          venue: 'Phoenix Marketcity',
+          finalAmount: 45000,
+          deliverables: 'Logo on backdrop',
+          otherTerms: null,
+          additionalNotes: null,
+          status: 'APPROVED',
+          version: 2,
+          changeRequestNote: null,
+          approvedAt: new Date(),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          sponsorshipInterest: {
+            id: 'interest-1',
+            sponsorshipProposal: { id: 'prop-1', name: 'Summer Fest Proposal', hostProfile: { displayName: 'Host', communityProfile: null } },
+            brandProfile: { id: 'brand-1', brandName: 'Acme' },
+          },
+        },
+      ]);
+
+      const result = await service.listSponsorshipDeals('APPROVED');
+
+      expect(prisma.sponsorshipDeal.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { status: 'APPROVED' } }),
+      );
+      expect(result).toEqual([
+        expect.objectContaining({ id: 'deal-1', proposalName: 'Summer Fest Proposal', communityName: 'Host', brandName: 'Acme', status: 'APPROVED' }),
+      ]);
     });
   });
 

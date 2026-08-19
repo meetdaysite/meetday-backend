@@ -83,6 +83,7 @@ model User {
   sentAdminAnnouncements AdminAnnouncement[] @relation("AdminAnnouncementSentBy")
 
   sponsorshipChatMessages SponsorshipChatMessage[] @relation("SponsorshipChatSender")
+  sponsorshipDealsCreated SponsorshipDeal[]        @relation("SponsorshipDealCreatedBy")
 
   meetdayChatThread    MeetdayChatThread?   @relation("MeetdayChatThreadUser")
   meetdayChatMessages  MeetdayChatMessage[] @relation("MeetdayChatMessageSender")
@@ -1061,6 +1062,10 @@ model SponsorshipInterest {
   hostLastReadAt  DateTime?
   brandLastReadAt DateTime?
 
+  // Negotiated & locked deal for this interest — nothing in the original proposal is final;
+  // the host and brand can agree on different terms entirely inside the chat.
+  deal SponsorshipDeal?
+
   @@unique([sponsorshipProposalId, brandProfileId])
   @@index([sponsorshipProposalId])
   @@index([brandProfileId])
@@ -1079,6 +1084,13 @@ enum ChatSenderType {
   ADMIN
 }
 
+// TEXT: a normal chat bubble. SYSTEM: an automated narrative message about the deal lifecycle
+// (submitted / updated / changes requested / locked) — rendered distinctly (centered/muted) by clients.
+enum ChatMessageType {
+  TEXT
+  SYSTEM
+}
+
 // One message in a TriChat thread. senderId is always a real User (host's user, brand's user,
 // or the admin who sent it) — senderType disambiguates which "hat" they sent it as.
 model SponsorshipChatMessage {
@@ -1086,9 +1098,10 @@ model SponsorshipChatMessage {
   sponsorshipInterestId String
   sponsorshipInterest   SponsorshipInterest @relation(fields: [sponsorshipInterestId], references: [id], onDelete: Cascade)
 
-  senderType ChatSenderType
-  senderId   String
-  sender     User           @relation("SponsorshipChatSender", fields: [senderId], references: [id])
+  senderType  ChatSenderType
+  senderId    String
+  sender      User            @relation("SponsorshipChatSender", fields: [senderId], references: [id])
+  messageType ChatMessageType @default(TEXT)
 
   content  String  @db.Text
   mediaKey String? // GCS object key for an attached image — content may be empty when this is set
@@ -1097,6 +1110,45 @@ model SponsorshipChatMessage {
 
   @@index([sponsorshipInterestId, createdAt])
   @@map("sponsorship_chat_messages")
+}
+
+enum SponsorshipDealStatus {
+  PENDING_APPROVAL // host submitted/edited, awaiting brand's review
+  CHANGES_REQUESTED // brand asked for changes, host needs to edit
+  APPROVED // brand approved — deal is locked, preserved as the final record
+}
+
+// The negotiated, final terms of a sponsorship — filled in manually by the host once chat
+// negotiation is done ("Lock the Deal"), reviewed/approved by the brand. Editable in place by
+// the host until approved; every edit resets status back to PENDING_APPROVAL.
+model SponsorshipDeal {
+  id                    String              @id @default(uuid())
+  sponsorshipInterestId String              @unique
+  sponsorshipInterest   SponsorshipInterest @relation(fields: [sponsorshipInterestId], references: [id], onDelete: Cascade)
+
+  eventName       String
+  eventDate       DateTime
+  eventTime       String?
+  venue           String
+  finalAmount     Decimal
+  deliverables    String  @db.Text
+  otherTerms      String? @db.Text
+  additionalNotes String? @db.Text
+
+  status            SponsorshipDealStatus @default(PENDING_APPROVAL)
+  version           Int                   @default(1)
+  changeRequestNote String?               @db.Text
+
+  createdById String
+  createdBy   User   @relation("SponsorshipDealCreatedBy", fields: [createdById], references: [id])
+
+  approvedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@map("sponsorship_deals")
 }
 
 // General "Talk to Meetday" support chat — one thread per Host/Brand user, separate from

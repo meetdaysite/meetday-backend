@@ -18,6 +18,8 @@ import { ListProposalsQueryDto } from './dto/list-proposals-query.dto';
 import { ListPublishedQueryDto } from './dto/list-published-query.dto';
 import { ListSponsorshipChatsQueryDto } from './dto/list-sponsorship-chats-query.dto';
 import { SendChatMessageDto } from './dto/send-chat-message.dto';
+import { UpsertSponsorshipDealDto } from './dto/upsert-sponsorship-deal.dto';
+import { RequestDealChangesDto } from './dto/request-deal-changes.dto';
 import { ADMIN_ALERT_EMAILS } from '../../common/mail/admin-recipients.constant';
 import { redactPersonalInfo } from '../../common/utils/redact-personal-info.util';
 
@@ -662,7 +664,7 @@ export class SponsorshipService {
       where: { sponsorshipInterestId: interest.id },
       orderBy: { createdAt: 'asc' },
       take: 200,
-      select: { id: true, senderType: true, senderId: true, content: true, mediaKey: true, createdAt: true },
+      select: { id: true, senderType: true, senderId: true, messageType: true, content: true, mediaKey: true, createdAt: true },
     });
     const withMediaUrls = await Promise.all(
       messages.map(async ({ mediaKey, ...m }) => ({
@@ -758,5 +760,162 @@ export class SponsorshipService {
       .catch((err) => this.logger.error('Failed to notify brand of accepted chat request', err));
 
     return { message: 'Request accepted', chatStatus: updated.chatStatus };
+  }
+
+  // ── Deal Lock: negotiated final terms, filled in by the host, approved by the brand ─────
+  // Nothing in the original proposal is final — chat negotiation can change anything; once both
+  // sides agree, the host locks it into a structured deal that the brand reviews and approves.
+
+  async getDeal(userId: string, interestId: string) {
+    const { interest } = await this.getInterestForParticipant(userId, interestId);
+    return this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
+  }
+
+  private async postDealSystemMessage(interestId: string, senderType: ChatSenderType, senderId: string, content: string) {
+    const message = await this.prisma.sponsorshipChatMessage.create({
+      data: { sponsorshipInterestId: interestId, senderType, senderId, content, messageType: 'SYSTEM' },
+    });
+    await this.prisma.sponsorshipInterest.update({ where: { id: interestId }, data: { lastMessageAt: message.createdAt } });
+    return message;
+  }
+
+  private hostNameOf(interest: { sponsorshipProposal: { hostProfile: { displayName: string | null; communityProfile: { name: string } | null } } }) {
+    return interest.sponsorshipProposal.hostProfile.communityProfile?.name ?? interest.sponsorshipProposal.hostProfile.displayName ?? 'The community';
+  }
+
+  async createDeal(userId: string, interestId: string, dto: UpsertSponsorshipDealDto) {
+    const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
+    if (senderType !== ChatSenderType.HOST) throw new ForbiddenException('Only the community can lock a deal');
+    if (interest.chatStatus !== SponsorshipChatStatus.ACCEPTED) {
+      throw new BadRequestException('The chat must be accepted before locking a deal');
+    }
+
+    const existing = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
+    if (existing) throw new BadRequestException('A deal already exists for this chat — use edit instead');
+
+    const deal = await this.prisma.sponsorshipDeal.create({
+      data: {
+        sponsorshipInterestId: interest.id,
+        eventName: dto.eventName,
+        eventDate: new Date(dto.eventDate),
+        eventTime: dto.eventTime,
+        venue: dto.venue,
+        finalAmount: dto.finalAmount,
+        deliverables: dto.deliverables,
+        otherTerms: dto.otherTerms,
+        additionalNotes: dto.additionalNotes,
+        createdById: userId,
+      },
+    });
+
+    const hostName = this.hostNameOf(interest);
+    await this.postDealSystemMessage(interest.id, ChatSenderType.HOST, userId, `📝 ${hostName} shared a deal proposal for your approval.`);
+
+    void this.notificationsService
+      .create(interest.brandProfile.userId, 'sponsorship_deal_submitted', hostName, `Shared a deal proposal: ${dto.eventName}`, {
+        sponsorshipInterestId: interest.id,
+      })
+      .catch((err) => this.logger.error('Failed to notify brand of new deal proposal', err));
+
+    return deal;
+  }
+
+  async updateDeal(userId: string, interestId: string, dto: UpsertSponsorshipDealDto) {
+    const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
+    if (senderType !== ChatSenderType.HOST) throw new ForbiddenException('Only the community can edit the deal');
+
+    const existing = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
+    if (!existing) throw new NotFoundException('No deal found for this chat — lock a deal first');
+    if (existing.status === 'APPROVED') throw new BadRequestException('This deal is already locked and cannot be edited');
+
+    const deal = await this.prisma.sponsorshipDeal.update({
+      where: { id: existing.id },
+      data: {
+        eventName: dto.eventName,
+        eventDate: new Date(dto.eventDate),
+        eventTime: dto.eventTime,
+        venue: dto.venue,
+        finalAmount: dto.finalAmount,
+        deliverables: dto.deliverables,
+        otherTerms: dto.otherTerms,
+        additionalNotes: dto.additionalNotes,
+        status: 'PENDING_APPROVAL',
+        changeRequestNote: null,
+        version: { increment: 1 },
+      },
+    });
+
+    const hostName = this.hostNameOf(interest);
+    await this.postDealSystemMessage(interest.id, ChatSenderType.HOST, userId, `✏️ ${hostName} updated the deal proposal.`);
+
+    void this.notificationsService
+      .create(interest.brandProfile.userId, 'sponsorship_deal_updated', hostName, `Updated the deal proposal: ${dto.eventName}`, {
+        sponsorshipInterestId: interest.id,
+      })
+      .catch((err) => this.logger.error('Failed to notify brand of updated deal proposal', err));
+
+    return deal;
+  }
+
+  async approveDeal(userId: string, interestId: string) {
+    const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
+    if (senderType !== ChatSenderType.BRAND) throw new ForbiddenException('Only the brand can approve the deal');
+
+    const existing = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
+    if (!existing) throw new NotFoundException('No deal found for this chat');
+    if (existing.status === 'APPROVED') return existing;
+
+    const deal = await this.prisma.sponsorshipDeal.update({
+      where: { id: existing.id },
+      data: { status: 'APPROVED', approvedAt: new Date() },
+    });
+
+    await this.postDealSystemMessage(interest.id, ChatSenderType.BRAND, userId, '🎉 Congratulations! The deal is locked.');
+
+    void this.notificationsService
+      .create(
+        interest.sponsorshipProposal.hostProfile.userId,
+        'sponsorship_deal_locked',
+        interest.brandProfile.brandName,
+        `🎉 Approved and locked the deal: ${existing.eventName}`,
+        { sponsorshipInterestId: interest.id },
+      )
+      .catch((err) => this.logger.error('Failed to notify host of locked deal', err));
+
+    return deal;
+  }
+
+  async requestDealChanges(userId: string, interestId: string, dto: RequestDealChangesDto) {
+    const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
+    if (senderType !== ChatSenderType.BRAND) throw new ForbiddenException('Only the brand can request changes');
+
+    const existing = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
+    if (!existing) throw new NotFoundException('No deal found for this chat');
+    if (existing.status === 'APPROVED') throw new BadRequestException('This deal is already locked');
+
+    const deal = await this.prisma.sponsorshipDeal.update({
+      where: { id: existing.id },
+      data: { status: 'CHANGES_REQUESTED', changeRequestNote: dto.note ?? null },
+    });
+
+    const noteSuffix = dto.note?.trim() ? `: "${dto.note.trim()}"` : '.';
+    await this.postDealSystemMessage(
+      interest.id,
+      ChatSenderType.BRAND,
+      userId,
+      `🔁 ${interest.brandProfile.brandName} requested changes to the deal${noteSuffix}`,
+    );
+
+    void this.notificationsService
+      .create(
+        interest.sponsorshipProposal.hostProfile.userId,
+        'sponsorship_deal_changes_requested',
+        interest.brandProfile.brandName,
+        dto.note?.trim() ? `Requested changes: ${dto.note.trim()}` : 'Requested changes to the deal',
+        { sponsorshipInterestId: interest.id },
+      )
+      .catch((err) => this.logger.error('Failed to notify host of requested deal changes', err));
+
+    return deal;
   }
 }
