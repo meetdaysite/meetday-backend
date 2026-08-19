@@ -135,8 +135,8 @@ export class SponsorshipController {
   })
   @ApiOkResponse({ description: 'Proposal detail with community profile.' })
   @ApiNotFoundResponse({ description: 'Proposal not found or not published.' })
-  getPublishedDetail(@Param('id', ParseUUIDPipe) id: string) {
-    return this.sponsorshipService.getPublishedProposalDetail(id);
+  getPublishedDetail(@GetUser('id') userId: string | undefined, @Param('id', ParseUUIDPipe) id: string) {
+    return this.sponsorshipService.getPublishedProposalDetail(id, userId);
   }
 
   @Post('published/:id/interest')

@@ -324,7 +324,7 @@ export class SponsorshipService {
 
   // Brand-facing: full detail of one published proposal, including the host's community profile
   // (if approved) for the "data room" view.
-  async getPublishedProposalDetail(id: string) {
+  async getPublishedProposalDetail(id: string, userId?: string) {
     const proposal = await this.prisma.sponsorshipProposal.findUnique({
       where: { id },
       include: {
@@ -368,7 +368,28 @@ export class SponsorshipService {
 
     // Brands must never see the host's not-yet-approved pending edits.
     const { pendingRevision: _pendingRevision, ...restWithoutPendingRevision } = rest;
-    return { ...restWithoutPendingRevision, hostProfile: hostRest, community };
+
+    let alreadyInterested = false;
+    if (userId) {
+      const brand = await this.prisma.brandProfile.findUnique({
+        where: { userId },
+      });
+      if (brand) {
+        const interest = await this.prisma.sponsorshipInterest.findUnique({
+          where: {
+            sponsorshipProposalId_brandProfileId: {
+              sponsorshipProposalId: id,
+              brandProfileId: brand.id,
+            },
+          },
+        });
+        if (interest) {
+          alreadyInterested = true;
+        }
+      }
+    }
+
+    return { ...restWithoutPendingRevision, hostProfile: hostRest, community, alreadyInterested };
   }
 
   // Brand marks interest in a published proposal — notifies admins (full brand details) and the
