@@ -1650,6 +1650,14 @@ export class AdminController {
     return this.adminService.listSponsorshipChats(query);
   }
 
+  @Get('sponsorship-chats/pending-count')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({ summary: 'Count of chat requests not yet accepted by the host', description: 'Backs the "Ongoing Chats" sidebar badge.' })
+  @ApiOkResponse({ description: 'Pending count.' })
+  countPendingSponsorshipChats() {
+    return this.adminService.countPendingSponsorshipChats();
+  }
+
   @Get('sponsorship-chats/:interestId/messages')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
   @ApiOperation({ summary: 'List messages in a Host ↔ Brand chat thread' })

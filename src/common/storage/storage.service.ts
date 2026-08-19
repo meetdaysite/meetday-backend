@@ -52,6 +52,7 @@ const CONTEXT_CONTENT_TYPES: Record<UploadContext, readonly string[]> = {
   [UploadContext.COMMUNITY_FEED_MEDIA]: [...IMAGE_TYPES, 'video/mp4'],
   [UploadContext.SPONSORSHIP_MEDIA]: IMAGE_TYPES,
   [UploadContext.SPONSORSHIP_DOCUMENT]: PITCH_DOC_TYPES,
+  [UploadContext.SPONSORSHIP_CHAT_MEDIA]: IMAGE_TYPES,
 };
 
 // Platform-admin roles required by the admin-only contexts.
@@ -349,6 +350,33 @@ export class StorageService {
           throw new ForbiddenException('You are not an active member of this community');
         }
         key = `communities/${dto.resourceId}/feed/${randomUUID()}.${ext}`;
+        break;
+      }
+
+      case UploadContext.SPONSORSHIP_CHAT_MEDIA: {
+        // TriChat image. resourceId is the sponsorship interest id; only the host, the brand, or
+        // an admin on an ACCEPTED thread may attach images.
+        if (!dto.resourceId) {
+          throw new BadRequestException('resourceId (sponsorship interest UUID) is required for SPONSORSHIP_CHAT_MEDIA');
+        }
+        const interest = await this.prisma.sponsorshipInterest.findUnique({
+          where: { id: dto.resourceId },
+          select: {
+            chatStatus: true,
+            sponsorshipProposal: { select: { hostProfile: { select: { userId: true } } } },
+            brandProfile: { select: { userId: true } },
+          },
+        });
+        if (!interest) throw new NotFoundException('Chat thread not found');
+        const isParticipant =
+          interest.sponsorshipProposal.hostProfile.userId === userId ||
+          interest.brandProfile.userId === userId ||
+          SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '');
+        if (!isParticipant) throw new ForbiddenException('You do not have access to this chat');
+        if (interest.chatStatus !== 'ACCEPTED') {
+          throw new ForbiddenException('This chat has not been accepted yet');
+        }
+        key = `sponsorship-chats/${dto.resourceId}/${randomUUID()}.${ext}`;
         break;
       }
 

@@ -2145,7 +2145,7 @@ export class AdminService {
           select: { id: true, name: true, hostProfile: { select: { displayName: true, communityProfile: { select: { name: true } } } } },
         },
         brandProfile: { select: { id: true, brandName: true } },
-        chatMessages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true, senderType: true, createdAt: true } },
+        chatMessages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true, mediaKey: true, senderType: true, createdAt: true } },
       },
       orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
     });
@@ -2160,8 +2160,14 @@ export class AdminService {
       createdAt: t.createdAt,
       chatAcceptedAt: t.chatAcceptedAt,
       lastMessageAt: t.lastMessageAt,
-      lastMessagePreview: t.chatMessages[0]?.content.slice(0, 120) ?? null,
+      lastMessagePreview: t.chatMessages[0] ? (t.chatMessages[0].content || (t.chatMessages[0].mediaKey ? '\ud83d\udcf7 Photo' : '')).slice(0, 120) : null,
     }));
+  }
+
+  // Count of chats a brand has requested that the host hasn't accepted yet \u2014 backs the admin
+  // sidebar's "Ongoing Chats" badge so pending requests aren't missed.
+  async countPendingSponsorshipChats() {
+    return this.prisma.sponsorshipInterest.count({ where: { chatStatus: 'REQUESTED' } });
   }
 
   async getSponsorshipChatMessages(interestId: string) {
@@ -2172,9 +2178,15 @@ export class AdminService {
       where: { sponsorshipInterestId: interestId },
       orderBy: { createdAt: 'asc' },
       take: 200,
-      select: { id: true, senderType: true, senderId: true, content: true, createdAt: true },
+      select: { id: true, senderType: true, senderId: true, content: true, mediaKey: true, createdAt: true },
     });
-    return { messages, chatStatus: interest.chatStatus };
+    const withMediaUrls = await Promise.all(
+      messages.map(async ({ mediaKey, ...m }) => ({
+        ...m,
+        mediaUrl: mediaKey ? await this.storageService.getPresignedDownloadUrl(mediaKey) : null,
+      })),
+    );
+    return { messages: withMediaUrls, chatStatus: interest.chatStatus };
   }
 
   async sendSponsorshipChatMessage(interestId: string, adminId: string, dto: SendChatMessageDto) {
@@ -2186,22 +2198,28 @@ export class AdminService {
       },
     });
     if (!interest) throw new NotFoundException('Chat thread not found');
+    if (!dto.content?.trim() && !dto.mediaKey) {
+      throw new BadRequestException('Message must have text or an image');
+    }
 
     const message = await this.prisma.sponsorshipChatMessage.create({
-      data: { sponsorshipInterestId: interestId, senderType: 'ADMIN', senderId: adminId, content: dto.content },
+      data: { sponsorshipInterestId: interestId, senderType: 'ADMIN', senderId: adminId, content: dto.content ?? '', mediaKey: dto.mediaKey },
     });
     await this.prisma.sponsorshipInterest.update({ where: { id: interestId }, data: { lastMessageAt: message.createdAt } });
 
+    const preview = dto.content?.trim() ? dto.content.slice(0, 80) : '\ud83d\udcf7 Sent a photo';
     for (const to of [interest.sponsorshipProposal.hostProfile.userId, interest.brandProfile.userId]) {
       void this.notificationsService
-        .create(to, 'sponsorship_chat_message', 'New message from Meetday', 'Meetday sent a message in your chat.', {
+        .create(to, 'sponsorship_chat_message', 'Meetday', preview, {
           sponsorshipInterestId: interestId,
         })
         .catch((err) => this.logger.error('Failed to notify of admin chat message', err));
     }
 
-    return message;
+    const mediaUrl = dto.mediaKey ? await this.storageService.getPresignedDownloadUrl(dto.mediaKey) : null;
+    return { ...message, mediaUrl };
   }
+
 
   async getCommunityProfileDetail(id: string) {
     const profile = await this.prisma.hostCommunityProfile.findUnique({

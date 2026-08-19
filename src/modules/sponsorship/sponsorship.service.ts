@@ -594,12 +594,27 @@ export class SponsorshipService {
           },
         },
         brandProfile: { select: { id: true, brandName: true } },
-        chatMessages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true, senderType: true, createdAt: true } },
+        chatMessages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true, mediaKey: true, senderType: true, createdAt: true } },
       },
       orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
     });
 
-    return interests.map((i) => ({
+    // Unread = messages from the other side sent after I last opened this thread.
+    const unreadCounts = await Promise.all(
+      interests.map((i) => {
+        const lastReadAt = hostProfile ? i.hostLastReadAt : i.brandLastReadAt;
+        const otherSenderType = hostProfile ? ChatSenderType.BRAND : ChatSenderType.HOST;
+        return this.prisma.sponsorshipChatMessage.count({
+          where: {
+            sponsorshipInterestId: i.id,
+            senderType: otherSenderType,
+            ...(lastReadAt && { createdAt: { gt: lastReadAt } }),
+          },
+        });
+      }),
+    );
+
+    return interests.map((i, idx) => ({
       id: i.id,
       proposalId: i.sponsorshipProposal.id,
       proposalName: i.sponsorshipProposal.name,
@@ -607,7 +622,8 @@ export class SponsorshipService {
       createdAt: i.createdAt,
       chatAcceptedAt: i.chatAcceptedAt,
       lastMessageAt: i.lastMessageAt,
-      lastMessagePreview: i.chatMessages[0]?.content.slice(0, 120) ?? null,
+      lastMessagePreview: i.chatMessages[0] ? (i.chatMessages[0].content || (i.chatMessages[0].mediaKey ? '📷 Photo' : '')).slice(0, 120) : null,
+      unreadCount: unreadCounts[idx],
       // From the host's side, the counterpart is the brand; from the brand's side, it's the community.
       counterpartName: hostProfile
         ? i.brandProfile.brandName
@@ -622,9 +638,13 @@ export class SponsorshipService {
       where: { id: interestId },
       include: {
         sponsorshipProposal: {
-          select: { id: true, name: true, hostProfile: { select: { id: true, userId: true } } },
+          select: {
+            id: true,
+            name: true,
+            hostProfile: { select: { id: true, userId: true, displayName: true, communityProfile: { select: { name: true } } } },
+          },
         },
-        brandProfile: { select: { id: true, userId: true } },
+        brandProfile: { select: { id: true, userId: true, brandName: true } },
       },
     });
     if (!interest) throw new NotFoundException('Chat thread not found');
@@ -637,14 +657,29 @@ export class SponsorshipService {
   }
 
   async listChatMessages(userId: string, interestId: string) {
-    const { interest } = await this.getInterestForParticipant(userId, interestId);
+    const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
     const messages = await this.prisma.sponsorshipChatMessage.findMany({
       where: { sponsorshipInterestId: interest.id },
       orderBy: { createdAt: 'asc' },
       take: 200,
-      select: { id: true, senderType: true, senderId: true, content: true, createdAt: true },
+      select: { id: true, senderType: true, senderId: true, content: true, mediaKey: true, createdAt: true },
     });
-    return { messages, chatStatus: interest.chatStatus };
+    const withMediaUrls = await Promise.all(
+      messages.map(async ({ mediaKey, ...m }) => ({
+        ...m,
+        mediaUrl: mediaKey ? await this.storageService.getPresignedDownloadUrl(mediaKey) : null,
+      })),
+    );
+
+    // Opening the thread marks everything up to now as read for this side.
+    void this.prisma.sponsorshipInterest
+      .update({
+        where: { id: interest.id },
+        data: senderType === ChatSenderType.HOST ? { hostLastReadAt: new Date() } : { brandLastReadAt: new Date() },
+      })
+      .catch((err) => this.logger.error('Failed to update chat read state', err));
+
+    return { messages: withMediaUrls, chatStatus: interest.chatStatus };
   }
 
   async sendChatMessage(userId: string, interestId: string, dto: SendChatMessageDto) {
@@ -652,30 +687,43 @@ export class SponsorshipService {
     if (interest.chatStatus !== SponsorshipChatStatus.ACCEPTED) {
       throw new BadRequestException('The community must accept this request before you can chat.');
     }
+    if (!dto.content?.trim() && !dto.mediaKey) {
+      throw new BadRequestException('Message must have text or an image');
+    }
 
     // Contact info must stay off-platform-conversation — redact emails/phone numbers so hosts
     // and brands can't route around Meetday, and tell the sender why in the response.
-    const { content, wasRedacted } = redactPersonalInfo(dto.content);
+    const { content, wasRedacted } = dto.content ? redactPersonalInfo(dto.content) : { content: '', wasRedacted: false };
 
     const message = await this.prisma.sponsorshipChatMessage.create({
-      data: { sponsorshipInterestId: interest.id, senderType, senderId: userId, content },
+      data: { sponsorshipInterestId: interest.id, senderType, senderId: userId, content, mediaKey: dto.mediaKey },
     });
     await this.prisma.sponsorshipInterest.update({
       where: { id: interest.id },
-      data: { lastMessageAt: message.createdAt },
+      data: {
+        lastMessageAt: message.createdAt,
+        // Sending also counts as having read up to now, on my own side.
+        ...(senderType === ChatSenderType.HOST ? { hostLastReadAt: message.createdAt } : { brandLastReadAt: message.createdAt }),
+      },
     });
 
     const recipientUserId =
       senderType === ChatSenderType.HOST ? interest.brandProfile.userId : interest.sponsorshipProposal.hostProfile.userId;
-    const senderLabel = senderType === ChatSenderType.HOST ? 'The community' : 'The brand';
+    const senderName =
+      senderType === ChatSenderType.HOST
+        ? interest.sponsorshipProposal.hostProfile.communityProfile?.name ?? interest.sponsorshipProposal.hostProfile.displayName ?? 'The community'
+        : interest.brandProfile.brandName;
+    const preview = content.trim() ? content.slice(0, 80) : '📷 Sent a photo';
     void this.notificationsService
-      .create(recipientUserId, 'sponsorship_chat_message', 'New message', `${senderLabel} sent you a message.`, {
+      .create(recipientUserId, 'sponsorship_chat_message', senderName, preview, {
         sponsorshipInterestId: interest.id,
       })
       .catch((err) => this.logger.error('Failed to notify of new chat message', err));
 
-    return { ...message, wasRedacted };
+    const mediaUrl = dto.mediaKey ? await this.storageService.getPresignedDownloadUrl(dto.mediaKey) : null;
+    return { ...message, mediaUrl, wasRedacted };
   }
+
 
   // Host accepts a brand's interest — opens the chat window both sides ("Requests" → "General").
   async acceptChatRequest(userId: string, interestId: string) {

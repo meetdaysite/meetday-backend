@@ -1054,6 +1054,10 @@ model SponsorshipInterest {
   chatMessages   SponsorshipChatMessage[]
   lastMessageAt  DateTime?
 
+  // Last time each side opened this thread — drives the unread-message count in each list.
+  hostLastReadAt  DateTime?
+  brandLastReadAt DateTime?
+
   @@unique([sponsorshipProposalId, brandProfileId])
   @@index([sponsorshipProposalId])
   @@index([brandProfileId])
@@ -1083,7 +1087,8 @@ model SponsorshipChatMessage {
   senderId   String
   sender     User           @relation("SponsorshipChatSender", fields: [senderId], references: [id])
 
-  content String @db.Text
+  content  String  @db.Text
+  mediaKey String? // GCS object key for an attached image — content may be empty when this is set
 
   createdAt DateTime @default(now())
 

@@ -12,7 +12,7 @@ function makePrisma() {
     hostProfile: { findUnique: jest.fn() },
     brandProfile: { findUnique: jest.fn() },
     sponsorshipInterest: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
-    sponsorshipChatMessage: { findMany: jest.fn(), create: jest.fn() },
+    sponsorshipChatMessage: { findMany: jest.fn(), create: jest.fn(), count: jest.fn().mockResolvedValue(0) },
   };
   return prisma;
 }
@@ -73,6 +73,33 @@ describe('SponsorshipService — TriChat', () => {
 
       await expect(service.listMyChats('user-3', {})).rejects.toThrow(NotFoundException);
     });
+
+    it('computes unreadCount from messages sent by the other side since I last read', async () => {
+      prisma.hostProfile.findUnique.mockResolvedValue({ id: 'host-1' });
+      prisma.brandProfile.findUnique.mockResolvedValue(null);
+      prisma.sponsorshipInterest.findMany.mockResolvedValue([
+        {
+          id: 'interest-1',
+          chatStatus: 'ACCEPTED',
+          createdAt: new Date(),
+          chatAcceptedAt: new Date(),
+          lastMessageAt: new Date(),
+          hostLastReadAt: new Date('2026-01-01'),
+          brandLastReadAt: null,
+          sponsorshipProposal: { id: 'prop-1', name: 'Proposal', hostProfile: { displayName: 'Host', communityProfile: null } },
+          brandProfile: { id: 'brand-1', brandName: 'Acme' },
+          chatMessages: [{ content: 'hi', mediaKey: null, senderType: 'BRAND', createdAt: new Date() }],
+        },
+      ]);
+      prisma.sponsorshipChatMessage.count.mockResolvedValue(3);
+
+      const result = await service.listMyChats('user-1', {});
+
+      expect(prisma.sponsorshipChatMessage.count).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ senderType: 'BRAND' }) }),
+      );
+      expect(result[0].unreadCount).toBe(3);
+    });
   });
 
   describe('sendChatMessage()', () => {
@@ -117,6 +144,23 @@ describe('SponsorshipService — TriChat', () => {
         expect.objectContaining({ data: expect.objectContaining({ content: expect.stringContaining('[contact info removed]') }) }),
       );
       expect(result.wasRedacted).toBe(true);
+    });
+
+    it('rejects an empty message with no text and no image', async () => {
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue(baseInterest);
+      await expect(service.sendChatMessage('host-user', 'interest-1', {})).rejects.toThrow(BadRequestException);
+    });
+
+    it('allows an image-only message and returns a signed mediaUrl', async () => {
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue(baseInterest);
+      prisma.sponsorshipChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
+
+      const result = await service.sendChatMessage('host-user', 'interest-1', { mediaKey: 'sponsorship-chats/interest-1/x.jpg' });
+
+      expect(prisma.sponsorshipChatMessage.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ content: '', mediaKey: 'sponsorship-chats/interest-1/x.jpg' }) }),
+      );
+      expect(result.mediaUrl).toBe('https://cdn.example.com/x');
     });
   });
 

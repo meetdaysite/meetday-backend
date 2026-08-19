@@ -48,7 +48,7 @@ function makePrisma() {
     hostCommunityProfile: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn(), create: jest.fn() },
     brandProfile: { findMany: jest.fn() },
     adminAnnouncement: { create: jest.fn().mockResolvedValue({ id: 'announcement-uuid' }), findMany: jest.fn(), count: jest.fn() },
-    sponsorshipInterest: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
+    sponsorshipInterest: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn(), count: jest.fn() },
     sponsorshipChatMessage: { findMany: jest.fn(), create: jest.fn() },
     coupon: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn(), count: jest.fn() },
     category: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn() },
@@ -1242,6 +1242,13 @@ describe('AdminService', () => {
     it('getSponsorshipChatMessages() throws NotFoundException for an unknown thread', async () => {
       prisma.sponsorshipInterest.findUnique.mockResolvedValue(null);
       await expect(service.getSponsorshipChatMessages('bad-id')).rejects.toThrow(NotFoundException);
+    });
+
+    it('countPendingSponsorshipChats() counts only REQUESTED threads', async () => {
+      prisma.sponsorshipInterest.count.mockResolvedValue(4);
+      const result = await service.countPendingSponsorshipChats();
+      expect(prisma.sponsorshipInterest.count).toHaveBeenCalledWith({ where: { chatStatus: 'REQUESTED' } });
+      expect(result).toBe(4);
     });
   });
 });

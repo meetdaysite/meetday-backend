@@ -1,10 +1,18 @@
-import { IsString, MaxLength, MinLength } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class SendChatMessageDto {
-  @ApiProperty({ example: "Hi, we'd love to sponsor your next event!" })
+  @ApiPropertyOptional({ example: "Hi, we'd love to sponsor your next event!" })
+  @IsOptional()
   @IsString()
-  @MinLength(1)
   @MaxLength(4000)
-  content: string;
+  content?: string;
+
+  @ApiPropertyOptional({
+    description: 'GCS object key of an attached image, from POST /storage/upload-url (context SPONSORSHIP_CHAT_MEDIA).',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  mediaKey?: string;
 }
