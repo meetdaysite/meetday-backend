@@ -1,12 +1,5 @@
 import { Logger } from '@nestjs/common';
-import {
-  ConnectedSocket,
-  MessageBody,
-  OnGatewayConnection,
-  SubscribeMessage,
-  WebSocketGateway,
-  WebSocketServer,
-} from '@nestjs/websockets';
+import { MessageBody, ConnectedSocket, OnGatewayInit, SubscribeMessage, WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import * as firebaseAdmin from 'firebase-admin';
 import { Namespace, Socket } from 'socket.io';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -25,7 +18,7 @@ type TypingPayload = { interestId: string; senderType: 'HOST' | 'BRAND' | 'ADMIN
     credentials: true,
   },
 })
-export class SponsorshipChatGateway implements OnGatewayConnection {
+export class SponsorshipChatGateway implements OnGatewayInit {
   @WebSocketServer() server: Namespace;
 
   private readonly logger = new Logger(SponsorshipChatGateway.name);
@@ -33,24 +26,33 @@ export class SponsorshipChatGateway implements OnGatewayConnection {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async handleConnection(client: Socket) {
-    const token = (client.handshake.auth?.token ?? client.handshake.query?.token) as string | undefined;
-    if (!token) {
-      client.disconnect();
-      return;
-    }
-    try {
-      const decoded = await firebaseAdmin.auth().verifyIdToken(token);
-      const user = await this.prisma.user.findUnique({ where: { firebaseUid: decoded.uid }, select: { id: true } });
-      if (!user) {
-        client.disconnect();
+  afterInit(namespace: Namespace) {
+    // Runs as part of the handshake, before the client's "connect" event fires — unlike
+    // handleConnection (which races against the client immediately emitting join-chat), this
+    // guarantees socket.data.userId is set before ANY message from the client is handled.
+    namespace.use((socket: Socket, next: (err?: Error) => void) => {
+      const token = (socket.handshake.auth?.token ?? socket.handshake.query?.token) as string | undefined;
+      if (!token) {
+        next(new Error('No auth token'));
         return;
       }
-      client.data.userId = user.id;
-    } catch (err) {
-      this.logger.warn(`Socket rejected: ${(err as Error).message}`);
-      client.disconnect();
-    }
+      firebaseAdmin
+        .auth()
+        .verifyIdToken(token)
+        .then((decoded) => this.prisma.user.findUnique({ where: { firebaseUid: decoded.uid }, select: { id: true } }))
+        .then((user) => {
+          if (!user) {
+            next(new Error('User not found'));
+            return;
+          }
+          socket.data.userId = user.id;
+          next();
+        })
+        .catch((err) => {
+          this.logger.warn(`Socket rejected: ${(err as Error).message}`);
+          next(new Error('Auth failed'));
+        });
+    });
   }
 
   @SubscribeMessage('join-chat')
