@@ -324,7 +324,7 @@ export class SponsorshipService {
 
   // Brand-facing: full detail of one published proposal, including the host's community profile
   // (if approved) for the "data room" view.
-  async getPublishedProposalDetail(id: string) {
+  async getPublishedProposalDetail(id: string, userId?: string) {
     const proposal = await this.prisma.sponsorshipProposal.findUnique({
       where: { id },
       include: {
@@ -368,7 +368,28 @@ export class SponsorshipService {
 
     // Brands must never see the host's not-yet-approved pending edits.
     const { pendingRevision: _pendingRevision, ...restWithoutPendingRevision } = rest;
-    return { ...restWithoutPendingRevision, hostProfile: hostRest, community };
+
+    let alreadyInterested = false;
+    if (userId) {
+      const brand = await this.prisma.brandProfile.findUnique({
+        where: { userId },
+      });
+      if (brand) {
+        const interest = await this.prisma.sponsorshipInterest.findUnique({
+          where: {
+            sponsorshipProposalId_brandProfileId: {
+              sponsorshipProposalId: id,
+              brandProfileId: brand.id,
+            },
+          },
+        });
+        if (interest) {
+          alreadyInterested = true;
+        }
+      }
+    }
+
+    return { ...restWithoutPendingRevision, hostProfile: hostRest, community, alreadyInterested };
   }
 
   // Brand marks interest in a published proposal — notifies admins (full brand details) and the
@@ -472,7 +493,7 @@ export class SponsorshipService {
   async listApprovedCommunities() {
     const profiles = await this.prisma.hostCommunityProfile.findMany({
       where: { approvalStatus: 'APPROVED' },
-      select: {
+            select: {
         id: true,
         hostProfileId: true,
         name: true,
@@ -482,6 +503,7 @@ export class SponsorshipService {
         size: true,
         avgGuestCount: true,
         experiencesPerYear: true,
+        pastEvents: true,
         categories: { select: { category: { select: { id: true, name: true } } } },
         hostProfile: {
           select: {
@@ -493,14 +515,29 @@ export class SponsorshipService {
       orderBy: { updatedAt: 'desc' },
     });
 
+        const signPastEvents = async (pastEvents) => {
+      if (!pastEvents || !Array.isArray(pastEvents)) return [];
+      return Promise.all(
+        pastEvents.map(async (event) => ({
+          name: event?.name ?? null,
+          description: event?.description ?? null,
+          imageKeys: event?.imageKeys ?? [],
+          imageUrls: await Promise.all(
+            (event?.imageKeys ?? []).map((key) => this.storageService.getPresignedDownloadUrl(key)),
+          ),
+        })),
+      );
+    };
+
     const communities = await Promise.all(
-      profiles.map(async ({ logoKey, secondaryImageKey, categories, hostProfile, ...rest }) => ({
+      profiles.map(async ({ logoKey, secondaryImageKey, categories, hostProfile, pastEvents, ...rest }) => ({
         ...rest,
         logoUrl: logoKey ? await this.storageService.getPresignedDownloadUrl(logoKey) : null,
         secondaryImageUrl: secondaryImageKey ? await this.storageService.getPresignedDownloadUrl(secondaryImageKey) : null,
         categories: categories.map((c) => c.category),
         operatingCities: hostProfile?.operatingCities ?? [],
         socialLinks: hostProfile?.socialLinks ?? null,
+        pastEvents: await signPastEvents(pastEvents),
       })),
     );
 
