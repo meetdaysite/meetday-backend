@@ -2143,28 +2143,36 @@ export class AdminService {
       where: query.status ? { chatStatus: query.status } : undefined,
       include: {
                 sponsorshipProposal: {
-          select: { id: true, name: true, hostProfile: { select: { displayName: true, communityProfile: { select: { name: true, logoUrl: true } } } } },
+          select: { id: true, name: true, hostProfile: { select: { displayName: true, communityProfile: { select: { name: true, logoKey: true } } } } },
         },
-        brandProfile: { select: { id: true, brandName: true, logoUrl: true } },
+        brandProfile: { select: { id: true, brandName: true, logoKey: true } },
         chatMessages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true, mediaKey: true, senderType: true, createdAt: true } },
       },
       orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
     });
 
-    return threads.map((t) => ({
-      id: t.id,
-      proposalId: t.sponsorshipProposal.id,
-      proposalName: t.sponsorshipProposal.name,
-      communityName: t.sponsorshipProposal.hostProfile.communityProfile?.name ?? t.sponsorshipProposal.hostProfile.displayName ?? 'Community',
-      brandName: t.brandProfile.brandName,
-      chatStatus: t.chatStatus,
-      createdAt: t.createdAt,
-      chatAcceptedAt: t.chatAcceptedAt,
-            lastMessageAt: t.lastMessageAt,
-      lastMessagePreview: t.chatMessages[0] ? (t.chatMessages[0].content || (t.chatMessages[0].mediaKey ? '\ud83d\udcf7 Photo' : '')).slice(0, 120) : null,
-      brandLogoUrl: t.brandProfile.logoUrl,
-      communityLogoUrl: t.sponsorshipProposal.hostProfile.communityProfile?.logoUrl,
-    }));
+    return Promise.all(
+      threads.map(async (t) => {
+        const brandLogoUrl = t.brandProfile.logoKey ? await this.storageService.getPresignedDownloadUrl(t.brandProfile.logoKey) : null;
+        const communityLogoUrl = t.sponsorshipProposal.hostProfile.communityProfile?.logoKey
+          ? await this.storageService.getPresignedDownloadUrl(t.sponsorshipProposal.hostProfile.communityProfile.logoKey)
+          : null;
+        return {
+          id: t.id,
+          proposalId: t.sponsorshipProposal.id,
+          proposalName: t.sponsorshipProposal.name,
+          communityName: t.sponsorshipProposal.hostProfile.communityProfile?.name ?? t.sponsorshipProposal.hostProfile.displayName ?? 'Community',
+          brandName: t.brandProfile.brandName,
+          chatStatus: t.chatStatus,
+          createdAt: t.createdAt,
+          chatAcceptedAt: t.chatAcceptedAt,
+          lastMessageAt: t.lastMessageAt,
+          lastMessagePreview: t.chatMessages[0] ? (t.chatMessages[0].content || (t.chatMessages[0].mediaKey ? '\ud83d\udcf7 Photo' : '')).slice(0, 120) : null,
+          brandLogoUrl,
+          communityLogoUrl,
+        };
+      })
+    );
   }
 
   // Count of chats a brand has requested that the host hasn't accepted yet \u2014 backs the admin
@@ -2280,8 +2288,8 @@ export class AdminService {
             lastName: true,
             email: true,
             role: { select: { name: true } },
-            hostProfile: { select: { communityProfile: { select: { logoUrl: true } } } },
-            brandProfile: { select: { logoUrl: true } },
+            hostProfile: { select: { communityProfile: { select: { logoKey: true } } } },
+            brandProfile: { select: { logoKey: true } },
           },
         },
         messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true, mediaKey: true, createdAt: true } },
@@ -2301,18 +2309,28 @@ export class AdminService {
       ),
     );
 
-    return threads.map((t, idx) => ({
-      id: t.id,
-      userId: t.userId,
-      userName: `${t.user.firstName} ${t.user.lastName}`.trim(),
-      userEmail: t.user.email,
-      userRole: t.user.role?.name ?? null,
-      createdAt: t.createdAt,
-      lastMessageAt: t.lastMessageAt,
-            lastMessagePreview: t.messages[0] ? (t.messages[0].content || (t.messages[0].mediaKey ? '📷 Photo' : '')).slice(0, 120) : null,
-      unreadCount: unreadCounts[idx],
-      userLogoUrl: t.user.brandProfile?.logoUrl || t.user.hostProfile?.communityProfile?.logoUrl || null,
-    }));
+    return Promise.all(
+      threads.map(async (t, idx) => {
+        let userLogoUrl: string | null = null;
+        if (t.user.brandProfile?.logoKey) {
+          userLogoUrl = await this.storageService.getPresignedDownloadUrl(t.user.brandProfile.logoKey);
+        } else if (t.user.hostProfile?.communityProfile?.logoKey) {
+          userLogoUrl = await this.storageService.getPresignedDownloadUrl(t.user.hostProfile.communityProfile.logoKey);
+        }
+        return {
+          id: t.id,
+          userId: t.userId,
+          userName: `${t.user.firstName} ${t.user.lastName}`.trim(),
+          userEmail: t.user.email,
+          userRole: t.user.role?.name ?? null,
+          createdAt: t.createdAt,
+          lastMessageAt: t.lastMessageAt,
+          lastMessagePreview: t.messages[0] ? (t.messages[0].content || (t.messages[0].mediaKey ? '📷 Photo' : '')).slice(0, 120) : null,
+          unreadCount: unreadCounts[idx],
+          userLogoUrl,
+        };
+      })
+    );
   }
 
   async getMeetdayChatMessages(threadId: string) {

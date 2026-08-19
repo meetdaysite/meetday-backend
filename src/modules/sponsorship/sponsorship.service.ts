@@ -613,10 +613,10 @@ export class SponsorshipService {
           select: {
             id: true,
             name: true,
-            hostProfile: { select: { displayName: true, communityProfile: { select: { name: true, logoUrl: true } } } },
+            hostProfile: { select: { displayName: true, communityProfile: { select: { name: true, logoKey: true } } } },
           },
         },
-        brandProfile: { select: { id: true, brandName: true, logoUrl: true } },
+        brandProfile: { select: { id: true, brandName: true, logoKey: true } },
         chatMessages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true, mediaKey: true, senderType: true, createdAt: true } },
       },
       orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
@@ -637,24 +637,32 @@ export class SponsorshipService {
       }),
     );
 
-    return interests.map((i, idx) => ({
-      id: i.id,
-      proposalId: i.sponsorshipProposal.id,
-      proposalName: i.sponsorshipProposal.name,
-      chatStatus: i.chatStatus,
-      createdAt: i.createdAt,
-      chatAcceptedAt: i.chatAcceptedAt,
-      lastMessageAt: i.lastMessageAt,
-      lastMessagePreview: i.chatMessages[0] ? (i.chatMessages[0].content || (i.chatMessages[0].mediaKey ? '📷 Photo' : '')).slice(0, 120) : null,
-      unreadCount: unreadCounts[idx],
-            // From the host's side, the counterpart is the brand; from the brand's side, it's the community.
-      counterpartName: hostProfile
-        ? i.brandProfile.brandName
-        : i.sponsorshipProposal.hostProfile.communityProfile?.name ?? i.sponsorshipProposal.hostProfile.displayName ?? 'Community',
-      counterpartAvatarUrl: hostProfile
-        ? i.brandProfile.logoUrl
-        : i.sponsorshipProposal.hostProfile.communityProfile?.logoUrl,
-    }));
+    return Promise.all(
+      interests.map(async (i, idx) => {
+        const brandLogoUrl = i.brandProfile.logoKey ? await this.storageService.getPresignedDownloadUrl(i.brandProfile.logoKey) : null;
+        const communityLogoUrl = i.sponsorshipProposal.hostProfile.communityProfile?.logoKey
+          ? await this.storageService.getPresignedDownloadUrl(i.sponsorshipProposal.hostProfile.communityProfile.logoKey)
+          : null;
+        return {
+          id: i.id,
+          proposalId: i.sponsorshipProposal.id,
+          proposalName: i.sponsorshipProposal.name,
+          chatStatus: i.chatStatus,
+          createdAt: i.createdAt,
+          chatAcceptedAt: i.chatAcceptedAt,
+          lastMessageAt: i.lastMessageAt,
+          lastMessagePreview: i.chatMessages[0] ? (i.chatMessages[0].content || (i.chatMessages[0].mediaKey ? '📷 Photo' : '')).slice(0, 120) : null,
+          unreadCount: unreadCounts[idx],
+          // From the host's side, the counterpart is the brand; from the brand's side, it's the community.
+          counterpartName: hostProfile
+            ? i.brandProfile.brandName
+            : i.sponsorshipProposal.hostProfile.communityProfile?.name ?? i.sponsorshipProposal.hostProfile.displayName ?? 'Community',
+          counterpartAvatarUrl: hostProfile
+            ? brandLogoUrl
+            : communityLogoUrl,
+        };
+      })
+    );
   }
 
   // Verifies the caller is either the host or the brand on this interest and returns which "hat"
