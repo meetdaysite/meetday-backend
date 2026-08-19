@@ -11,8 +11,8 @@ function makePrisma() {
   const prisma: any = {
     hostProfile: { findUnique: jest.fn() },
     brandProfile: { findUnique: jest.fn() },
-    sponsorshipInterest: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
-    sponsorshipChatMessage: { findMany: jest.fn(), create: jest.fn(), count: jest.fn().mockResolvedValue(0) },
+    sponsorshipInterest: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}) },
+    sponsorshipChatMessage: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), count: jest.fn().mockResolvedValue(0) },
     sponsorshipDeal: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
   };
   return prisma;
@@ -337,6 +337,128 @@ describe('SponsorshipService — TriChat', () => {
         );
         expect(mockNotifications.create).toHaveBeenCalledWith('host-user', 'sponsorship_deal_changes_requested', expect.any(String), expect.any(String), expect.any(Object));
       });
+    });
+  });
+
+  describe('listChatMessages()', () => {
+    const baseInterest = {
+      id: 'interest-1',
+      chatStatus: 'ACCEPTED',
+      hostLastReadAt: new Date('2026-01-01T00:00:00.000Z'),
+      brandLastReadAt: new Date('2026-01-02T06:00:00.000Z'),
+      sponsorshipProposal: { id: 'prop-1', name: 'Proposal', hostProfile: { id: 'host-1', userId: 'host-user' } },
+      brandProfile: { id: 'brand-1', userId: 'brand-user' },
+    };
+
+    it('flags own messages as seenByOther based on the other side\'s last-read time', async () => {
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue(baseInterest);
+      prisma.sponsorshipChatMessage.findMany.mockResolvedValue([
+        { id: 'm1', senderType: 'HOST', senderId: 'host-user', messageType: 'TEXT', content: 'seen', mediaKey: null, editedAt: null, deletedAt: null, createdAt: new Date('2026-01-02T05:00:00.000Z') },
+        { id: 'm2', senderType: 'HOST', senderId: 'host-user', messageType: 'TEXT', content: 'not seen yet', mediaKey: null, editedAt: null, deletedAt: null, createdAt: new Date('2026-01-03T00:00:00.000Z') },
+      ]);
+
+      const result = await service.listChatMessages('host-user', 'interest-1');
+
+      expect(result.messages[0].seenByOther).toBe(true);
+      expect(result.messages[1].seenByOther).toBe(false);
+    });
+
+    it('hides content/media for a deleted message but keeps deletedAt', async () => {
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue(baseInterest);
+      prisma.sponsorshipChatMessage.findMany.mockResolvedValue([
+        { id: 'm1', senderType: 'BRAND', senderId: 'brand-user', messageType: 'TEXT', content: 'secret stuff', mediaKey: 'x.jpg', editedAt: null, deletedAt: new Date(), createdAt: new Date('2026-01-01T05:00:00.000Z') },
+      ]);
+
+      const result = await service.listChatMessages('host-user', 'interest-1');
+
+      expect(result.messages[0]).toEqual(expect.objectContaining({ content: '', mediaUrl: null, deletedAt: expect.any(Date) }));
+    });
+
+    it('computes unreadCount and firstUnreadMessageId from messages sent after my previous lastReadAt', async () => {
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue(baseInterest);
+      prisma.sponsorshipChatMessage.findMany.mockResolvedValue([
+        { id: 'm1', senderType: 'BRAND', senderId: 'brand-user', messageType: 'TEXT', content: 'old', mediaKey: null, editedAt: null, deletedAt: null, createdAt: new Date('2025-12-31T00:00:00.000Z') },
+        { id: 'm2', senderType: 'BRAND', senderId: 'brand-user', messageType: 'TEXT', content: 'new 1', mediaKey: null, editedAt: null, deletedAt: null, createdAt: new Date('2026-01-01T06:00:00.000Z') },
+        { id: 'm3', senderType: 'BRAND', senderId: 'brand-user', messageType: 'TEXT', content: 'new 2', mediaKey: null, editedAt: null, deletedAt: null, createdAt: new Date('2026-01-01T07:00:00.000Z') },
+      ]);
+
+      // hostLastReadAt is 2026-01-01T00:00:00 — messages m2/m3 (from BRAND) came after that.
+      const result = await service.listChatMessages('host-user', 'interest-1');
+
+      expect(result.unreadCount).toBe(2);
+      expect(result.firstUnreadMessageId).toBe('m2');
+    });
+  });
+
+  describe('editChatMessage()', () => {
+    const baseInterest = {
+      id: 'interest-1',
+      chatStatus: 'ACCEPTED',
+      sponsorshipProposal: { id: 'prop-1', name: 'Proposal', hostProfile: { id: 'host-1', userId: 'host-user' } },
+      brandProfile: { id: 'brand-1', userId: 'brand-user' },
+    };
+
+    it('rejects editing someone else\'s message', async () => {
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue(baseInterest);
+      prisma.sponsorshipChatMessage.findUnique.mockResolvedValue({ id: 'msg-1', sponsorshipInterestId: 'interest-1', senderId: 'brand-user', deletedAt: null });
+      await expect(service.editChatMessage('host-user', 'interest-1', 'msg-1', { content: 'edited' })).rejects.toThrow(ForbiddenException);
+    });
+
+    it('rejects editing a deleted message', async () => {
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue(baseInterest);
+      prisma.sponsorshipChatMessage.findUnique.mockResolvedValue({ id: 'msg-1', sponsorshipInterestId: 'interest-1', senderId: 'host-user', deletedAt: new Date() });
+      await expect(service.editChatMessage('host-user', 'interest-1', 'msg-1', { content: 'edited' })).rejects.toThrow(BadRequestException);
+    });
+
+    it('masks PII and sets editedAt on the sender\'s own message', async () => {
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue(baseInterest);
+      prisma.sponsorshipChatMessage.findUnique.mockResolvedValue({ id: 'msg-1', sponsorshipInterestId: 'interest-1', senderId: 'host-user', deletedAt: null });
+      prisma.sponsorshipChatMessage.update.mockResolvedValue({ id: 'msg-1', content: 'call me at 98******10', editedAt: new Date(), mediaKey: null });
+
+      const result = await service.editChatMessage('host-user', 'interest-1', 'msg-1', { content: 'call me at 9876543210' });
+
+      expect(prisma.sponsorshipChatMessage.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'msg-1' }, data: expect.objectContaining({ content: expect.stringContaining('98******10'), editedAt: expect.any(Date) }) }),
+      );
+      expect(result.wasRedacted).toBe(true);
+    });
+  });
+
+  describe('deleteChatMessage()', () => {
+    const baseInterest = {
+      id: 'interest-1',
+      chatStatus: 'ACCEPTED',
+      sponsorshipProposal: { id: 'prop-1', name: 'Proposal', hostProfile: { id: 'host-1', userId: 'host-user' } },
+      brandProfile: { id: 'brand-1', userId: 'brand-user' },
+    };
+
+    it('rejects deleting someone else\'s message', async () => {
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue(baseInterest);
+      prisma.sponsorshipChatMessage.findUnique.mockResolvedValue({ id: 'msg-1', sponsorshipInterestId: 'interest-1', senderId: 'brand-user', deletedAt: null });
+      await expect(service.deleteChatMessage('host-user', 'interest-1', 'msg-1')).rejects.toThrow(ForbiddenException);
+    });
+
+    it('soft-deletes the sender\'s own message', async () => {
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue(baseInterest);
+      prisma.sponsorshipChatMessage.findUnique.mockResolvedValue({ id: 'msg-1', sponsorshipInterestId: 'interest-1', senderId: 'host-user', deletedAt: null });
+      prisma.sponsorshipChatMessage.update.mockResolvedValue({ id: 'msg-1', deletedAt: new Date() });
+
+      const result = await service.deleteChatMessage('host-user', 'interest-1', 'msg-1');
+
+      expect(prisma.sponsorshipChatMessage.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'msg-1' }, data: expect.objectContaining({ deletedAt: expect.any(Date) }) }),
+      );
+      expect(result.deleted).toBe(true);
+    });
+
+    it('is idempotent when the message is already deleted', async () => {
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue(baseInterest);
+      prisma.sponsorshipChatMessage.findUnique.mockResolvedValue({ id: 'msg-1', sponsorshipInterestId: 'interest-1', senderId: 'host-user', deletedAt: new Date() });
+
+      const result = await service.deleteChatMessage('host-user', 'interest-1', 'msg-1');
+
+      expect(prisma.sponsorshipChatMessage.update).not.toHaveBeenCalled();
+      expect(result.deleted).toBe(true);
     });
   });
 });

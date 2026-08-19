@@ -1106,6 +1106,9 @@ model SponsorshipChatMessage {
   content  String  @db.Text
   mediaKey String? // GCS object key for an attached image — content may be empty when this is set
 
+  editedAt  DateTime? // set when the sender edits their own message's content
+  deletedAt DateTime? // soft delete — host/brand see a placeholder, admin still sees the original content
+
   createdAt DateTime @default(now())
 
   @@index([sponsorshipInterestId, createdAt])

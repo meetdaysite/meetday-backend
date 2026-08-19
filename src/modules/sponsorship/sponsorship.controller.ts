@@ -37,6 +37,7 @@ import { ListPublishedQueryDto } from './dto/list-published-query.dto';
 import { GenerateProposalDraftDto } from './dto/generate-proposal-draft.dto';
 import { ListSponsorshipChatsQueryDto } from './dto/list-sponsorship-chats-query.dto';
 import { SendChatMessageDto } from './dto/send-chat-message.dto';
+import { UpdateChatMessageDto } from './dto/update-chat-message.dto';
 import { UpsertSponsorshipDealDto } from './dto/upsert-sponsorship-deal.dto';
 import { RequestDealChangesDto } from './dto/request-deal-changes.dto';
 
@@ -201,6 +202,41 @@ export class SponsorshipController {
     @Body() dto: SendChatMessageDto,
   ) {
     return this.sponsorshipService.sendChatMessage(userId, interestId, dto);
+  }
+
+  @Patch('chats/:interestId/messages/:messageId')
+  @UseGuards(RolesGuard)
+  @Roles('HOST', 'BRAND')
+  @ApiOperation({ summary: 'Edit a message you sent', description: 'Only the original sender can edit; adds an "edited" marker.' })
+  @ApiOkResponse({ description: 'Message updated.' })
+  @ApiForbiddenResponse({ description: 'Not your message.' })
+  @ApiNotFoundResponse({ description: 'Message not found.' })
+  editChatMessage(
+    @GetUser('id') userId: string,
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Param('messageId', ParseUUIDPipe) messageId: string,
+    @Body() dto: UpdateChatMessageDto,
+  ) {
+    return this.sponsorshipService.editChatMessage(userId, interestId, messageId, dto);
+  }
+
+  @Delete('chats/:interestId/messages/:messageId')
+  @UseGuards(RolesGuard)
+  @Roles('HOST', 'BRAND')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Delete a message you sent',
+    description: 'Soft delete — shows a placeholder to both sides, but admins can still see the original content.',
+  })
+  @ApiOkResponse({ description: 'Message deleted.' })
+  @ApiForbiddenResponse({ description: 'Not your message.' })
+  @ApiNotFoundResponse({ description: 'Message not found.' })
+  deleteChatMessage(
+    @GetUser('id') userId: string,
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Param('messageId', ParseUUIDPipe) messageId: string,
+  ) {
+    return this.sponsorshipService.deleteChatMessage(userId, interestId, messageId);
   }
 
   @Post('chats/:interestId/accept')

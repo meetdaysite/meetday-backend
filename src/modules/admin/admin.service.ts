@@ -2179,8 +2179,20 @@ export class AdminService {
       where: { sponsorshipInterestId: interestId },
       orderBy: { createdAt: 'asc' },
       take: 200,
-      select: { id: true, senderType: true, senderId: true, messageType: true, content: true, mediaKey: true, createdAt: true },
+      select: {
+        id: true,
+        senderType: true,
+        senderId: true,
+        messageType: true,
+        content: true,
+        mediaKey: true,
+        editedAt: true,
+        deletedAt: true,
+        createdAt: true,
+      },
     });
+    // Admin sees the original content even after a host/brand "deletes" it — deletedAt is
+    // surfaced so the UI can flag it (e.g. "Deleted by sender"), not hidden like it is for them.
     const withMediaUrls = await Promise.all(
       messages.map(async ({ mediaKey, ...m }) => ({
         ...m,

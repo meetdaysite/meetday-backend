@@ -18,6 +18,7 @@ import { ListProposalsQueryDto } from './dto/list-proposals-query.dto';
 import { ListPublishedQueryDto } from './dto/list-published-query.dto';
 import { ListSponsorshipChatsQueryDto } from './dto/list-sponsorship-chats-query.dto';
 import { SendChatMessageDto } from './dto/send-chat-message.dto';
+import { UpdateChatMessageDto } from './dto/update-chat-message.dto';
 import { UpsertSponsorshipDealDto } from './dto/upsert-sponsorship-deal.dto';
 import { RequestDealChangesDto } from './dto/request-deal-changes.dto';
 import { ADMIN_ALERT_EMAILS } from '../../common/mail/admin-recipients.constant';
@@ -681,17 +682,52 @@ export class SponsorshipService {
 
   async listChatMessages(userId: string, interestId: string) {
     const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
+
+    // Captured before this call marks the thread read below, so both the unread-divider and the
+    // seen-tick reflect state as of the moment the thread was opened, not after.
+    const myPreviousLastReadAt = senderType === ChatSenderType.HOST ? interest.hostLastReadAt : interest.brandLastReadAt;
+    const otherLastReadAt = senderType === ChatSenderType.HOST ? interest.brandLastReadAt : interest.hostLastReadAt;
+
     const messages = await this.prisma.sponsorshipChatMessage.findMany({
       where: { sponsorshipInterestId: interest.id },
       orderBy: { createdAt: 'asc' },
       take: 200,
-      select: { id: true, senderType: true, senderId: true, messageType: true, content: true, mediaKey: true, createdAt: true },
+      select: {
+        id: true,
+        senderType: true,
+        senderId: true,
+        messageType: true,
+        content: true,
+        mediaKey: true,
+        editedAt: true,
+        deletedAt: true,
+        createdAt: true,
+      },
     });
+
+    let firstUnreadMessageId: string | null = null;
+    let unreadCount = 0;
+    for (const m of messages) {
+      if (m.senderType !== senderType && (!myPreviousLastReadAt || m.createdAt > myPreviousLastReadAt)) {
+        if (!firstUnreadMessageId) firstUnreadMessageId = m.id;
+        unreadCount += 1;
+      }
+    }
+
     const withMediaUrls = await Promise.all(
-      messages.map(async ({ mediaKey, ...m }) => ({
-        ...m,
-        mediaUrl: mediaKey ? await this.storageService.getPresignedDownloadUrl(mediaKey) : null,
-      })),
+      messages.map(async ({ mediaKey, deletedAt, ...m }) => {
+        // Deleted messages are hidden from host/brand (placeholder only) — admin still sees the
+        // original content via the separate admin endpoint, which doesn't go through this path.
+        if (deletedAt) {
+          return { ...m, content: '', mediaUrl: null, deletedAt, seenByOther: false };
+        }
+        return {
+          ...m,
+          deletedAt: null,
+          mediaUrl: mediaKey ? await this.storageService.getPresignedDownloadUrl(mediaKey) : null,
+          seenByOther: m.senderType === senderType && !!otherLastReadAt && m.createdAt <= otherLastReadAt,
+        };
+      }),
     );
 
     // Opening the thread marks everything up to now as read for this side.
@@ -702,7 +738,36 @@ export class SponsorshipService {
       })
       .catch((err) => this.logger.error('Failed to update chat read state', err));
 
-    return { messages: withMediaUrls, chatStatus: interest.chatStatus };
+    return { messages: withMediaUrls, chatStatus: interest.chatStatus, unreadCount, firstUnreadMessageId };
+  }
+
+  async editChatMessage(userId: string, interestId: string, messageId: string, dto: UpdateChatMessageDto) {
+    const { interest } = await this.getInterestForParticipant(userId, interestId);
+    const message = await this.prisma.sponsorshipChatMessage.findUnique({ where: { id: messageId } });
+    if (!message || message.sponsorshipInterestId !== interest.id) throw new NotFoundException('Message not found');
+    if (message.senderId !== userId) throw new ForbiddenException('You can only edit your own messages');
+    if (message.deletedAt) throw new BadRequestException('Cannot edit a deleted message');
+
+    const { content, wasRedacted } = redactPersonalInfo(dto.content);
+    const updated = await this.prisma.sponsorshipChatMessage.update({
+      where: { id: messageId },
+      data: { content, editedAt: new Date() },
+    });
+
+    const mediaUrl = updated.mediaKey ? await this.storageService.getPresignedDownloadUrl(updated.mediaKey) : null;
+    return { ...updated, mediaUrl, wasRedacted };
+  }
+
+  // Soft delete — content stays in the DB for admin's view, host/brand just see a placeholder.
+  async deleteChatMessage(userId: string, interestId: string, messageId: string) {
+    const { interest } = await this.getInterestForParticipant(userId, interestId);
+    const message = await this.prisma.sponsorshipChatMessage.findUnique({ where: { id: messageId } });
+    if (!message || message.sponsorshipInterestId !== interest.id) throw new NotFoundException('Message not found');
+    if (message.senderId !== userId) throw new ForbiddenException('You can only delete your own messages');
+    if (message.deletedAt) return { message: 'Already deleted', deleted: true };
+
+    await this.prisma.sponsorshipChatMessage.update({ where: { id: messageId }, data: { deletedAt: new Date() } });
+    return { message: 'Message deleted', deleted: true };
   }
 
   async sendChatMessage(userId: string, interestId: string, dto: SendChatMessageDto) {
