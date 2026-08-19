@@ -1242,6 +1242,28 @@ describe('AdminService', () => {
       );
     });
 
+    it('sendSponsorshipChatMessage() schedules a deduped unread-chat-email check for both host and brand', async () => {
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue({
+        id: 'interest-1',
+        sponsorshipProposal: { hostProfile: { userId: 'host-user' } },
+        brandProfile: { userId: 'brand-user' },
+      });
+      prisma.sponsorshipChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
+
+      await service.sendSponsorshipChatMessage('interest-1', 'admin-uuid', { content: 'Hi from Meetday' });
+
+      expect(mockMailQueue.add).toHaveBeenCalledWith(
+        'unread-chat-message-check',
+        { interestId: 'interest-1', recipientUserId: 'host-user' },
+        expect.objectContaining({ jobId: 'unread-chat:interest-1:host-user', removeOnComplete: true, removeOnFail: true }),
+      );
+      expect(mockMailQueue.add).toHaveBeenCalledWith(
+        'unread-chat-message-check',
+        { interestId: 'interest-1', recipientUserId: 'brand-user' },
+        expect.objectContaining({ jobId: 'unread-chat:interest-1:brand-user', removeOnComplete: true, removeOnFail: true }),
+      );
+    });
+
     it('getSponsorshipChatMessages() throws NotFoundException for an unknown thread', async () => {
       prisma.sponsorshipInterest.findUnique.mockResolvedValue(null);
       await expect(service.getSponsorshipChatMessages('bad-id')).rejects.toThrow(NotFoundException);

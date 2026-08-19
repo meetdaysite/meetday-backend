@@ -40,6 +40,7 @@ export default () => {
       tdsRate: env.TDS_RATE,
       minPayoutAmount: env.MIN_PAYOUT_AMOUNT,
     },
+    unreadChatEmailDelayMinutes: env.UNREAD_CHAT_EMAIL_DELAY_MINUTES,
     sandbox: {
       host: env.SANDBOX_HOST,
       apiKey: env.SANDBOX_API_KEY,

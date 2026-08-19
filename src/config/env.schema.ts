@@ -55,6 +55,10 @@ export const envSchema = z.object({
   TDS_RATE: z.coerce.number().min(0).max(1).default(0.01), // Section 194-O TDS rate (1%)
   MIN_PAYOUT_AMOUNT: z.coerce.number().nonnegative().default(100), // minimum ₹ net amount to issue a payout
 
+  // Grace period before a fallback "you have unread messages" email is sent for a TriChat
+  // message — cancelled (never sent) if the recipient reads it before this elapses.
+  UNREAD_CHAT_EMAIL_DELAY_MINUTES: z.coerce.number().int().positive().default(10),
+
   // Meetday's legal identity — the "supplier" printed on customer tax invoices.
   // Fill real values in production before invoices are legally valid.
   COMPANY_LEGAL_NAME: z.string().default('Meetday'),

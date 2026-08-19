@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { getQueueToken } from '@nestjs/bull';
+import { ConfigService } from '@nestjs/config';
 import { SponsorshipService } from './sponsorship.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
@@ -36,6 +37,7 @@ describe('SponsorshipService — TriChat', () => {
         { provide: StorageService, useValue: { getPresignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/x') } },
         { provide: NotificationsService, useValue: mockNotifications },
         { provide: AuditLogService, useValue: { log: jest.fn() } },
+        { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue(10) } },
         { provide: getQueueToken('mail'), useValue: mockMailQueue },
       ],
     }).compile();
@@ -162,6 +164,24 @@ describe('SponsorshipService — TriChat', () => {
         expect.objectContaining({ data: expect.objectContaining({ content: '', mediaKey: 'sponsorship-chats/interest-1/x.jpg' }) }),
       );
       expect(result.mediaUrl).toBe('https://cdn.example.com/x');
+    });
+
+    it('schedules a deduped, delayed unread-chat-email check for the recipient', async () => {
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue(baseInterest);
+      prisma.sponsorshipChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
+
+      await service.sendChatMessage('host-user', 'interest-1', { content: 'hello' });
+
+      expect(mockMailQueue.add).toHaveBeenCalledWith(
+        'unread-chat-message-check',
+        { interestId: 'interest-1', recipientUserId: 'brand-user' },
+        expect.objectContaining({
+          delay: 10 * 60_000,
+          jobId: 'unread-chat:interest-1:brand-user',
+          removeOnComplete: true,
+          removeOnFail: true,
+        }),
+      );
     });
   });
 

@@ -24,6 +24,7 @@ import { errorAlertTemplate } from './templates/error-alert.template';
 import { userActionTemplate } from './templates/user-action.template';
 import { brandInterestTemplate } from './templates/brand-interest.template';
 import { announcementTemplate } from './templates/announcement.template';
+import { unreadChatMessageTemplate } from './templates/unread-chat-message.template';
 
 // Admin-facing operational alerts (new signups, pending reviews) are sent from a distinct
 // address from the regular user-facing transactional emails (host-approved, tickets, etc).
@@ -79,6 +80,11 @@ export class MailService {
 
   async sendKycFailed(to: string, hostName: string, reason: string | null): Promise<void> {
     await this.sendMail(to, 'KYC Verification Failed — Meetday', kycFailedTemplate(hostName, reason));
+  }
+
+  async sendUnreadChatMessage(to: string, name: string, unreadCount: number, ctaUrl: string): Promise<void> {
+    const subject = unreadCount > 1 ? `You have ${unreadCount} unread messages on Meetday` : 'You have a new message on Meetday';
+    await this.sendMail(to, subject, unreadChatMessageTemplate(name, unreadCount, ctaUrl));
   }
 
   async sendHostApproved(to: string, hostName: string): Promise<void> {

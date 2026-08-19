@@ -2183,6 +2183,24 @@ export class AdminService {
     return this.prisma.sponsorshipInterest.count({ where: { chatStatus: 'REQUESTED' } });
   }
 
+  // Schedules the fallback "you have unread messages" email check — deduped by jobId so several
+  // admin messages to the same recipient within the grace period collapse into one check/email.
+  private scheduleUnreadChatEmail(interestId: string, recipientUserId: string) {
+    const delayMinutes = this.configService.get<number>('unreadChatEmailDelayMinutes') ?? 10;
+    void this.mailQueue
+      .add(
+        'unread-chat-message-check',
+        { interestId, recipientUserId },
+        {
+          delay: delayMinutes * 60_000,
+          jobId: `unread-chat:${interestId}:${recipientUserId}`,
+          removeOnComplete: true,
+          removeOnFail: true,
+        },
+      )
+      .catch((err) => this.logger.error('Failed to schedule unread-chat-message-check job', err));
+  }
+
   async getSponsorshipChatMessages(interestId: string) {
     const interest = await this.prisma.sponsorshipInterest.findUnique({ where: { id: interestId } });
     if (!interest) throw new NotFoundException('Chat thread not found');
@@ -2239,6 +2257,7 @@ export class AdminService {
           sponsorshipInterestId: interestId,
         })
         .catch((err) => this.logger.error('Failed to notify of admin chat message', err));
+      this.scheduleUnreadChatEmail(interestId, to);
     }
 
     const mediaUrl = dto.mediaKey ? await this.storageService.getPresignedDownloadUrl(dto.mediaKey) : null;

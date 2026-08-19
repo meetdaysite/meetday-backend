@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
+import { ConfigService } from '@nestjs/config';
 import { Prisma, SponsorshipStatus, SponsorshipChatStatus, ChatSenderType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
@@ -38,8 +39,27 @@ export class SponsorshipService {
     private readonly storageService: StorageService,
     private readonly notificationsService: NotificationsService,
     private readonly auditLogService: AuditLogService,
+    private readonly configService: ConfigService,
     @InjectQueue('mail') private readonly mailQueue: Queue,
   ) {}
+
+  // Schedules the fallback "you have unread messages" email check — deduped by jobId so several
+  // messages to the same recipient within the grace period collapse into a single check/email.
+  private scheduleUnreadChatEmail(interestId: string, recipientUserId: string) {
+    const delayMinutes = this.configService.get<number>('unreadChatEmailDelayMinutes') ?? 10;
+    void this.mailQueue
+      .add(
+        'unread-chat-message-check',
+        { interestId, recipientUserId },
+        {
+          delay: delayMinutes * 60_000,
+          jobId: `unread-chat:${interestId}:${recipientUserId}`,
+          removeOnComplete: true,
+          removeOnFail: true,
+        },
+      )
+      .catch((err) => this.logger.error('Failed to schedule unread-chat-message-check job', err));
+  }
 
   private async withSignedUrls<
     T extends { imageKey: string; docKey: string; pendingRevision: Prisma.JsonValue | null },
@@ -813,6 +833,7 @@ export class SponsorshipService {
         sponsorshipInterestId: interest.id,
       })
       .catch((err) => this.logger.error('Failed to notify of new chat message', err));
+    this.scheduleUnreadChatEmail(interest.id, recipientUserId);
 
     const mediaUrl = dto.mediaKey ? await this.storageService.getPresignedDownloadUrl(dto.mediaKey) : null;
     return { ...message, mediaUrl, wasRedacted };
