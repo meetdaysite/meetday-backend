@@ -681,6 +681,18 @@ export class SponsorshipService {
     );
   }
 
+  // Shapes a replied-to message into the small quoted preview returned alongside a reply — shows
+  // a placeholder instead of the real content if the original was since deleted.
+  private replyToPreview(
+    replyTo: { id: string; senderType: ChatSenderType; content: string; mediaKey: string | null; deletedAt: Date | null } | null,
+  ) {
+    if (!replyTo) return null;
+    if (replyTo.deletedAt) {
+      return { id: replyTo.id, senderType: replyTo.senderType, content: 'This message was deleted', hasMedia: false };
+    }
+    return { id: replyTo.id, senderType: replyTo.senderType, content: replyTo.content, hasMedia: !!replyTo.mediaKey };
+  }
+
   // Verifies the caller is either the host or the brand on this interest and returns which "hat"
   // they're wearing, for use as senderType when they post a message.
   private async getInterestForParticipant(userId: string, interestId: string) {
@@ -728,6 +740,7 @@ export class SponsorshipService {
         editedAt: true,
         deletedAt: true,
         createdAt: true,
+        replyTo: { select: { id: true, senderType: true, content: true, mediaKey: true, deletedAt: true } },
       },
     });
 
@@ -741,17 +754,18 @@ export class SponsorshipService {
     }
 
     const withMediaUrls = await Promise.all(
-      messages.map(async ({ mediaKey, deletedAt, ...m }) => {
+      messages.map(async ({ mediaKey, deletedAt, replyTo, ...m }) => {
         // Deleted messages are hidden from host/brand (placeholder only) — admin still sees the
         // original content via the separate admin endpoint, which doesn't go through this path.
         if (deletedAt) {
-          return { ...m, content: '', mediaUrl: null, deletedAt, seenByOther: false };
+          return { ...m, content: '', mediaUrl: null, deletedAt, seenByOther: false, replyTo: this.replyToPreview(replyTo) };
         }
         return {
           ...m,
           deletedAt: null,
           mediaUrl: mediaKey ? await this.storageService.getPresignedDownloadUrl(mediaKey) : null,
           seenByOther: m.senderType === senderType && !!otherLastReadAt && m.createdAt <= otherLastReadAt,
+          replyTo: this.replyToPreview(replyTo),
         };
       }),
     );
@@ -778,10 +792,12 @@ export class SponsorshipService {
     const updated = await this.prisma.sponsorshipChatMessage.update({
       where: { id: messageId },
       data: { content, editedAt: new Date() },
+      include: { replyTo: { select: { id: true, senderType: true, content: true, mediaKey: true, deletedAt: true } } },
     });
 
+    const { replyTo, ...rest } = updated;
     const mediaUrl = updated.mediaKey ? await this.storageService.getPresignedDownloadUrl(updated.mediaKey) : null;
-    return { ...updated, mediaUrl, wasRedacted };
+    return { ...rest, mediaUrl, wasRedacted, replyTo: this.replyToPreview(replyTo) };
   }
 
   // Soft delete — content stays in the DB for admin's view, host/brand just see a placeholder.
@@ -805,12 +821,24 @@ export class SponsorshipService {
       throw new BadRequestException('Message must have text or an image');
     }
 
+    let replyToRow: { id: string; senderType: ChatSenderType; content: string; mediaKey: string | null; deletedAt: Date | null } | null = null;
+    if (dto.replyToId) {
+      const original = await this.prisma.sponsorshipChatMessage.findUnique({
+        where: { id: dto.replyToId },
+        select: { id: true, senderType: true, content: true, mediaKey: true, deletedAt: true, sponsorshipInterestId: true },
+      });
+      if (!original || original.sponsorshipInterestId !== interest.id) {
+        throw new BadRequestException('You can only reply to a message in this chat');
+      }
+      replyToRow = original;
+    }
+
     // Contact info must stay off-platform-conversation — redact emails/phone numbers so hosts
     // and brands can't route around Meetday, and tell the sender why in the response.
     const { content, wasRedacted } = dto.content ? redactPersonalInfo(dto.content) : { content: '', wasRedacted: false };
 
     const message = await this.prisma.sponsorshipChatMessage.create({
-      data: { sponsorshipInterestId: interest.id, senderType, senderId: userId, content, mediaKey: dto.mediaKey },
+      data: { sponsorshipInterestId: interest.id, senderType, senderId: userId, content, mediaKey: dto.mediaKey, replyToId: dto.replyToId },
     });
     await this.prisma.sponsorshipInterest.update({
       where: { id: interest.id },
@@ -836,7 +864,7 @@ export class SponsorshipService {
     this.scheduleUnreadChatEmail(interest.id, recipientUserId);
 
     const mediaUrl = dto.mediaKey ? await this.storageService.getPresignedDownloadUrl(dto.mediaKey) : null;
-    return { ...message, mediaUrl, wasRedacted };
+    return { ...message, mediaUrl, wasRedacted, replyTo: this.replyToPreview(replyToRow) };
   }
 
 

@@ -2219,14 +2219,18 @@ export class AdminService {
         editedAt: true,
         deletedAt: true,
         createdAt: true,
+        replyTo: { select: { id: true, senderType: true, content: true, mediaKey: true, deletedAt: true } },
       },
     });
     // Admin sees the original content even after a host/brand "deletes" it — deletedAt is
     // surfaced so the UI can flag it (e.g. "Deleted by sender"), not hidden like it is for them.
     const withMediaUrls = await Promise.all(
-      messages.map(async ({ mediaKey, ...m }) => ({
+      messages.map(async ({ mediaKey, replyTo, ...m }) => ({
         ...m,
         mediaUrl: mediaKey ? await this.storageService.getPresignedDownloadUrl(mediaKey) : null,
+        replyTo: replyTo
+          ? { id: replyTo.id, senderType: replyTo.senderType, content: replyTo.deletedAt ? 'This message was deleted' : replyTo.content, hasMedia: !replyTo.deletedAt && !!replyTo.mediaKey }
+          : null,
       })),
     );
     return { messages: withMediaUrls, chatStatus: interest.chatStatus };
@@ -2245,8 +2249,27 @@ export class AdminService {
       throw new BadRequestException('Message must have text or an image');
     }
 
+    let replyToRow: { id: string; senderType: string; content: string; mediaKey: string | null; deletedAt: Date | null } | null = null;
+    if (dto.replyToId) {
+      const original = await this.prisma.sponsorshipChatMessage.findUnique({
+        where: { id: dto.replyToId },
+        select: { id: true, senderType: true, content: true, mediaKey: true, deletedAt: true, sponsorshipInterestId: true },
+      });
+      if (!original || original.sponsorshipInterestId !== interestId) {
+        throw new BadRequestException('You can only reply to a message in this chat');
+      }
+      replyToRow = original;
+    }
+
     const message = await this.prisma.sponsorshipChatMessage.create({
-      data: { sponsorshipInterestId: interestId, senderType: 'ADMIN', senderId: adminId, content: dto.content ?? '', mediaKey: dto.mediaKey },
+      data: {
+        sponsorshipInterestId: interestId,
+        senderType: 'ADMIN',
+        senderId: adminId,
+        content: dto.content ?? '',
+        mediaKey: dto.mediaKey,
+        replyToId: dto.replyToId,
+      },
     });
     await this.prisma.sponsorshipInterest.update({ where: { id: interestId }, data: { lastMessageAt: message.createdAt } });
 
@@ -2261,7 +2284,18 @@ export class AdminService {
     }
 
     const mediaUrl = dto.mediaKey ? await this.storageService.getPresignedDownloadUrl(dto.mediaKey) : null;
-    return { ...message, mediaUrl };
+    return {
+      ...message,
+      mediaUrl,
+      replyTo: replyToRow
+        ? {
+            id: replyToRow.id,
+            senderType: replyToRow.senderType,
+            content: replyToRow.deletedAt ? 'This message was deleted' : replyToRow.content,
+            hasMedia: !replyToRow.deletedAt && !!replyToRow.mediaKey,
+          }
+        : null,
+    };
   }
 
   // ── Deal Lock: admin oversight of negotiated & locked sponsorship deals ────────

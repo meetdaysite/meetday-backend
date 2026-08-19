@@ -1109,6 +1109,10 @@ model SponsorshipChatMessage {
   editedAt  DateTime? // set when the sender edits their own message's content
   deletedAt DateTime? // soft delete — host/brand see a placeholder, admin still sees the original content
 
+  replyToId String?
+  replyTo   SponsorshipChatMessage?  @relation("MessageReplyTo", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies   SponsorshipChatMessage[] @relation("MessageReplyTo")
+
   createdAt DateTime @default(now())
 
   @@index([sponsorshipInterestId, createdAt])

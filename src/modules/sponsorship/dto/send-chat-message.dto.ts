@@ -1,4 +1,4 @@
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class SendChatMessageDto {
@@ -15,4 +15,9 @@ export class SendChatMessageDto {
   @IsString()
   @MaxLength(500)
   mediaKey?: string;
+
+  @ApiPropertyOptional({ description: 'UUID of a message in the same thread being replied to.' })
+  @IsOptional()
+  @IsUUID()
+  replyToId?: string;
 }
