@@ -29,7 +29,7 @@ const sign = (rawBody: Buffer) => createHmac('sha256', TEST_WEBHOOK_SECRET).upda
 
 function makePrisma() {
   const prisma: any = {
-    user: { findUnique: jest.fn() },
+    user: { findUnique: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
     role: { findUniqueOrThrow: jest.fn() },
     category: { findMany: jest.fn() },
     hostProfile: {
@@ -50,6 +50,13 @@ function makePrisma() {
     subscriptionPlan: { findUnique: jest.fn() },
     coupon: { findUnique: jest.fn() },
     couponRedemption: { create: jest.fn(), count: jest.fn().mockResolvedValue(0) },
+    hostCommunityProfile: {
+      findUnique: jest.fn(),
+      upsert: jest.fn(),
+      update: jest.fn(),
+      deleteMany: jest.fn().mockResolvedValue({}),
+    },
+    hostCommunityProfileCategory: { deleteMany: jest.fn().mockResolvedValue({}), createMany: jest.fn().mockResolvedValue({}) },
   };
   prisma.$transaction = jest.fn().mockImplementation(async (fn: any) => {
     if (Array.isArray(fn)) return Promise.all(fn);
@@ -781,6 +788,87 @@ describe('HostsService', () => {
           service.upgradeSubscription(userId, { ...upgradeDto, couponCode: 'SAVE10' }),
         ).rejects.toThrow(BadRequestException);
       });
+    });
+  });
+
+  // ── Community profile: pastEvents ────────────────────────────────────────
+
+  describe('community profile past events', () => {
+    const communityDto = {
+      name: 'Founders Circle',
+      about: 'A community of founders',
+      logoKey: 'logo.jpg',
+      size: '100',
+      avgGuestCount: '20',
+      experiencesPerYear: '6',
+      categoryIds: [categoryId],
+      pastEvents: [{ name: 'Meetup 1', description: 'A great night', imageKeys: ['past-events/a.jpg', 'past-events/b.jpg'] }],
+    };
+
+    beforeEach(() => {
+      prisma.hostProfile.findUnique.mockResolvedValue({
+        id: hostProfileId,
+        communityName: 'Founders Circle',
+        user: { firstName: 'Jane' },
+      });
+      prisma.category.findMany.mockResolvedValue([{ id: categoryId }]);
+      prisma.user.findMany.mockResolvedValue([]);
+    });
+
+    it('persists pastEvents as JSON on a new/not-yet-approved profile', async () => {
+      prisma.hostCommunityProfile.findUnique
+        .mockResolvedValueOnce(null) // existing lookup
+        .mockResolvedValueOnce({ ...communityDto, id: 'profile-1', logoUrl: undefined, categories: [] }); // final re-fetch
+      prisma.hostCommunityProfile.upsert.mockResolvedValue({ id: 'profile-1', name: communityDto.name });
+
+      await service.activateCommunityProfile(userId, communityDto as any);
+
+      expect(prisma.hostCommunityProfile.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ pastEvents: communityDto.pastEvents }),
+          update: expect.objectContaining({ pastEvents: communityDto.pastEvents }),
+        }),
+      );
+    });
+
+    it('stages pastEvents inside pendingRevision when the profile is already APPROVED', async () => {
+      prisma.hostCommunityProfile.findUnique
+        .mockResolvedValueOnce({ id: 'profile-1', approvalStatus: 'APPROVED' })
+        .mockResolvedValueOnce({ ...communityDto, id: 'profile-1', approvalStatus: 'APPROVED', pendingRevision: communityDto, logoUrl: undefined, categories: [] });
+      prisma.hostCommunityProfile.update.mockResolvedValue({ id: 'profile-1', name: communityDto.name });
+
+      await service.activateCommunityProfile(userId, communityDto as any);
+
+      expect(prisma.hostCommunityProfile.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ pendingRevision: expect.objectContaining({ pastEvents: communityDto.pastEvents }) }) }),
+      );
+    });
+
+    it('getCommunityProfile() signs each past event image into a URL', async () => {
+      prisma.hostCommunityProfile.findUnique.mockResolvedValue({
+        id: 'profile-1',
+        logoKey: 'logo.jpg',
+        pastEvents: [{ name: 'Meetup 1', imageKeys: ['past-events/a.jpg'] }],
+        categories: [],
+      });
+
+      const result = await service.getCommunityProfile(userId);
+
+      expect(result?.pastEvents).toEqual([
+        expect.objectContaining({ name: 'Meetup 1', imageKeys: ['past-events/a.jpg'], imageUrls: ['https://cdn.example.com/img'] }),
+      ]);
+    });
+
+    it('getCommunityProfile() returns an empty pastEvents array when none were ever added', async () => {
+      prisma.hostCommunityProfile.findUnique.mockResolvedValue({
+        id: 'profile-1',
+        logoKey: 'logo.jpg',
+        pastEvents: null,
+        categories: [],
+      });
+
+      const result = await service.getCommunityProfile(userId);
+      expect(result?.pastEvents).toEqual([]);
     });
   });
 });

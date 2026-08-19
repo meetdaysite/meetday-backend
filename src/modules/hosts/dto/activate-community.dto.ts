@@ -1,5 +1,7 @@
-import { IsArray, IsOptional, IsString, IsUUID } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsArray, IsOptional, IsString, IsUUID, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { PastEventDto } from './past-event.dto';
 
 export class ActivateCommunityDto {
   @ApiProperty({ description: 'Optional GCS object key for the secondary 4:5 image' })
@@ -34,4 +36,14 @@ export class ActivateCommunityDto {
   @IsArray()
   @IsUUID('4', { each: true })
   categoryIds: string[];
+
+  @ApiPropertyOptional({
+    type: [PastEventDto],
+    description: 'Optional showcase of past events — entirely optional, and every field within each entry is optional too.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PastEventDto)
+  pastEvents?: PastEventDto[];
 }

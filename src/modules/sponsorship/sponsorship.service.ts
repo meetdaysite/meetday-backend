@@ -25,6 +25,9 @@ import { redactPersonalInfo } from '../../common/utils/redact-personal-info.util
 
 const ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'];
 
+// Shape of one raw stored past-event entry (HostCommunityProfile.pastEvents JSON column).
+type PastEventLike = { name?: string; description?: string; imageKeys?: string[] };
+
 @Injectable()
 export class SponsorshipService {
   private readonly logger = new Logger(SponsorshipService.name);
@@ -61,6 +64,22 @@ export class SponsorshipService {
     }
 
     return { ...proposal, imageUrl, docUrl, pendingRevision };
+  }
+
+  // Signs each past event's image keys into downloadable URLs — pastEvents is stored as raw
+  // JSON (array of { name?, description?, imageKeys? }), entirely optional at every level.
+  private async withPastEventImageUrls(pastEvents: PastEventLike[] | null | undefined) {
+    if (!pastEvents || !Array.isArray(pastEvents)) return [];
+    return Promise.all(
+      pastEvents.map(async (event) => ({
+        name: event?.name ?? null,
+        description: event?.description ?? null,
+        imageKeys: event?.imageKeys ?? [],
+        imageUrls: await Promise.all(
+          (event?.imageKeys ?? []).map((key) => this.storageService.getPresignedDownloadUrl(key)),
+        ),
+      })),
+    );
   }
 
   private async getOwnedProposal(userId: string, id: string) {
@@ -311,15 +330,17 @@ export class SponsorshipService {
 
     let community: Record<string, unknown> | null = null;
     if (communityProfile && communityProfile.approvalStatus === 'APPROVED') {
-      const { categories, logoKey, secondaryImageKey, ...communityRest } = communityProfile;
-      const [logoUrl, secondaryImageUrl] = await Promise.all([
+      const { categories, logoKey, secondaryImageKey, pastEvents, ...communityRest } = communityProfile;
+      const [logoUrl, secondaryImageUrl, pastEventsWithUrls] = await Promise.all([
         logoKey ? this.storageService.getPresignedDownloadUrl(logoKey) : null,
         secondaryImageKey ? this.storageService.getPresignedDownloadUrl(secondaryImageKey) : null,
+        this.withPastEventImageUrls(pastEvents as PastEventLike[] | null),
       ]);
       community = {
         ...communityRest,
         logoUrl,
         secondaryImageUrl,
+        pastEvents: pastEventsWithUrls,
         categories: categories.map((c) => c.category),
       };
     }

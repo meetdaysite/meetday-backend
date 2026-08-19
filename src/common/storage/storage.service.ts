@@ -54,6 +54,7 @@ const CONTEXT_CONTENT_TYPES: Record<UploadContext, readonly string[]> = {
   [UploadContext.SPONSORSHIP_DOCUMENT]: PITCH_DOC_TYPES,
   [UploadContext.SPONSORSHIP_CHAT_MEDIA]: IMAGE_TYPES,
   [UploadContext.MEETDAY_CHAT_MEDIA]: IMAGE_TYPES,
+  [UploadContext.COMMUNITY_PAST_EVENT_MEDIA]: IMAGE_TYPES,
 };
 
 // Platform-admin roles required by the admin-only contexts.
@@ -391,6 +392,13 @@ export class StorageService {
           throw new ForbiddenException('You do not have access to this chat');
         }
         key = `meetday-chats/${targetUserId}/${randomUUID()}.${ext}`;
+        break;
+      }
+
+      case UploadContext.COMMUNITY_PAST_EVENT_MEDIA: {
+        const hostProfile = await this.prisma.hostProfile.findUnique({ where: { userId } });
+        if (!hostProfile) throw new NotFoundException('Host profile not found');
+        key = `hosts/${hostProfile.id}/community-profile/past-events/${randomUUID()}.${ext}`;
         break;
       }
 
