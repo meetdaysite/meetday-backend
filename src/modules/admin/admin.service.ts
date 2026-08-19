@@ -2142,10 +2142,10 @@ export class AdminService {
     const threads = await this.prisma.sponsorshipInterest.findMany({
       where: query.status ? { chatStatus: query.status } : undefined,
       include: {
-        sponsorshipProposal: {
-          select: { id: true, name: true, hostProfile: { select: { displayName: true, communityProfile: { select: { name: true } } } } },
+                sponsorshipProposal: {
+          select: { id: true, name: true, hostProfile: { select: { displayName: true, communityProfile: { select: { name: true, logoUrl: true } } } } },
         },
-        brandProfile: { select: { id: true, brandName: true } },
+        brandProfile: { select: { id: true, brandName: true, logoUrl: true } },
         chatMessages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true, mediaKey: true, senderType: true, createdAt: true } },
       },
       orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
@@ -2160,8 +2160,10 @@ export class AdminService {
       chatStatus: t.chatStatus,
       createdAt: t.createdAt,
       chatAcceptedAt: t.chatAcceptedAt,
-      lastMessageAt: t.lastMessageAt,
+            lastMessageAt: t.lastMessageAt,
       lastMessagePreview: t.chatMessages[0] ? (t.chatMessages[0].content || (t.chatMessages[0].mediaKey ? '\ud83d\udcf7 Photo' : '')).slice(0, 120) : null,
+      brandLogoUrl: t.brandProfile.logoUrl,
+      communityLogoUrl: t.sponsorshipProposal.hostProfile.communityProfile?.logoUrl,
     }));
   }
 
@@ -2284,7 +2286,16 @@ export class AdminService {
   async listMeetdayChats() {
     const threads = await this.prisma.meetdayChatThread.findMany({
       include: {
-        user: { select: { firstName: true, lastName: true, email: true, role: { select: { name: true } } } },
+                user: {
+          select: {
+            firstName: true,
+            lastName: true,
+            email: true,
+            role: { select: { name: true } },
+            hostProfile: { select: { communityProfile: { select: { logoUrl: true } } } },
+            brandProfile: { select: { logoUrl: true } },
+          },
+        },
         messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true, mediaKey: true, createdAt: true } },
       },
       orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
@@ -2310,8 +2321,9 @@ export class AdminService {
       userRole: t.user.role?.name ?? null,
       createdAt: t.createdAt,
       lastMessageAt: t.lastMessageAt,
-      lastMessagePreview: t.messages[0] ? (t.messages[0].content || (t.messages[0].mediaKey ? '📷 Photo' : '')).slice(0, 120) : null,
+            lastMessagePreview: t.messages[0] ? (t.messages[0].content || (t.messages[0].mediaKey ? '📷 Photo' : '')).slice(0, 120) : null,
       unreadCount: unreadCounts[idx],
+      userLogoUrl: t.user.brandProfile?.logoUrl || t.user.hostProfile?.communityProfile?.logoUrl || null,
     }));
   }
 
