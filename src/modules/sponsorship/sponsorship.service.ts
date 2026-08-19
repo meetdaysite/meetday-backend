@@ -472,7 +472,7 @@ export class SponsorshipService {
   async listApprovedCommunities() {
     const profiles = await this.prisma.hostCommunityProfile.findMany({
       where: { approvalStatus: 'APPROVED' },
-      select: {
+            select: {
         id: true,
         hostProfileId: true,
         name: true,
@@ -482,6 +482,7 @@ export class SponsorshipService {
         size: true,
         avgGuestCount: true,
         experiencesPerYear: true,
+        pastEvents: true,
         categories: { select: { category: { select: { id: true, name: true } } } },
         hostProfile: {
           select: {
@@ -493,14 +494,29 @@ export class SponsorshipService {
       orderBy: { updatedAt: 'desc' },
     });
 
+        const signPastEvents = async (pastEvents) => {
+      if (!pastEvents || !Array.isArray(pastEvents)) return [];
+      return Promise.all(
+        pastEvents.map(async (event) => ({
+          name: event?.name ?? null,
+          description: event?.description ?? null,
+          imageKeys: event?.imageKeys ?? [],
+          imageUrls: await Promise.all(
+            (event?.imageKeys ?? []).map((key) => this.storageService.getPresignedDownloadUrl(key)),
+          ),
+        })),
+      );
+    };
+
     const communities = await Promise.all(
-      profiles.map(async ({ logoKey, secondaryImageKey, categories, hostProfile, ...rest }) => ({
+      profiles.map(async ({ logoKey, secondaryImageKey, categories, hostProfile, pastEvents, ...rest }) => ({
         ...rest,
         logoUrl: logoKey ? await this.storageService.getPresignedDownloadUrl(logoKey) : null,
         secondaryImageUrl: secondaryImageKey ? await this.storageService.getPresignedDownloadUrl(secondaryImageKey) : null,
         categories: categories.map((c) => c.category),
         operatingCities: hostProfile?.operatingCities ?? [],
         socialLinks: hostProfile?.socialLinks ?? null,
+        pastEvents: await signPastEvents(pastEvents),
       })),
     );
 
