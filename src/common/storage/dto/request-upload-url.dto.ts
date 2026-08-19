@@ -16,6 +16,7 @@ export enum UploadContext {
   SPONSORSHIP_MEDIA = 'SPONSORSHIP_MEDIA',
   SPONSORSHIP_DOCUMENT = 'SPONSORSHIP_DOCUMENT',
   SPONSORSHIP_CHAT_MEDIA = 'SPONSORSHIP_CHAT_MEDIA',
+  MEETDAY_CHAT_MEDIA = 'MEETDAY_CHAT_MEDIA',
 }
 
 const ALLOWED_CONTENT_TYPES = [
@@ -44,7 +45,7 @@ export class RequestUploadUrlDto {
       'UUID of the related resource — semantics depend on context: event (EVENT_MEDIA, optional), ' +
       'interest (INTEREST_IMAGE), community (COMMUNITY_COVER/ICON optional, COMMUNITY_ANNOUNCEMENT/FEED_MEDIA required), ' +
       'conversation (COMMUNITY_DM_MEDIA required), sponsorship interest (SPONSORSHIP_CHAT_MEDIA required). ' +
-      'Not used for USER_AVATAR / HOST_DOCUMENT / REVIEW_PHOTO.',
+      'Not used for USER_AVATAR / HOST_DOCUMENT / REVIEW_PHOTO / MEETDAY_CHAT_MEDIA.',
   })
   @IsOptional()
   @IsUUID()

@@ -50,6 +50,8 @@ function makePrisma() {
     adminAnnouncement: { create: jest.fn().mockResolvedValue({ id: 'announcement-uuid' }), findMany: jest.fn(), count: jest.fn() },
     sponsorshipInterest: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn(), count: jest.fn() },
     sponsorshipChatMessage: { findMany: jest.fn(), create: jest.fn() },
+    meetdayChatThread: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}) },
+    meetdayChatMessage: { findMany: jest.fn(), create: jest.fn(), count: jest.fn() },
     coupon: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn(), count: jest.fn() },
     category: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn() },
     event: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
@@ -1251,4 +1253,67 @@ describe('AdminService', () => {
       expect(result).toBe(4);
     });
   });
+
+  describe('"Talk to Meetday" general chat', () => {
+    it('listMeetdayChats() maps threads with an unread count', async () => {
+      prisma.meetdayChatThread.findMany.mockResolvedValue([
+        {
+          id: 'thread-1',
+          userId: 'user-1',
+          createdAt: new Date(),
+          lastMessageAt: new Date(),
+          adminLastReadAt: null,
+          user: { firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com', role: { name: 'HOST' } },
+          messages: [{ content: 'Need help', mediaKey: null, createdAt: new Date() }],
+        },
+      ]);
+      prisma.meetdayChatMessage.count.mockResolvedValue(2);
+
+      const result = await service.listMeetdayChats();
+
+      expect(result).toEqual([
+        expect.objectContaining({
+          id: 'thread-1',
+          userId: 'user-1',
+          userName: 'Jane Doe',
+          userEmail: 'jane@example.com',
+          lastMessagePreview: 'Need help',
+          unreadCount: 2,
+        }),
+      ]);
+    });
+
+    it('getMeetdayChatMessages() throws NotFoundException for an unknown thread', async () => {
+      prisma.meetdayChatThread.findUnique.mockResolvedValue(null);
+      await expect(service.getMeetdayChatMessages('bad-id')).rejects.toThrow(NotFoundException);
+    });
+
+    it('sendMeetdayChatMessage() posts as ADMIN and notifies the thread owner only', async () => {
+      prisma.meetdayChatThread.findUnique.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
+      prisma.meetdayChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
+
+      await service.sendMeetdayChatMessage('thread-1', 'admin-uuid', { content: 'Hi from Meetday' });
+
+      expect(prisma.meetdayChatMessage.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ threadId: 'thread-1', senderType: 'ADMIN', senderId: 'admin-uuid' }) }),
+      );
+    });
+
+    it('sendMeetdayChatMessage() rejects a message with no text and no image', async () => {
+      prisma.meetdayChatThread.findUnique.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
+      await expect(service.sendMeetdayChatMessage('thread-1', 'admin-uuid', {})).rejects.toThrow(BadRequestException);
+    });
+
+    it('countUnreadMeetdayChats() counts only threads with an unread user message', async () => {
+      prisma.meetdayChatThread.findMany.mockResolvedValue([
+        { id: 'thread-1', adminLastReadAt: null },
+        { id: 'thread-2', adminLastReadAt: new Date() },
+      ]);
+      prisma.meetdayChatMessage.count.mockResolvedValueOnce(3).mockResolvedValueOnce(0);
+
+      const result = await service.countUnreadMeetdayChats();
+      expect(result).toBe(1);
+    });
+  });
 });
+

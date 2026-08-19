@@ -84,6 +84,9 @@ model User {
 
   sponsorshipChatMessages SponsorshipChatMessage[] @relation("SponsorshipChatSender")
 
+  meetdayChatThread    MeetdayChatThread?   @relation("MeetdayChatThreadUser")
+  meetdayChatMessages  MeetdayChatMessage[] @relation("MeetdayChatMessageSender")
+
   createdCommunities   Community[]       @relation("CommunityCreatedBy")
   communityMemberships CommunityMember[]
 
@@ -1094,6 +1097,47 @@ model SponsorshipChatMessage {
 
   @@index([sponsorshipInterestId, createdAt])
   @@map("sponsorship_chat_messages")
+}
+
+// General "Talk to Meetday" support chat — one thread per Host/Brand user, separate from
+// TriChat (which is tied to a specific sponsorship interest).
+model MeetdayChatThread {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation("MeetdayChatThreadUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt       DateTime  @default(now())
+  lastMessageAt   DateTime?
+  userLastReadAt  DateTime?
+  // Shared across all admins for simplicity — any admin opening the thread marks it read for all.
+  adminLastReadAt DateTime?
+
+  messages MeetdayChatMessage[]
+
+  @@map("meetday_chat_threads")
+}
+
+enum MeetdayChatSenderType {
+  USER
+  ADMIN
+}
+
+model MeetdayChatMessage {
+  id       String            @id @default(uuid())
+  threadId String
+  thread   MeetdayChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  senderType MeetdayChatSenderType
+  senderId   String
+  sender     User                  @relation("MeetdayChatMessageSender", fields: [senderId], references: [id])
+
+  content  String  @db.Text
+  mediaKey String?
+
+  createdAt DateTime @default(now())
+
+  @@index([threadId, createdAt])
+  @@map("meetday_chat_messages")
 }
 
 // Host-facing "community profile" shown to potential sponsors on the sponsorship

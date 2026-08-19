@@ -1684,6 +1684,50 @@ export class AdminController {
     return this.adminService.sendSponsorshipChatMessage(interestId, adminId, dto);
   }
 
+  // ─── "Talk to Meetday" general support chat ────────────────────────────
+
+  @Get('meetday-chats')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({
+    summary: 'List every "Talk to Meetday" support chat thread',
+    description: 'One thread per Host/Brand user, newest activity first — separate from TriChat.',
+  })
+  @ApiOkResponse({ description: 'List of chat threads.' })
+  listMeetdayChats() {
+    return this.adminService.listMeetdayChats();
+  }
+
+  @Get('meetday-chats/unread-count')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({ summary: 'Count of Meetday chat threads with an unread user message', description: 'Backs the "Meetday Chats" sidebar badge.' })
+  @ApiOkResponse({ description: 'Unread thread count.' })
+  countUnreadMeetdayChats() {
+    return this.adminService.countUnreadMeetdayChats();
+  }
+
+  @Get('meetday-chats/:threadId/messages')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({ summary: 'List messages in a "Talk to Meetday" thread' })
+  @ApiOkResponse({ description: 'Messages, oldest first.' })
+  @ApiNotFoundResponse({ description: 'Chat thread not found.' })
+  getMeetdayChatMessages(@Param('threadId', ParseUUIDPipe) threadId: string) {
+    return this.adminService.getMeetdayChatMessages(threadId);
+  }
+
+  @Post('meetday-chats/:threadId/messages')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Reply as Meetday in a "Talk to Meetday" thread' })
+  @ApiOkResponse({ description: 'Message sent.' })
+  @ApiNotFoundResponse({ description: 'Chat thread not found.' })
+  sendMeetdayChatMessage(
+    @Param('threadId', ParseUUIDPipe) threadId: string,
+    @Body() dto: SendChatMessageDto,
+    @GetUser('id') adminId: string,
+  ) {
+    return this.adminService.sendMeetdayChatMessage(threadId, adminId, dto);
+  }
+
   @Post('brands/:id/approve')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @HttpCode(HttpStatus.OK)

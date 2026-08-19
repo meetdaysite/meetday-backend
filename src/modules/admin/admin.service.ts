@@ -2220,6 +2220,107 @@ export class AdminService {
     return { ...message, mediaUrl };
   }
 
+  // ── "Talk to Meetday" general support chat (separate from TriChat) ──────
+
+  async listMeetdayChats() {
+    const threads = await this.prisma.meetdayChatThread.findMany({
+      include: {
+        user: { select: { firstName: true, lastName: true, email: true, role: { select: { name: true } } } },
+        messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true, mediaKey: true, createdAt: true } },
+      },
+      orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    const unreadCounts = await Promise.all(
+      threads.map((t) =>
+        this.prisma.meetdayChatMessage.count({
+          where: {
+            threadId: t.id,
+            senderType: 'USER',
+            ...(t.adminLastReadAt && { createdAt: { gt: t.adminLastReadAt } }),
+          },
+        }),
+      ),
+    );
+
+    return threads.map((t, idx) => ({
+      id: t.id,
+      userId: t.userId,
+      userName: `${t.user.firstName} ${t.user.lastName}`.trim(),
+      userEmail: t.user.email,
+      userRole: t.user.role?.name ?? null,
+      createdAt: t.createdAt,
+      lastMessageAt: t.lastMessageAt,
+      lastMessagePreview: t.messages[0] ? (t.messages[0].content || (t.messages[0].mediaKey ? '📷 Photo' : '')).slice(0, 120) : null,
+      unreadCount: unreadCounts[idx],
+    }));
+  }
+
+  async getMeetdayChatMessages(threadId: string) {
+    const thread = await this.prisma.meetdayChatThread.findUnique({ where: { id: threadId } });
+    if (!thread) throw new NotFoundException('Chat thread not found');
+
+    const messages = await this.prisma.meetdayChatMessage.findMany({
+      where: { threadId },
+      orderBy: { createdAt: 'asc' },
+      take: 200,
+      select: { id: true, senderType: true, senderId: true, content: true, mediaKey: true, createdAt: true },
+    });
+    const withMediaUrls = await Promise.all(
+      messages.map(async ({ mediaKey, ...m }) => ({
+        ...m,
+        mediaUrl: mediaKey ? await this.storageService.getPresignedDownloadUrl(mediaKey) : null,
+      })),
+    );
+
+    void this.prisma.meetdayChatThread
+      .update({ where: { id: threadId }, data: { adminLastReadAt: new Date() } })
+      .catch((err) => this.logger.error('Failed to update Meetday chat admin read state', err));
+
+    return { messages: withMediaUrls };
+  }
+
+  async sendMeetdayChatMessage(threadId: string, adminId: string, dto: SendChatMessageDto) {
+    const thread = await this.prisma.meetdayChatThread.findUnique({ where: { id: threadId } });
+    if (!thread) throw new NotFoundException('Chat thread not found');
+    if (!dto.content?.trim() && !dto.mediaKey) {
+      throw new BadRequestException('Message must have text or an image');
+    }
+
+    const message = await this.prisma.meetdayChatMessage.create({
+      data: { threadId, senderType: 'ADMIN', senderId: adminId, content: dto.content ?? '', mediaKey: dto.mediaKey },
+    });
+    await this.prisma.meetdayChatThread.update({
+      where: { id: threadId },
+      data: { lastMessageAt: message.createdAt, adminLastReadAt: message.createdAt },
+    });
+
+    const preview = dto.content?.trim() ? dto.content.slice(0, 80) : '📷 Sent a photo';
+    void this.notificationsService
+      .create(thread.userId, 'meetday_chat_message', 'Meetday', preview, { meetdayChatThreadId: threadId })
+      .catch((err) => this.logger.error('Failed to notify of Meetday chat message', err));
+
+    const mediaUrl = dto.mediaKey ? await this.storageService.getPresignedDownloadUrl(dto.mediaKey) : null;
+    return { ...message, mediaUrl };
+  }
+
+  // Total threads with an unread user message — backs the admin sidebar's "Meetday Chats" badge.
+  async countUnreadMeetdayChats() {
+    const threads = await this.prisma.meetdayChatThread.findMany({ select: { id: true, adminLastReadAt: true } });
+    const unreadFlags = await Promise.all(
+      threads.map((t) =>
+        this.prisma.meetdayChatMessage.count({
+          where: {
+            threadId: t.id,
+            senderType: 'USER',
+            ...(t.adminLastReadAt && { createdAt: { gt: t.adminLastReadAt } }),
+          },
+        }),
+      ),
+    );
+    return unreadFlags.filter((count) => count > 0).length;
+  }
+
 
   async getCommunityProfileDetail(id: string) {
     const profile = await this.prisma.hostCommunityProfile.findUnique({

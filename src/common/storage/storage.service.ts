@@ -53,6 +53,7 @@ const CONTEXT_CONTENT_TYPES: Record<UploadContext, readonly string[]> = {
   [UploadContext.SPONSORSHIP_MEDIA]: IMAGE_TYPES,
   [UploadContext.SPONSORSHIP_DOCUMENT]: PITCH_DOC_TYPES,
   [UploadContext.SPONSORSHIP_CHAT_MEDIA]: IMAGE_TYPES,
+  [UploadContext.MEETDAY_CHAT_MEDIA]: IMAGE_TYPES,
 };
 
 // Platform-admin roles required by the admin-only contexts.
@@ -377,6 +378,19 @@ export class StorageService {
           throw new ForbiddenException('This chat has not been accepted yet');
         }
         key = `sponsorship-chats/${dto.resourceId}/${randomUUID()}.${ext}`;
+        break;
+      }
+
+      case UploadContext.MEETDAY_CHAT_MEDIA: {
+        // "Talk to Meetday" support chat image. resourceId (optional) is the thread owner's user
+        // id — only relevant for an admin uploading into someone else's thread; a host/brand
+        // uploading to their own thread omits it and defaults to themselves.
+        const isAdmin = SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '');
+        const targetUserId = dto.resourceId ?? userId;
+        if (dto.resourceId && dto.resourceId !== userId && !isAdmin) {
+          throw new ForbiddenException('You do not have access to this chat');
+        }
+        key = `meetday-chats/${targetUserId}/${randomUUID()}.${ext}`;
         break;
       }
 
