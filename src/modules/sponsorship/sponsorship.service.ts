@@ -19,6 +19,7 @@ import { ListPublishedQueryDto } from './dto/list-published-query.dto';
 import { ListSponsorshipChatsQueryDto } from './dto/list-sponsorship-chats-query.dto';
 import { SendChatMessageDto } from './dto/send-chat-message.dto';
 import { ADMIN_ALERT_EMAILS } from '../../common/mail/admin-recipients.constant';
+import { redactPersonalInfo } from '../../common/utils/redact-personal-info.util';
 
 const ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'];
 
@@ -652,8 +653,12 @@ export class SponsorshipService {
       throw new BadRequestException('The community must accept this request before you can chat.');
     }
 
+    // Contact info must stay off-platform-conversation — redact emails/phone numbers so hosts
+    // and brands can't route around Meetday, and tell the sender why in the response.
+    const { content, wasRedacted } = redactPersonalInfo(dto.content);
+
     const message = await this.prisma.sponsorshipChatMessage.create({
-      data: { sponsorshipInterestId: interest.id, senderType, senderId: userId, content: dto.content },
+      data: { sponsorshipInterestId: interest.id, senderType, senderId: userId, content },
     });
     await this.prisma.sponsorshipInterest.update({
       where: { id: interest.id },
@@ -669,7 +674,7 @@ export class SponsorshipService {
       })
       .catch((err) => this.logger.error('Failed to notify of new chat message', err));
 
-    return message;
+    return { ...message, wasRedacted };
   }
 
   // Host accepts a brand's interest \u2014 opens the chat window both sides ("Requests" \u2192 "General").
