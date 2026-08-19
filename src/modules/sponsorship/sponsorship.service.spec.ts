@@ -132,7 +132,7 @@ describe('SponsorshipService — TriChat', () => {
       await expect(service.sendChatMessage('host-user', 'interest-1', { content: 'hi' })).rejects.toThrow(BadRequestException);
     });
 
-    it('redacts an email/phone number before saving and flags wasRedacted', async () => {
+    it('masks an email/phone number before saving and flags wasRedacted', async () => {
       prisma.sponsorshipInterest.findUnique.mockResolvedValue(baseInterest);
       prisma.sponsorshipChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
 
@@ -141,7 +141,7 @@ describe('SponsorshipService — TriChat', () => {
       });
 
       expect(prisma.sponsorshipChatMessage.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ content: expect.stringContaining('[contact info removed]') }) }),
+        expect.objectContaining({ data: expect.objectContaining({ content: expect.stringContaining('h***@example.com') }) }),
       );
       expect(result.wasRedacted).toBe(true);
     });
