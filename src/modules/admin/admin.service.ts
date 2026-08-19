@@ -2151,8 +2151,23 @@ export class AdminService {
       orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
     });
 
+    // Unread = messages from the host or brand (not Meetday itself) sent after an admin last
+    // opened this thread — shared across all admins, same as adminLastReadAt on the interest.
+    const unreadCounts = await Promise.all(
+      threads.map((t) =>
+        this.prisma.sponsorshipChatMessage.count({
+          where: {
+            sponsorshipInterestId: t.id,
+            senderType: { not: 'ADMIN' },
+            deletedAt: null,
+            ...(t.adminLastReadAt && { createdAt: { gt: t.adminLastReadAt } }),
+          },
+        }),
+      ),
+    );
+
     return Promise.all(
-      threads.map(async (t) => {
+      threads.map(async (t, idx) => {
         const [brandLogoUrl, communityLogoUrl] = await Promise.all([
           t.brandProfile.logoKey ? this.storageService.getPresignedDownloadUrl(t.brandProfile.logoKey) : null,
           t.sponsorshipProposal.hostProfile.communityProfile?.logoKey
@@ -2170,6 +2185,7 @@ export class AdminService {
           chatAcceptedAt: t.chatAcceptedAt,
           lastMessageAt: t.lastMessageAt,
           lastMessagePreview: t.chatMessages[0] ? (t.chatMessages[0].content || (t.chatMessages[0].mediaKey ? '📷 Photo' : '')).slice(0, 120) : null,
+          unreadCount: unreadCounts[idx],
           brandLogoUrl,
           communityLogoUrl,
         };
@@ -2233,6 +2249,13 @@ export class AdminService {
           : null,
       })),
     );
+
+    // Opening the thread marks everything up to now as read for admins (shared across all
+    // admins) — drives the unread badge/count in listSponsorshipChats and the dashboard widget.
+    void this.prisma.sponsorshipInterest
+      .update({ where: { id: interestId }, data: { adminLastReadAt: new Date() } })
+      .catch((err) => this.logger.error('Failed to update admin chat read state', err));
+
     return { messages: withMediaUrls, chatStatus: interest.chatStatus };
   }
 

@@ -1061,6 +1061,8 @@ model SponsorshipInterest {
   // Last time each side opened this thread — drives the unread-message count in each list.
   hostLastReadAt  DateTime?
   brandLastReadAt DateTime?
+  // Shared across all admins for simplicity — any admin opening the thread marks it read for all.
+  adminLastReadAt DateTime?
 
   // Negotiated & locked deal for this interest — nothing in the original proposal is final;
   // the host and brand can agree on different terms entirely inside the chat.
