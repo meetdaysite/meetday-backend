@@ -1207,6 +1207,10 @@ model HostCommunityProfile {
   experiencesPerYear String
   secondaryImageKey  String?
 
+  // Optional showcase of past events — array of { name?, description?, imageKeys: string[] }
+  // (max 2 imageKeys each), entirely optional at both the section and per-field level.
+  pastEvents Json?
+
   categories HostCommunityProfileCategory[]
 
   // Edits to an already-APPROVED profile are staged here instead of overwriting the live

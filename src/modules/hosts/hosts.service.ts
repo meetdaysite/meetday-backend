@@ -36,6 +36,9 @@ import {
 } from '../graph/graph.constants';
 import { ADMIN_ALERT_EMAILS } from '../../common/mail/admin-recipients.constant';
 
+// Shape of one raw stored past-event entry (HostCommunityProfile.pastEvents JSON column).
+type PastEventLike = { name?: string; description?: string; imageKeys?: string[] };
+
 @Injectable()
 export class HostsService {
   private readonly logger = new Logger(HostsService.name);
@@ -223,6 +226,7 @@ export class HostsService {
     logoKey: string;
     secondaryImageKey?: string | null;
     pendingRevision?: Prisma.JsonValue;
+    pastEvents?: Prisma.JsonValue;
     categories: { category: { id: string; name: string } }[];
     [key: string]: unknown;
   }) {
@@ -233,17 +237,23 @@ export class HostsService {
     ]);
 
     let pendingRevision = profile.pendingRevision as
-      | (Record<string, unknown> & { logoKey?: string; secondaryImageKey?: string })
+      | (Record<string, unknown> & { logoKey?: string; secondaryImageKey?: string; pastEvents?: PastEventLike[] })
       | null
       | undefined;
     if (pendingRevision) {
-      const [revisionLogoUrl, revisionSecondaryImageUrl] = await Promise.all([
+      const [revisionLogoUrl, revisionSecondaryImageUrl, revisionPastEvents] = await Promise.all([
         pendingRevision.logoKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.logoKey) : undefined,
         pendingRevision.secondaryImageKey
           ? this.storageService.getPresignedDownloadUrl(pendingRevision.secondaryImageKey)
           : undefined,
+        this.withPastEventImageUrls(pendingRevision.pastEvents),
       ]);
-      pendingRevision = { ...pendingRevision, logoUrl: revisionLogoUrl, secondaryImageUrl: revisionSecondaryImageUrl };
+      pendingRevision = {
+        ...pendingRevision,
+        logoUrl: revisionLogoUrl,
+        secondaryImageUrl: revisionSecondaryImageUrl,
+        pastEvents: revisionPastEvents,
+      };
     }
 
     return {
@@ -251,8 +261,25 @@ export class HostsService {
       logoUrl,
       secondaryImageUrl,
       pendingRevision: pendingRevision ?? null,
+      pastEvents: await this.withPastEventImageUrls(profile.pastEvents as PastEventLike[] | undefined),
       categories: categories.map((c) => c.category),
     };
+  }
+
+  // Signs each past event's image keys into downloadable URLs — pastEvents is stored as raw
+  // JSON (array of { name?, description?, imageKeys? }), entirely optional at every level.
+  private async withPastEventImageUrls(pastEvents: PastEventLike[] | null | undefined) {
+    if (!pastEvents || !Array.isArray(pastEvents)) return [];
+    return Promise.all(
+      pastEvents.map(async (event) => ({
+        name: event?.name ?? null,
+        description: event?.description ?? null,
+        imageKeys: event?.imageKeys ?? [],
+        imageUrls: await Promise.all(
+          (event?.imageKeys ?? []).map((key) => this.storageService.getPresignedDownloadUrl(key)),
+        ),
+      })),
+    );
   }
 
   async getCommunityProfile(userId: string) {
@@ -303,12 +330,15 @@ export class HostsService {
         data: { pendingRevision: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue },
       });
     } else {
-      const { categoryIds, ...fields } = dto;
+      const { categoryIds, pastEvents, ...fields } = dto;
+      const pastEventsJson =
+        pastEvents !== undefined ? (JSON.parse(JSON.stringify(pastEvents)) as Prisma.InputJsonValue) : Prisma.JsonNull;
       communityProfile = await this.prisma.hostCommunityProfile.upsert({
         where: { hostProfileId: hostProfile.id },
-        create: { ...fields, hostProfileId: hostProfile.id },
+        create: { ...fields, hostProfileId: hostProfile.id, pastEvents: pastEventsJson },
         update: {
           ...fields,
+          pastEvents: pastEventsJson,
           approvalStatus: 'PENDING',
           adminRejectionRemark: null,
           reviewedBy: null,

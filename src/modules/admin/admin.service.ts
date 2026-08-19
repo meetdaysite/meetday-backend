@@ -1943,6 +1943,7 @@ export class AdminService {
     size: true,
     avgGuestCount: true,
     experiencesPerYear: true,
+    pastEvents: true,
     approvalStatus: true,
     adminRejectionRemark: true,
     reviewedAt: true,
@@ -2388,24 +2389,47 @@ export class AdminService {
     if (!profile) throw new NotFoundException('Community profile not found');
 
     let pendingRevision = profile.pendingRevision as
-      | (Record<string, unknown> & { logoKey?: string; secondaryImageKey?: string })
+      | (Record<string, unknown> & { logoKey?: string; secondaryImageKey?: string; pastEvents?: { name?: string; description?: string; imageKeys?: string[] }[] })
       | null;
     if (pendingRevision) {
-      const [revisionLogoUrl, revisionSecondaryImageUrl] = await Promise.all([
+      const [revisionLogoUrl, revisionSecondaryImageUrl, revisionPastEvents] = await Promise.all([
         pendingRevision.logoKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.logoKey) : undefined,
         pendingRevision.secondaryImageKey
           ? this.storageService.getPresignedDownloadUrl(pendingRevision.secondaryImageKey)
           : undefined,
+        this.withPastEventImageUrls(pendingRevision.pastEvents),
       ]);
-      pendingRevision = { ...pendingRevision, logoUrl: revisionLogoUrl, secondaryImageUrl: revisionSecondaryImageUrl };
+      pendingRevision = {
+        ...pendingRevision,
+        logoUrl: revisionLogoUrl,
+        secondaryImageUrl: revisionSecondaryImageUrl,
+        pastEvents: revisionPastEvents,
+      };
     }
 
     return {
       ...AdminService.flattenCommunityProfileCategories(profile),
       logoUrl: await this.storageService.getPresignedDownloadUrl(profile.logoKey),
       secondaryImageUrl: profile.secondaryImageKey ? await this.storageService.getPresignedDownloadUrl(profile.secondaryImageKey) : null,
+      pastEvents: await this.withPastEventImageUrls(profile.pastEvents as { name?: string; description?: string; imageKeys?: string[] }[] | null),
       pendingRevision,
     };
+  }
+
+  // Signs each past event's image keys into downloadable URLs — pastEvents is stored as raw
+  // JSON (array of { name?, description?, imageKeys? }), entirely optional at every level.
+  private async withPastEventImageUrls(pastEvents: { name?: string; description?: string; imageKeys?: string[] }[] | null | undefined) {
+    if (!pastEvents || !Array.isArray(pastEvents)) return [];
+    return Promise.all(
+      pastEvents.map(async (event) => ({
+        name: event?.name ?? null,
+        description: event?.description ?? null,
+        imageKeys: event?.imageKeys ?? [],
+        imageUrls: await Promise.all(
+          (event?.imageKeys ?? []).map((key) => this.storageService.getPresignedDownloadUrl(key)),
+        ),
+      })),
+    );
   }
 
   // Hosts eligible to have a community profile created for them by an admin — i.e. hosts that
@@ -2689,6 +2713,9 @@ export class AdminService {
           ...(fieldChanges.size !== undefined && { size: fieldChanges.size }),
           ...(fieldChanges.avgGuestCount !== undefined && { avgGuestCount: fieldChanges.avgGuestCount }),
           ...(fieldChanges.experiencesPerYear !== undefined && { experiencesPerYear: fieldChanges.experiencesPerYear }),
+          ...(fieldChanges.pastEvents !== undefined && {
+            pastEvents: JSON.parse(JSON.stringify(fieldChanges.pastEvents)) as Prisma.InputJsonValue,
+          }),
           pendingRevision: Prisma.JsonNull,
           reviewedBy: adminId,
           reviewedAt: new Date(),
