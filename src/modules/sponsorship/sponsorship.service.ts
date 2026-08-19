@@ -588,14 +588,14 @@ export class SponsorshipService {
     const interests = await this.prisma.sponsorshipInterest.findMany({
       where,
       include: {
-        sponsorshipProposal: {
+                sponsorshipProposal: {
           select: {
             id: true,
             name: true,
-            hostProfile: { select: { displayName: true, communityProfile: { select: { name: true } } } },
+            hostProfile: { select: { displayName: true, communityProfile: { select: { name: true, logoUrl: true } } } },
           },
         },
-        brandProfile: { select: { id: true, brandName: true } },
+        brandProfile: { select: { id: true, brandName: true, logoUrl: true } },
         chatMessages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true, mediaKey: true, senderType: true, createdAt: true } },
       },
       orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
@@ -626,10 +626,13 @@ export class SponsorshipService {
       lastMessageAt: i.lastMessageAt,
       lastMessagePreview: i.chatMessages[0] ? (i.chatMessages[0].content || (i.chatMessages[0].mediaKey ? '📷 Photo' : '')).slice(0, 120) : null,
       unreadCount: unreadCounts[idx],
-      // From the host's side, the counterpart is the brand; from the brand's side, it's the community.
+            // From the host's side, the counterpart is the brand; from the brand's side, it's the community.
       counterpartName: hostProfile
         ? i.brandProfile.brandName
         : i.sponsorshipProposal.hostProfile.communityProfile?.name ?? i.sponsorshipProposal.hostProfile.displayName ?? 'Community',
+      counterpartAvatarUrl: hostProfile
+        ? i.brandProfile.logoUrl
+        : i.sponsorshipProposal.hostProfile.communityProfile?.logoUrl,
     }));
   }
 
