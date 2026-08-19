@@ -29,8 +29,9 @@ export class NotificationsService {
       data: { userId, type, title, body, metadata: (metadata ?? undefined) as any },
     });
 
-    await this.redis.del(this.unreadKey(userId));
-
+    // Emit in real-time immediately — a slow/reconnecting Redis (commands queue indefinitely,
+    // see RedisService's maxRetriesPerRequest: null) must never delay live delivery of the
+    // notification. Cache invalidation is best-effort and happens in the background.
     this.gateway.sendToUser(userId, 'notification', {
       id: notification.id,
       type: notification.type,
@@ -39,6 +40,8 @@ export class NotificationsService {
       metadata: notification.metadata,
       createdAt: notification.createdAt,
     });
+
+    Promise.resolve(this.redis.del(this.unreadKey(userId))).catch(() => {});
   }
 
   async findForUser(userId: string, query: ListNotificationsQueryDto) {
