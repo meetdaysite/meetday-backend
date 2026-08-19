@@ -562,9 +562,9 @@ export class SponsorshipService {
     return { message: 'Proposal deleted successfully', deleted: true };
   }
 
-  // ── TriChat: Host \u2194 Brand chat tied to a SponsorshipInterest ────────────────
+  // ── TriChat: Host ↔ Brand chat tied to a SponsorshipInterest ────────────
   // "Requests" (chatStatus=REQUESTED) vs "General"/"Accepted" (chatStatus=ACCEPTED) is purely
-  // this status field \u2014 the frontend segments the same list by it, no separate query needed.
+  // this status field — the frontend segments the same list by it, no separate query needed.
 
   private async getOwnProfiles(userId: string) {
     const [hostProfile, brandProfile] = await Promise.all([
@@ -677,7 +677,7 @@ export class SponsorshipService {
     return { ...message, wasRedacted };
   }
 
-  // Host accepts a brand's interest \u2014 opens the chat window both sides ("Requests" \u2192 "General").
+  // Host accepts a brand's interest — opens the chat window both sides ("Requests" → "General").
   async acceptChatRequest(userId: string, interestId: string) {
     const interest = await this.prisma.sponsorshipInterest.findUnique({
       where: { id: interestId },

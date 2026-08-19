@@ -1642,8 +1642,8 @@ export class AdminController {
   @Get('sponsorship-chats')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
   @ApiOperation({
-    summary: 'List every Host \u2194 Brand chat thread',
-    description: 'Admin "Ongoing Chats" view \u2014 every sponsorship interest across all hosts/brands, newest activity first.',
+    summary: 'List every Host ↔ Brand chat thread',
+    description: 'Admin "Ongoing Chats" view — every sponsorship interest across all hosts/brands, newest activity first.',
   })
   @ApiOkResponse({ description: 'List of chat threads.' })
   listSponsorshipChats(@Query() query: ListSponsorshipChatsQueryDto) {
@@ -1652,7 +1652,7 @@ export class AdminController {
 
   @Get('sponsorship-chats/:interestId/messages')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
-  @ApiOperation({ summary: 'List messages in a Host \u2194 Brand chat thread' })
+  @ApiOperation({ summary: 'List messages in a Host ↔ Brand chat thread' })
   @ApiOkResponse({ description: 'Messages, oldest first.' })
   @ApiNotFoundResponse({ description: 'Chat thread not found.' })
   getSponsorshipChatMessages(@Param('interestId', ParseUUIDPipe) interestId: string) {
@@ -1663,8 +1663,8 @@ export class AdminController {
   @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
-    summary: 'Send a message into a Host \u2194 Brand chat thread as Meetday',
-    description: 'Posted as "Meetday" to both the host and the brand \u2014 usable any time, regardless of accept status.',
+    summary: 'Send a message into a Host ↔ Brand chat thread as Meetday',
+    description: 'Posted as "Meetday" to both the host and the brand — usable any time, regardless of accept status.',
   })
   @ApiOkResponse({ description: 'Message sent.' })
   @ApiNotFoundResponse({ description: 'Chat thread not found.' })

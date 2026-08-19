@@ -20,7 +20,7 @@ function makePrisma() {
 const mockNotifications = { create: jest.fn().mockResolvedValue(undefined) };
 const mockMailQueue = { add: jest.fn().mockResolvedValue(undefined) };
 
-describe('SponsorshipService \u2014 TriChat', () => {
+describe('SponsorshipService — TriChat', () => {
   let service: SponsorshipService;
   let prisma: ReturnType<typeof makePrisma>;
 

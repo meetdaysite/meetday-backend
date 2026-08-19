@@ -2135,7 +2135,7 @@ export class AdminService {
     return { announcements, total, page, limit };
   }
 
-  // ── TriChat: admin observes/participates in every Host \u2194 Brand chat thread ─────
+  // ── TriChat: admin observes/participates in every Host ↔ Brand chat thread ─────
 
   async listSponsorshipChats(query: ListSponsorshipChatsQueryDto) {
     const threads = await this.prisma.sponsorshipInterest.findMany({
