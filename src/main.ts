@@ -63,19 +63,6 @@ async function bootstrap() {
     });
   }
 
-  // Temporary hook to clean up the failed migration and reset chats
-  try {
-    const { PrismaClient } = await import('@prisma/client');
-    const prisma = new PrismaClient();
-    await prisma.$executeRawUnsafe(`DELETE FROM _prisma_migrations WHERE migration_name = '20260820202000_reset_chats';`);
-    await prisma.$executeRawUnsafe(`TRUNCATE TABLE sponsorship_interests CASCADE;`);
-    await prisma.$executeRawUnsafe(`TRUNCATE TABLE meetday_chat_threads CASCADE;`);
-    logger.log('Database chats reset successfully.');
-    await prisma.$disconnect();
-  } catch (err) {
-    logger.error('Failed to reset database chats:', err);
-  }
-
   const port = process.env.PORT ?? 3000;
   await app.listen(port, '0.0.0.0');
   logger.log(`Application is running on: http://localhost:${port}`);
