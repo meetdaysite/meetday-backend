@@ -1,7 +1,8 @@
-import { IsArray, IsOptional, IsString, IsUUID, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsOptional, IsString, IsUUID, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { SocialLinksDto } from '../../hosts/dto/apply-host.dto';
+import { PastEventDto } from '../../hosts/dto/past-event.dto';
 
 // Full admin edit of an existing community profile — every field optional, only the fields
 // provided are updated. Writes directly (no pendingRevision staging) and works regardless of
@@ -49,6 +50,11 @@ export class UpdateAdminCommunityProfileDto {
   @IsUUID('4', { each: true })
   categoryIds?: string[];
 
+  @ApiPropertyOptional({ description: 'Hide (true) or unhide (false) this community from brand browse/discovery — does not affect the host\'s own access.' })
+  @IsOptional()
+  @IsBoolean()
+  isHidden?: boolean;
+
   // Written onto the host's own profile (not the community profile row) — same shape as the
   // host-side ApplyHostDto/UpdateHostProfileDto socialLinks field.
   @ApiPropertyOptional({ type: SocialLinksDto })
@@ -56,4 +62,11 @@ export class UpdateAdminCommunityProfileDto {
   @ValidateNested()
   @Type(() => SocialLinksDto)
   socialLinks?: SocialLinksDto;
+
+  @ApiPropertyOptional({ type: [PastEventDto], description: 'Past events/experiences to showcase on the profile' })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PastEventDto)
+  pastEvents?: PastEventDto[];
 }

@@ -1237,6 +1237,11 @@ model HostCommunityProfile {
   reviewedByUser       User?              @relation("CommunityProfileReviewedBy", fields: [reviewedBy], references: [id])
   reviewedAt           DateTime?
 
+  // Admin-only kill switch — hides the community (and its sponsorship proposals) from brands'
+  // browse/discovery views, independent of approvalStatus. The host itself is entirely
+  // unaffected: full dashboard access, can still create/edit proposals, chat, etc.
+  isHidden Boolean @default(false)
+
   activatedAt DateTime @default(now())
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -1639,6 +1644,8 @@ enum AuditAction {
   COMMUNITY_PROFILE_REJECTED
   COMMUNITY_PROFILE_REVISION_APPROVED
   COMMUNITY_PROFILE_REVISION_REJECTED
+  COMMUNITY_PROFILE_HIDDEN
+  COMMUNITY_PROFILE_UNHIDDEN
 
   // Brand profile lifecycle
   BRAND_PROFILE_APPROVED

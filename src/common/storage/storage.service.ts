@@ -396,7 +396,14 @@ export class StorageService {
       }
 
       case UploadContext.COMMUNITY_PAST_EVENT_MEDIA: {
-        const hostProfile = await this.prisma.hostProfile.findUnique({ where: { userId } });
+        // Admins can upload on behalf of a host (create/edit community profile flow) by passing
+        // the target hostProfile's UUID as resourceId — hosts themselves never need to (it's
+        // always their own profile), so resourceId is ignored for non-admins.
+        const isAdmin = SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '');
+        const hostProfile =
+          dto.resourceId && isAdmin
+            ? await this.prisma.hostProfile.findUnique({ where: { id: dto.resourceId }, select: { id: true } })
+            : await this.prisma.hostProfile.findUnique({ where: { userId }, select: { id: true } });
         if (!hostProfile) throw new NotFoundException('Host profile not found');
         key = `hosts/${hostProfile.id}/community-profile/past-events/${randomUUID()}.${ext}`;
         break;

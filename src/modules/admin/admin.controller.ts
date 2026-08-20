@@ -60,6 +60,7 @@ import { UpdateAdminSponsorshipDto } from './dto/update-admin-sponsorship.dto';
 import { ListEligibleHostsQueryDto } from './dto/list-eligible-hosts-query.dto';
 import { CreateAdminCommunityProfileDto } from './dto/create-admin-community-profile.dto';
 import { UpdateAdminCommunityProfileDto } from './dto/update-admin-community-profile.dto';
+import { SetCommunityProfileVisibilityDto } from './dto/set-community-profile-visibility.dto';
 import { UpdateGstRateDto } from './dto/update-gst-rate.dto';
 import { UpdatePlanFeeRateDto } from './dto/update-plan-fee-rate.dto';
 import { CreateHostFeePromoDto } from './dto/create-host-fee-promo.dto';
@@ -1591,6 +1592,25 @@ export class AdminController {
     @GetUser('id') adminId: string,
   ) {
     return this.adminService.updateCommunityProfileAsAdmin(id, adminId, dto);
+  }
+
+  @Patch('community-profiles/:id/visibility')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @ApiOperation({
+    summary: 'Hide or unhide a community profile from brand browse/discovery',
+    description:
+      'Does not affect the host\'s own platform access — they keep full dashboard/proposal/chat access ' +
+      'regardless. Only whether brands can discover this community and its published proposals.',
+  })
+  @ApiParam({ name: 'id', description: 'Community profile UUID' })
+  @ApiOkResponse({ description: 'Visibility updated.' })
+  @ApiNotFoundResponse({ description: 'Community profile not found.' })
+  setCommunityProfileVisibility(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetCommunityProfileVisibilityDto,
+    @GetUser('id') adminId: string,
+  ) {
+    return this.adminService.setCommunityProfileVisibility(id, adminId, dto.isHidden);
   }
 
   // ─── Brands ─────────────────────────────────────────────────────────────

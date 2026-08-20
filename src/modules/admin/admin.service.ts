@@ -1948,6 +1948,7 @@ export class AdminService {
     adminRejectionRemark: true,
     reviewedAt: true,
     pendingRevision: true,
+    isHidden: true,
     createdAt: true,
     updatedAt: true,
     categories: { select: { category: { select: { id: true, name: true } } } },
@@ -2603,6 +2604,7 @@ export class AdminService {
         reviewedBy: adminId,
         reviewedAt: new Date(),
         categories: { create: dto.categoryIds.map((categoryId) => ({ categoryId })) },
+        pastEvents: dto.pastEvents ? (JSON.parse(JSON.stringify(dto.pastEvents)) as Prisma.InputJsonValue) : Prisma.JsonNull,
       },
     });
 
@@ -2672,6 +2674,10 @@ export class AdminService {
             create: dto.categoryIds.map((categoryId) => ({ categoryId })),
           },
         }),
+        ...(dto.pastEvents !== undefined && {
+          pastEvents: JSON.parse(JSON.stringify(dto.pastEvents)) as Prisma.InputJsonValue,
+        }),
+        ...(dto.isHidden !== undefined && { isHidden: dto.isHidden }),
       },
     });
 
@@ -2690,6 +2696,26 @@ export class AdminService {
       entityType: 'HOST_COMMUNITY_PROFILE',
       entityId: id,
       metadata: { name: dto.name },
+    });
+
+    return this.getCommunityProfileDetail(id);
+  }
+
+  // Quick one-click hide/unhide from the community profiles list — doesn't touch the host's own
+  // access at all, only whether brands can discover this community and its proposals.
+  async setCommunityProfileVisibility(id: string, adminId: string, isHidden: boolean) {
+    const existing = await this.prisma.hostCommunityProfile.findUnique({ where: { id }, select: { id: true, name: true } });
+    if (!existing) throw new NotFoundException('Community profile not found');
+
+    await this.prisma.hostCommunityProfile.update({ where: { id }, data: { isHidden } });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: isHidden ? 'COMMUNITY_PROFILE_HIDDEN' : 'COMMUNITY_PROFILE_UNHIDDEN',
+      entityType: 'HOST_COMMUNITY_PROFILE',
+      entityId: id,
+      metadata: { name: existing.name },
     });
 
     return this.getCommunityProfileDetail(id);

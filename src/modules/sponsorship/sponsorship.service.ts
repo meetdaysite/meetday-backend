@@ -301,6 +301,8 @@ export class SponsorshipService {
     const proposals = await this.prisma.sponsorshipProposal.findMany({
       where: {
         status: SponsorshipStatus.PUBLISHED,
+        // A community an admin has hidden must not surface in brand browse/discovery at all.
+        NOT: { hostProfile: { communityProfile: { isHidden: true } } },
         ...(query.categoryId && {
           hostProfile: {
             communityProfile: {
@@ -344,6 +346,8 @@ export class SponsorshipService {
     });
     if (!proposal || proposal.status !== SponsorshipStatus.PUBLISHED)
       throw new NotFoundException('Sponsorship proposal not found');
+    // A hidden community's proposals are treated as not found for brands, same as unpublished.
+    if (proposal.hostProfile.communityProfile?.isHidden) throw new NotFoundException('Sponsorship proposal not found');
 
     const withUrls = await this.withSignedUrls(proposal);
     const { hostProfile, ...rest } = withUrls;
@@ -492,7 +496,7 @@ export class SponsorshipService {
   // (logo, name, size, categories) for the brand "Communities" browse page.
   async listApprovedCommunities() {
     const profiles = await this.prisma.hostCommunityProfile.findMany({
-      where: { approvalStatus: 'APPROVED' },
+      where: { approvalStatus: 'APPROVED', isHidden: false },
             select: {
         id: true,
         hostProfileId: true,

@@ -2,6 +2,7 @@ import { IsArray, IsOptional, IsString, IsUUID, ValidateNested } from 'class-val
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { SocialLinksDto } from '../../hosts/dto/apply-host.dto';
+import { PastEventDto } from '../../hosts/dto/past-event.dto';
 
 // Admin creates the community profile already-approved for a host who doesn't have one yet,
 // bypassing the normal PENDING → admin-review flow (see ActivateCommunityDto for the host-side
@@ -53,4 +54,11 @@ export class CreateAdminCommunityProfileDto {
   @ValidateNested()
   @Type(() => SocialLinksDto)
   socialLinks?: SocialLinksDto;
+
+  @ApiPropertyOptional({ type: [PastEventDto], description: 'Past events/experiences to showcase on the profile' })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PastEventDto)
+  pastEvents?: PastEventDto[];
 }
