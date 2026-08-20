@@ -25,7 +25,7 @@ export class UpsertSponsorshipDealDto {
   @ApiPropertyOptional({ example: 'Music Festival' })
   @IsOptional()
   @IsString()
-  @MaxLength(100)
+  @MaxLength(500)
   sponsorshipCategory?: string;
 
   @ApiProperty({ example: 'Phoenix Marketcity, Bengaluru' })
