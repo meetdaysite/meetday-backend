@@ -5,27 +5,44 @@ export class UpsertSponsorshipDealDto {
   @ApiProperty({ example: 'Summer Music Fest — Title Sponsorship' })
   @IsString()
   @MaxLength(200)
-  eventName: string;
+  projectName: string;
 
   @ApiProperty({ example: '2026-12-05T00:00:00.000Z' })
   @IsISO8601()
-  eventDate: string;
+  startDate: string;
+
+  @ApiPropertyOptional({ example: '2026-12-07T00:00:00.000Z' })
+  @IsOptional()
+  @IsISO8601()
+  endDate?: string;
 
   @ApiPropertyOptional({ example: '6:00 PM onwards' })
   @IsOptional()
   @IsString()
   @MaxLength(50)
-  eventTime?: string;
+  time?: string;
+
+  @ApiPropertyOptional({ example: 'Music Festival' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  sponsorshipCategory?: string;
 
   @ApiProperty({ example: 'Phoenix Marketcity, Bengaluru' })
   @IsString()
   @MaxLength(300)
   venue: string;
 
+  @ApiPropertyOptional({ example: '10 VIP passes' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  barterElements?: string;
+
   @ApiProperty({ example: 45000 })
   @IsNumber()
   @Min(0)
-  finalAmount: number;
+  sponsorshipAmount: number;
 
   @ApiProperty({ example: 'Logo on stage backdrop, 2 Instagram posts, on-site booth' })
   @IsString()

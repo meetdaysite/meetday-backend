@@ -978,11 +978,14 @@ export class SponsorshipService {
     const deal = await this.prisma.sponsorshipDeal.create({
       data: {
         sponsorshipInterestId: interest.id,
-        eventName: dto.eventName,
-        eventDate: new Date(dto.eventDate),
-        eventTime: dto.eventTime,
+        projectName: dto.projectName,
+        startDate: new Date(dto.startDate),
+        endDate: dto.endDate ? new Date(dto.endDate) : null,
+        time: dto.time,
+        sponsorshipCategory: dto.sponsorshipCategory,
+        sponsorshipAmount: dto.sponsorshipAmount,
         venue: dto.venue,
-        finalAmount: dto.finalAmount,
+        barterElements: dto.barterElements,
         deliverables: dto.deliverables,
         otherTerms: dto.otherTerms,
         additionalNotes: dto.additionalNotes,
@@ -994,7 +997,7 @@ export class SponsorshipService {
     await this.postDealSystemMessage(interest.id, ChatSenderType.HOST, userId, `📝 ${hostName} shared a deal proposal for your approval.`);
 
     void this.notificationsService
-      .create(interest.brandProfile.userId, 'sponsorship_deal_submitted', hostName, `Shared a deal proposal: ${dto.eventName}`, {
+      .create(interest.brandProfile.userId, 'sponsorship_deal_submitted', hostName, `Shared a deal proposal: ${dto.projectName}`, {
         sponsorshipInterestId: interest.id,
       })
       .catch((err) => this.logger.error('Failed to notify brand of new deal proposal', err));
@@ -1013,11 +1016,14 @@ export class SponsorshipService {
     const deal = await this.prisma.sponsorshipDeal.update({
       where: { id: existing.id },
       data: {
-        eventName: dto.eventName,
-        eventDate: new Date(dto.eventDate),
-        eventTime: dto.eventTime,
+        projectName: dto.projectName,
+        startDate: new Date(dto.startDate),
+        endDate: dto.endDate ? new Date(dto.endDate) : null,
+        time: dto.time,
+        sponsorshipCategory: dto.sponsorshipCategory,
+        sponsorshipAmount: dto.sponsorshipAmount,
         venue: dto.venue,
-        finalAmount: dto.finalAmount,
+        barterElements: dto.barterElements,
         deliverables: dto.deliverables,
         otherTerms: dto.otherTerms,
         additionalNotes: dto.additionalNotes,
@@ -1031,7 +1037,7 @@ export class SponsorshipService {
     await this.postDealSystemMessage(interest.id, ChatSenderType.HOST, userId, `✏️ ${hostName} updated the deal proposal.`);
 
     void this.notificationsService
-      .create(interest.brandProfile.userId, 'sponsorship_deal_updated', hostName, `Updated the deal proposal: ${dto.eventName}`, {
+      .create(interest.brandProfile.userId, 'sponsorship_deal_updated', hostName, `Updated the deal proposal: ${dto.projectName}`, {
         sponsorshipInterestId: interest.id,
       })
       .catch((err) => this.logger.error('Failed to notify brand of updated deal proposal', err));
@@ -1059,7 +1065,7 @@ export class SponsorshipService {
         interest.sponsorshipProposal.hostProfile.userId,
         'sponsorship_deal_locked',
         interest.brandProfile.brandName,
-        `🎉 Approved and locked the deal: ${existing.eventName}`,
+        `🎉 Approved and locked the deal: ${existing.projectName}`,
         { sponsorshipInterestId: interest.id },
       )
       .catch((err) => this.logger.error('Failed to notify host of locked deal', err));

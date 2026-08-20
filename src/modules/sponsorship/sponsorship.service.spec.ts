@@ -226,10 +226,14 @@ describe('SponsorshipService — TriChat', () => {
     };
 
     const dealDto = {
-      eventName: 'Summer Fest',
-      eventDate: '2026-12-05T00:00:00.000Z',
+      projectName: 'Summer Fest',
+      startDate: '2026-12-05T00:00:00.000Z',
+      endDate: null,
+      time: null,
+      sponsorshipCategory: null,
+      sponsorshipAmount: 45000,
       venue: 'Phoenix Marketcity',
-      finalAmount: 45000,
+      barterElements: null,
       deliverables: 'Logo on backdrop',
     };
 
@@ -259,7 +263,7 @@ describe('SponsorshipService — TriChat', () => {
         await service.createDeal('host-user', 'interest-1', dealDto);
 
         expect(prisma.sponsorshipDeal.create).toHaveBeenCalledWith(
-          expect.objectContaining({ data: expect.objectContaining({ sponsorshipInterestId: 'interest-1', eventName: 'Summer Fest', createdById: 'host-user' }) }),
+          expect.objectContaining({ data: expect.objectContaining({ sponsorshipInterestId: 'interest-1', projectName: 'Summer Fest', createdById: 'host-user' }) }),
         );
         expect(prisma.sponsorshipChatMessage.create).toHaveBeenCalledWith(
           expect.objectContaining({ data: expect.objectContaining({ messageType: 'SYSTEM', senderType: 'HOST' }) }),
@@ -318,7 +322,7 @@ describe('SponsorshipService — TriChat', () => {
 
       it('locks the deal, posts a congratulations system message, and notifies the host', async () => {
         prisma.sponsorshipInterest.findUnique.mockResolvedValue(dealInterest);
-        prisma.sponsorshipDeal.findUnique.mockResolvedValue({ id: 'deal-1', status: 'PENDING_APPROVAL', eventName: 'Summer Fest' });
+        prisma.sponsorshipDeal.findUnique.mockResolvedValue({ id: 'deal-1', status: 'PENDING_APPROVAL', projectName: 'Summer Fest' });
         prisma.sponsorshipDeal.update.mockResolvedValue({ id: 'deal-1', status: 'APPROVED' });
         prisma.sponsorshipChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
 

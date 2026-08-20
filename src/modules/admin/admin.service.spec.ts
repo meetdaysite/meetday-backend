@@ -1282,11 +1282,14 @@ describe('AdminService', () => {
       prisma.sponsorshipDeal.findMany.mockResolvedValue([
         {
           id: 'deal-1',
-          eventName: 'Summer Fest',
-          eventDate: new Date(),
-          eventTime: '6pm',
+          projectName: 'Summer Fest',
+          startDate: new Date(),
+          endDate: null,
+          time: '6pm',
+          sponsorshipCategory: null,
+          sponsorshipAmount: 45000,
           venue: 'Phoenix Marketcity',
-          finalAmount: 45000,
+          barterElements: null,
           deliverables: 'Logo on backdrop',
           otherTerms: null,
           additionalNotes: null,

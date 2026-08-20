@@ -1135,14 +1135,17 @@ model SponsorshipDeal {
   sponsorshipInterestId String              @unique
   sponsorshipInterest   SponsorshipInterest @relation(fields: [sponsorshipInterestId], references: [id], onDelete: Cascade)
 
-  eventName       String
-  eventDate       DateTime
-  eventTime       String?
-  venue           String
-  finalAmount     Decimal
-  deliverables    String  @db.Text
-  otherTerms      String? @db.Text
-  additionalNotes String? @db.Text
+  projectName         String
+  startDate           DateTime
+  endDate             DateTime?
+  time                String?
+  sponsorshipCategory String?
+  sponsorshipAmount   Decimal
+  venue               String
+  barterElements      String?
+  deliverables        String                @db.Text
+  otherTerms          String?               @db.Text
+  additionalNotes     String?               @db.Text
 
   status            SponsorshipDealStatus @default(PENDING_APPROVAL)
   version           Int                   @default(1)
