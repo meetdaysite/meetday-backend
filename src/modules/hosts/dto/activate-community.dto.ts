@@ -4,10 +4,10 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PastEventDto } from './past-event.dto';
 
 export class ActivateCommunityDto {
-  @ApiProperty({ description: 'Optional GCS object key for the secondary 4:5 image' })
-  @IsString()
+  @ApiPropertyOptional({ description: 'GCS object key for the secondary 4:5 image, or null to remove it' })
   @IsOptional()
-  secondaryImageKey?: string;
+  @IsString()
+  secondaryImageKey?: string | null;
   @ApiProperty({ example: 'Bangalore Founders Circle' })
   @IsString()
   name: string;
