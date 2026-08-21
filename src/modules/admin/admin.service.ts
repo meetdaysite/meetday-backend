@@ -2372,6 +2372,7 @@ export class AdminService {
       hasReport: !!d.report,
       paymentStatus: d.paymentStatus,
       platformFeeAmount: d.platformFeeAmount,
+      transactionFeeAmount: d.transactionFeeAmount,
       taxAmount: d.taxAmount,
       totalAmount: d.totalAmount,
       paymentExpiresAt: d.paymentExpiresAt,

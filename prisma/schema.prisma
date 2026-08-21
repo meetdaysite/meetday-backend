@@ -1162,18 +1162,19 @@ model SponsorshipDeal {
 
   approvedAt DateTime?
 
-  // Brand's payment of the sponsorshipAmount (+ platform fee + GST) via Razorpay, due within
-  // 3 days of the deal being locked. Breakdown is fixed at order-creation time so it stays
-  // accurate even if fee/GST rates change later.
-  paymentStatus     SponsorshipDealPaymentStatus @default(UNPAID)
-  platformFeeAmount Decimal?
-  taxAmount         Decimal?
-  totalAmount       Decimal?
-  paymentExpiresAt  DateTime?
-  razorpayOrderId   String?
-  razorpayPaymentId String?
-  paidAt            DateTime?
-  invoicePdfKey     String?
+  // Brand's payment of the sponsorshipAmount (+ platform fee + transaction fee + GST) via
+  // Razorpay, due within 3 days of the deal being locked. Breakdown is fixed at order-creation
+  // time so it stays accurate even if fee/GST rates change later.
+  paymentStatus       SponsorshipDealPaymentStatus @default(UNPAID)
+  platformFeeAmount   Decimal?
+  transactionFeeAmount Decimal?
+  taxAmount           Decimal?
+  totalAmount         Decimal?
+  paymentExpiresAt    DateTime?
+  razorpayOrderId     String?
+  razorpayPaymentId   String?
+  paidAt              DateTime?
+  invoicePdfKey       String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

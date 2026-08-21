@@ -39,6 +39,7 @@ const ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'];
 // fee) — same taxable-value convention used for ticket orders (see OrdersService) — and falls
 // back to the `gst_rate` platform config, defaulting to 18% if unset.
 const SPONSORSHIP_PLATFORM_FEE_RATE = 0.05;
+const SPONSORSHIP_TRANSACTION_FEE_RATE = 0.03;
 const DEFAULT_GST_RATE = 0.18;
 const DEAL_PAYMENT_DUE_DAYS = 3;
 
@@ -1218,7 +1219,7 @@ export class SponsorshipService {
       return { razorpayOrderId: deal.razorpayOrderId, amount: amountInPaise, currency: 'INR', keyId: this.razorpayKeyId };
     }
 
-    const { platformFeeAmount, taxAmount, totalAmount } = await this.computeDealPaymentBreakdown(Number(deal.sponsorshipAmount));
+    const { platformFeeAmount, transactionFeeAmount, taxAmount, totalAmount } = await this.computeDealPaymentBreakdown(Number(deal.sponsorshipAmount));
     const amountInPaise = Math.round(totalAmount * 100);
     if (amountInPaise < 100) throw new BadRequestException('Deal amount is below the minimum chargeable amount');
 
@@ -1238,7 +1239,7 @@ export class SponsorshipService {
 
     await this.prisma.sponsorshipDeal.update({
       where: { id: deal.id },
-      data: { razorpayOrderId: razorpayOrder.id, platformFeeAmount, taxAmount, totalAmount },
+      data: { razorpayOrderId: razorpayOrder.id, platformFeeAmount, transactionFeeAmount, taxAmount, totalAmount },
     });
 
     this.logger.log(`Razorpay order created: ${razorpayOrder.id} for sponsorship deal: ${deal.id}`);
@@ -1297,9 +1298,10 @@ export class SponsorshipService {
   private async computeDealPaymentBreakdown(sponsorshipAmount: number) {
     const gstRate = await this.getGstRate();
     const platformFeeAmount = Math.round(sponsorshipAmount * SPONSORSHIP_PLATFORM_FEE_RATE * 100) / 100;
-    const taxAmount = Math.round((sponsorshipAmount + platformFeeAmount) * gstRate * 100) / 100;
-    const totalAmount = Math.round((sponsorshipAmount + platformFeeAmount + taxAmount) * 100) / 100;
-    return { platformFeeAmount, taxAmount, totalAmount };
+    const transactionFeeAmount = Math.round(sponsorshipAmount * SPONSORSHIP_TRANSACTION_FEE_RATE * 100) / 100;
+    const taxAmount = Math.round((sponsorshipAmount + platformFeeAmount + transactionFeeAmount) * gstRate * 100) / 100;
+    const totalAmount = Math.round((sponsorshipAmount + platformFeeAmount + transactionFeeAmount + taxAmount) * 100) / 100;
+    return { platformFeeAmount, transactionFeeAmount, taxAmount, totalAmount };
   }
 
   // ── Billing: brand-facing list of all locked deals across chats, with payment breakdown ──
@@ -1334,6 +1336,7 @@ export class SponsorshipService {
       projectName: d.projectName,
       sponsorshipAmount: d.sponsorshipAmount,
       platformFeeAmount: d.platformFeeAmount,
+      transactionFeeAmount: d.transactionFeeAmount,
       taxAmount: d.taxAmount,
       totalAmount: d.totalAmount,
       paymentStatus: d.paymentStatus,
