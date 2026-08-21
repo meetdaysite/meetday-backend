@@ -45,6 +45,7 @@ import { RequestDealChangesDto } from './dto/request-deal-changes.dto';
 import { UpsertSponsorshipDealReportDto } from './dto/upsert-sponsorship-deal-report.dto';
 import { VerifySponsorshipDealPaymentDto } from './dto/verify-sponsorship-deal-payment.dto';
 import { SponsorshipInvoicePdfService } from './sponsorship-invoice-pdf.service';
+import { SponsorshipReportPdfService } from './sponsorship-report-pdf.service';
 
 @ApiTags('Sponsorship Proposals')
 @ApiBearerAuth('firebase-token')
@@ -54,6 +55,7 @@ export class SponsorshipController {
     private readonly sponsorshipService: SponsorshipService,
     private readonly proposalCopilotService: ProposalCopilotService,
     private readonly sponsorshipInvoicePdfService: SponsorshipInvoicePdfService,
+    private readonly sponsorshipReportPdfService: SponsorshipReportPdfService,
   ) {}
 
   @Post('copilot/generate-draft')
@@ -348,10 +350,10 @@ export class SponsorshipController {
 
   @Put('chats/:interestId/deal/report')
   @UseGuards(RolesGuard)
-  @Roles('HOST')
+  @Roles('HOST', 'BRAND')
   @ApiOperation({
-    summary: 'Submit (or resubmit) the deliverables report — community only',
-    description: 'Only enabled once the deal is APPROVED/locked.',
+    summary: 'Submit/resubmit the deliverables report (community), or approve / request revision (brand)',
+    description: 'Only enabled once the deal is APPROVED/locked. Brand can only act on an already-submitted report.',
   })
   @ApiOkResponse({ description: 'Report saved.' })
   @ApiNotFoundResponse({ description: 'No deal exists yet for this chat.' })
@@ -409,6 +411,19 @@ export class SponsorshipController {
     const deal = await this.sponsorshipService.getDeal(userId, interestId);
     if (!deal || deal.paymentStatus !== 'PAID') throw new NotFoundException('No paid deal found for this chat');
     const url = await this.sponsorshipInvoicePdfService.getDownloadUrl(deal.id);
+    return { url };
+  }
+
+  @Get('chats/:interestId/deal/report/pdf')
+  @UseGuards(RolesGuard)
+  @Roles('HOST', 'BRAND')
+  @ApiOperation({ summary: 'Get a presigned download URL for the deliverables report as a PDF' })
+  @ApiOkResponse({ description: 'Presigned report PDF URL.' })
+  @ApiNotFoundResponse({ description: 'No report has been submitted for this deal yet.' })
+  async getDealReportPdfUrl(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string) {
+    // Reuses getDeal's participant access check before generating the PDF.
+    await this.sponsorshipService.getDeal(userId, interestId);
+    const url = await this.sponsorshipReportPdfService.getDownloadUrl(interestId);
     return { url };
   }
 

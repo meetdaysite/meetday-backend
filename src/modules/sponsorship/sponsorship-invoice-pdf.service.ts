@@ -98,7 +98,6 @@ export class SponsorshipInvoicePdfService {
 
   <table>
     <tr><td class="label">Sponsorship Amount</td><td class="value">₹${money(deal.sponsorshipAmount)}</td></tr>
-    <tr><td class="label">Platform Fee (5%)</td><td class="value">₹${money(deal.platformFeeAmount ?? 0)}</td></tr>
     <tr><td class="label">Transaction Fee (3%)</td><td class="value">₹${money(deal.transactionFeeAmount ?? 0)}</td></tr>
     <tr><td class="label">GST</td><td class="value">₹${money(deal.taxAmount ?? 0)}</td></tr>
     <tr class="total-row"><td>Total Paid</td><td class="value">₹${money(deal.totalAmount ?? deal.sponsorshipAmount)}</td></tr>

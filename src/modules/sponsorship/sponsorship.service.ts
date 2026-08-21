@@ -464,7 +464,7 @@ export class SponsorshipService {
     });
     if (existing) return { message: 'Already marked as interested', alreadyInterested: true };
 
-    await this.prisma.sponsorshipInterest.create({
+    const interest = await this.prisma.sponsorshipInterest.create({
       data: { sponsorshipProposalId: proposalId, brandProfileId: brandProfile.id },
     });
 
@@ -476,7 +476,7 @@ export class SponsorshipService {
         'brand_interested_in_sponsorship',
         `${brandProfile.brandName} is interested!`,
         'This brand is interested in your proposal. Check your Chats to respond.',
-        { proposalId },
+        { proposalId, sponsorshipInterestId: interest.id },
       )
       .catch((err) => this.logger.error('Failed to notify host of brand interest', err));
 
@@ -1101,6 +1101,22 @@ export class SponsorshipService {
       )
       .catch((err) => this.logger.error('Failed to notify host of locked deal', err));
 
+    const admins = await this.prisma.user.findMany({
+      where: { isActive: true, role: { name: { in: ADMIN_ROLES } } },
+      select: { id: true },
+    });
+    void Promise.allSettled(
+      admins.map((admin) =>
+        this.notificationsService.create(
+          admin.id,
+          'sponsorship_deal_locked',
+          'Deal locked',
+          `${this.hostNameOf(interest)} \u00d7 ${interest.brandProfile.brandName}: "${existing.projectName}" is now locked.`,
+          { sponsorshipInterestId: interest.id },
+        ),
+      ),
+    );
+
     return deal;
   }
 
@@ -1154,12 +1170,17 @@ export class SponsorshipService {
 
   async upsertDealReport(userId: string, interestId: string, dto: UpsertSponsorshipDealReportDto) {
     const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
-    if (senderType !== ChatSenderType.HOST) throw new ForbiddenException('Only the community can submit the deliverables report');
 
     const deal = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
     if (!deal) throw new NotFoundException('No deal found for this chat');
     if (deal.status !== 'APPROVED') {
       throw new BadRequestException('The deal must be locked and approved before submitting a report');
+    }
+
+    const existingReport = await this.prisma.sponsorshipDealReport.findUnique({ where: { sponsorshipDealId: deal.id } });
+    // Brand can only approve/request-revision on an already-submitted report, not create one.
+    if (senderType !== ChatSenderType.HOST && !existingReport) {
+      throw new ForbiddenException('Only the community can submit the deliverables report');
     }
 
     const report = await this.prisma.sponsorshipDealReport.upsert({
@@ -1201,22 +1222,49 @@ export class SponsorshipService {
       },
     });
 
-    await this.postDealSystemMessage(
-      interest.id,
-      ChatSenderType.HOST,
-      userId,
-      `📝 ${this.hostNameOf(interest)} submitted the deliverables report.`,
-    );
+    if (senderType === ChatSenderType.HOST) {
+      await this.postDealSystemMessage(
+        interest.id,
+        ChatSenderType.HOST,
+        userId,
+        `📝 ${this.hostNameOf(interest)} submitted the deliverables report.`,
+      );
 
-    void this.notificationsService
-      .create(
-        interest.brandProfile.userId,
-        'sponsorship_deal_report_submitted',
-        this.hostNameOf(interest),
-        'Submitted the deliverables report for your locked deal',
-        { sponsorshipInterestId: interest.id },
-      )
-      .catch((err) => this.logger.error('Failed to notify brand of submitted deal report', err));
+      void this.notificationsService
+        .create(
+          interest.brandProfile.userId,
+          'sponsorship_deal_report_submitted',
+          this.hostNameOf(interest),
+          'Submitted the deliverables report for your locked deal',
+          { sponsorshipInterestId: interest.id },
+        )
+        .catch((err) => this.logger.error('Failed to notify brand of submitted deal report', err));
+    } else {
+      // Brand approving/requesting revision — best-effort read of the status the frontend
+      // embeds in the summary JSON, since it isn't sent as a top-level dto field.
+      let brandStatus = 'reviewed';
+      try {
+        brandStatus = JSON.parse(dto.summary)?.status === 'APPROVED' ? 'approved' : 'requested changes to';
+      } catch {
+        /* keep generic wording */
+      }
+      await this.postDealSystemMessage(
+        interest.id,
+        ChatSenderType.BRAND,
+        userId,
+        `📝 ${interest.brandProfile.brandName} ${brandStatus} the deliverables report.`,
+      );
+
+      void this.notificationsService
+        .create(
+          interest.sponsorshipProposal.hostProfile.userId,
+          'sponsorship_deal_report_reviewed',
+          interest.brandProfile.brandName,
+          `${brandStatus === 'approved' ? 'Approved' : 'Requested changes to'} your deliverables report`,
+          { sponsorshipInterestId: interest.id },
+        )
+        .catch((err) => this.logger.error('Failed to notify host of report review', err));
+    }
 
     const proofUrls = await Promise.all(report.proofKeys.map((key) => this.storageService.getPresignedDownloadUrl(key)));
     return { ...report, proofUrls };
