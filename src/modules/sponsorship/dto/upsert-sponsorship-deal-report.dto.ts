@@ -7,20 +7,23 @@ export class UpsertSponsorshipDealReportDto {
   @MaxLength(4000)
   summary: string;
 
-  @ApiProperty({ example: 'Tech Conference 2026' })
+  @ApiPropertyOptional({ example: 'Tech Conference 2026' })
+  @IsOptional()
   @IsString()
   @MaxLength(255)
-  projectName: string;
+  projectName?: string;
 
-  @ApiProperty({ example: '2026-08-25' })
+  @ApiPropertyOptional({ example: '2026-08-25' })
+  @IsOptional()
   @IsString()
   @MaxLength(100)
-  eventDate: string;
+  eventDate?: string;
 
-  @ApiProperty({ example: 'Convention Center, Hall A' })
+  @ApiPropertyOptional({ example: 'Convention Center, Hall A' })
+  @IsOptional()
   @IsString()
   @MaxLength(1000)
-  venue: string;
+  venue?: string;
 
   @ApiPropertyOptional({ example: '9 AM - 5 PM' })
   @IsOptional()
