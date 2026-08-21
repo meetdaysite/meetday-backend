@@ -29,18 +29,13 @@ import { UpsertSponsorshipDealReportDto } from './dto/upsert-sponsorship-deal-re
 import { VerifySponsorshipDealPaymentDto } from './dto/verify-sponsorship-deal-payment.dto';
 import { ADMIN_ALERT_EMAILS } from '../../common/mail/admin-recipients.constant';
 import { redactPersonalInfo } from '../../common/utils/redact-personal-info.util';
+import { computeDealPaymentBreakdown as computeDealPaymentBreakdownUtil, DEFAULT_SPONSORSHIP_GST_RATE } from '../../common/utils/sponsorship-deal-payment.util';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const Razorpay = require('razorpay');
 
 const ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'];
 
-// Fixed 5% Meetday commission on the sponsorship amount. GST is charged on (amount + platform
-// fee) — same taxable-value convention used for ticket orders (see OrdersService) — and falls
-// back to the `gst_rate` platform config, defaulting to 18% if unset.
-const SPONSORSHIP_PLATFORM_FEE_RATE = 0.05;
-const SPONSORSHIP_TRANSACTION_FEE_RATE = 0.03;
-const DEFAULT_GST_RATE = 0.18;
 const DEAL_PAYMENT_DUE_DAYS = 3;
 
 // Shape of one raw stored past-event entry (HostCommunityProfile.pastEvents JSON column).
@@ -1292,16 +1287,12 @@ export class SponsorshipService {
 
   private async getGstRate(): Promise<number> {
     const config = await this.prisma.platformConfig.findUnique({ where: { key: 'gst_rate' } });
-    return config ? parseFloat(config.value) : DEFAULT_GST_RATE;
+    return config ? parseFloat(config.value) : DEFAULT_SPONSORSHIP_GST_RATE;
   }
 
   private async computeDealPaymentBreakdown(sponsorshipAmount: number) {
     const gstRate = await this.getGstRate();
-    const platformFeeAmount = Math.round(sponsorshipAmount * SPONSORSHIP_PLATFORM_FEE_RATE * 100) / 100;
-    const transactionFeeAmount = Math.round(sponsorshipAmount * SPONSORSHIP_TRANSACTION_FEE_RATE * 100) / 100;
-    const taxAmount = Math.round((sponsorshipAmount + platformFeeAmount + transactionFeeAmount) * gstRate * 100) / 100;
-    const totalAmount = Math.round((sponsorshipAmount + platformFeeAmount + transactionFeeAmount + taxAmount) * 100) / 100;
-    return { platformFeeAmount, transactionFeeAmount, taxAmount, totalAmount };
+    return computeDealPaymentBreakdownUtil(sponsorshipAmount, gstRate);
   }
 
   // ── Billing: brand-facing list of all locked deals across chats, with payment breakdown ──
@@ -1325,26 +1316,34 @@ export class SponsorshipService {
       orderBy: [{ approvedAt: 'desc' }],
     });
 
-    return deals.map((d) => ({
-      id: d.id,
-      sponsorshipInterestId: d.sponsorshipInterest.id,
-      proposalName: d.sponsorshipInterest.sponsorshipProposal.name,
-      communityName:
-        d.sponsorshipInterest.sponsorshipProposal.hostProfile.communityProfile?.name ??
-        d.sponsorshipInterest.sponsorshipProposal.hostProfile.displayName ??
-        'Community',
-      projectName: d.projectName,
-      sponsorshipAmount: d.sponsorshipAmount,
-      platformFeeAmount: d.platformFeeAmount,
-      transactionFeeAmount: d.transactionFeeAmount,
-      taxAmount: d.taxAmount,
-      totalAmount: d.totalAmount,
-      paymentStatus: d.paymentStatus,
-      paymentExpiresAt: d.paymentExpiresAt,
-      paidAt: d.paidAt,
-      approvedAt: d.approvedAt,
-      razorpayPaymentId: d.razorpayPaymentId,
-      invoicePdfKey: d.invoicePdfKey,
-    }));
+    return Promise.all(
+      deals.map(async (d) => {
+        // Breakdown is only persisted once a Razorpay order is created (payment initiated).
+        // Before that, compute it live so the brand can see it before ever clicking "Pay".
+        const breakdown =
+          d.platformFeeAmount != null
+            ? { platformFeeAmount: d.platformFeeAmount, transactionFeeAmount: d.transactionFeeAmount, taxAmount: d.taxAmount, totalAmount: d.totalAmount }
+            : await this.computeDealPaymentBreakdown(Number(d.sponsorshipAmount));
+
+        return {
+          id: d.id,
+          sponsorshipInterestId: d.sponsorshipInterest.id,
+          proposalName: d.sponsorshipInterest.sponsorshipProposal.name,
+          communityName:
+            d.sponsorshipInterest.sponsorshipProposal.hostProfile.communityProfile?.name ??
+            d.sponsorshipInterest.sponsorshipProposal.hostProfile.displayName ??
+            'Community',
+          projectName: d.projectName,
+          sponsorshipAmount: d.sponsorshipAmount,
+          ...breakdown,
+          paymentStatus: d.paymentStatus,
+          paymentExpiresAt: d.paymentExpiresAt,
+          paidAt: d.paidAt,
+          approvedAt: d.approvedAt,
+          razorpayPaymentId: d.razorpayPaymentId,
+          invoicePdfKey: d.invoicePdfKey,
+        };
+      }),
+    );
   }
 }

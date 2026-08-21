@@ -13,6 +13,7 @@ import { Prisma } from '@prisma/client';
 import * as crypto from 'crypto';
 import * as firebaseAdmin from 'firebase-admin';
 import { PrismaService } from '../../prisma/prisma.service';
+import { computeDealPaymentBreakdown, DEFAULT_SPONSORSHIP_GST_RATE } from '../../common/utils/sponsorship-deal-payment.util';
 import { ListHostsQueryDto } from './dto/list-hosts-query.dto';
 import { ListAdminsQueryDto } from './dto/list-admins-query.dto';
 import { ListRolesQueryDto } from './dto/list-roles-query.dto';
@@ -2342,44 +2343,59 @@ export class AdminService {
       orderBy: [{ approvedAt: 'desc' }, { updatedAt: 'desc' }],
     });
 
-    return deals.map((d) => ({
-      id: d.id,
-      sponsorshipInterestId: d.sponsorshipInterest.id,
-      proposalId: d.sponsorshipInterest.sponsorshipProposal.id,
-      proposalName: d.sponsorshipInterest.sponsorshipProposal.name,
-      communityName:
-        d.sponsorshipInterest.sponsorshipProposal.hostProfile.communityProfile?.name ??
-        d.sponsorshipInterest.sponsorshipProposal.hostProfile.displayName ??
-        'Community',
-      brandName: d.sponsorshipInterest.brandProfile.brandName,
-      projectName: d.projectName,
-      startDate: d.startDate,
-      endDate: d.endDate,
-      time: d.time,
-      sponsorshipCategory: d.sponsorshipCategory,
-      sponsorshipAmount: d.sponsorshipAmount,
-      venue: d.venue,
-      barterElements: d.barterElements,
-      deliverables: d.deliverables,
-      otherTerms: d.otherTerms,
-      additionalNotes: d.additionalNotes,
-      status: d.status,
-      version: d.version,
-      changeRequestNote: d.changeRequestNote,
-      approvedAt: d.approvedAt,
-      createdAt: d.createdAt,
-      updatedAt: d.updatedAt,
-      hasReport: !!d.report,
-      paymentStatus: d.paymentStatus,
-      platformFeeAmount: d.platformFeeAmount,
-      transactionFeeAmount: d.transactionFeeAmount,
-      taxAmount: d.taxAmount,
-      totalAmount: d.totalAmount,
-      paymentExpiresAt: d.paymentExpiresAt,
-      paidAt: d.paidAt,
-      razorpayPaymentId: d.razorpayPaymentId,
-      invoicePdfKey: d.invoicePdfKey,
-    }));
+    return Promise.all(
+      deals.map(async (d) => {
+        // Breakdown is only persisted once the brand initiates a Razorpay order — compute it
+        // live for display before that, using the current gst_rate config (same as the brand side).
+        let breakdown: { platformFeeAmount: Prisma.Decimal | number | null; transactionFeeAmount: Prisma.Decimal | number | null; taxAmount: Prisma.Decimal | number | null; totalAmount: Prisma.Decimal | number | null } = {
+          platformFeeAmount: d.platformFeeAmount,
+          transactionFeeAmount: d.transactionFeeAmount,
+          taxAmount: d.taxAmount,
+          totalAmount: d.totalAmount,
+        };
+        if (d.platformFeeAmount == null) {
+          const gstConfig = await this.prisma.platformConfig.findUnique({ where: { key: 'gst_rate' } });
+          const gstRate = gstConfig ? parseFloat(gstConfig.value) : DEFAULT_SPONSORSHIP_GST_RATE;
+          breakdown = computeDealPaymentBreakdown(Number(d.sponsorshipAmount), gstRate);
+        }
+
+        return {
+          id: d.id,
+          sponsorshipInterestId: d.sponsorshipInterest.id,
+          proposalId: d.sponsorshipInterest.sponsorshipProposal.id,
+          proposalName: d.sponsorshipInterest.sponsorshipProposal.name,
+          communityName:
+            d.sponsorshipInterest.sponsorshipProposal.hostProfile.communityProfile?.name ??
+            d.sponsorshipInterest.sponsorshipProposal.hostProfile.displayName ??
+            'Community',
+          brandName: d.sponsorshipInterest.brandProfile.brandName,
+          projectName: d.projectName,
+          startDate: d.startDate,
+          endDate: d.endDate,
+          time: d.time,
+          sponsorshipCategory: d.sponsorshipCategory,
+          sponsorshipAmount: d.sponsorshipAmount,
+          venue: d.venue,
+          barterElements: d.barterElements,
+          deliverables: d.deliverables,
+          otherTerms: d.otherTerms,
+          additionalNotes: d.additionalNotes,
+          status: d.status,
+          version: d.version,
+          changeRequestNote: d.changeRequestNote,
+          approvedAt: d.approvedAt,
+          createdAt: d.createdAt,
+          updatedAt: d.updatedAt,
+          hasReport: !!d.report,
+          paymentStatus: d.paymentStatus,
+          ...breakdown,
+          paymentExpiresAt: d.paymentExpiresAt,
+          paidAt: d.paidAt,
+          razorpayPaymentId: d.razorpayPaymentId,
+          invoicePdfKey: d.invoicePdfKey,
+        };
+      }),
+    );
   }
 
   // ── "Talk to Meetday" general support chat (separate from TriChat) ──────

@@ -50,6 +50,7 @@ function makePrisma() {
     adminAnnouncement: { create: jest.fn().mockResolvedValue({ id: 'announcement-uuid' }), findMany: jest.fn(), count: jest.fn() },
     sponsorshipInterest: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn(), count: jest.fn() },
     sponsorshipDeal: { findMany: jest.fn() },
+    platformConfig: { findUnique: jest.fn().mockResolvedValue(null) },
     sponsorshipChatMessage: { findMany: jest.fn(), create: jest.fn(), count: jest.fn().mockResolvedValue(0) },
     meetdayChatThread: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}) },
     meetdayChatMessage: { findMany: jest.fn(), create: jest.fn(), count: jest.fn() },
