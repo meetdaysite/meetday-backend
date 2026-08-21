@@ -657,6 +657,16 @@ export class SponsorshipService {
 
   async deleteProposal(userId: string, id: string) {
     const proposal = await this.getOwnedProposal(userId, id);
+
+    // Deleting cascades to every SponsorshipInterest (and its chat messages/deal) on this
+    // proposal — block it once a brand has expressed interest so a chat can never silently vanish.
+    const interestCount = await this.prisma.sponsorshipInterest.count({ where: { sponsorshipProposalId: id } });
+    if (interestCount > 0) {
+      throw new BadRequestException(
+        'This proposal has brand interest/chats on it and cannot be deleted, to avoid losing that conversation history.',
+      );
+    }
+
     await this.prisma.sponsorshipProposal.delete({ where: { id } });
 
     this.auditLogService.log({

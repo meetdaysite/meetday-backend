@@ -12,7 +12,8 @@ function makePrisma() {
   const prisma: any = {
     hostProfile: { findUnique: jest.fn() },
     brandProfile: { findUnique: jest.fn() },
-    sponsorshipInterest: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}) },
+    sponsorshipProposal: { findUnique: jest.fn(), delete: jest.fn().mockResolvedValue({}) },
+    sponsorshipInterest: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}), count: jest.fn().mockResolvedValue(0) },
     sponsorshipChatMessage: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), count: jest.fn().mockResolvedValue(0) },
     sponsorshipDeal: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
   };
@@ -102,6 +103,25 @@ describe('SponsorshipService — TriChat', () => {
         expect.objectContaining({ where: expect.objectContaining({ senderType: 'BRAND' }) }),
       );
       expect(result[0].unreadCount).toBe(3);
+    });
+  });
+
+  describe('deleteProposal()', () => {
+    it('deletes a proposal with no brand interests', async () => {
+      prisma.sponsorshipProposal.findUnique.mockResolvedValue({ id: 'prop-1', hostProfile: { userId: 'host-user' } });
+      prisma.sponsorshipInterest.count.mockResolvedValue(0);
+
+      await service.deleteProposal('host-user', 'prop-1');
+
+      expect(prisma.sponsorshipProposal.delete).toHaveBeenCalledWith({ where: { id: 'prop-1' } });
+    });
+
+    it('blocks deletion when the proposal has existing brand interests/chats, to avoid silently wiping them', async () => {
+      prisma.sponsorshipProposal.findUnique.mockResolvedValue({ id: 'prop-1', hostProfile: { userId: 'host-user' } });
+      prisma.sponsorshipInterest.count.mockResolvedValue(2);
+
+      await expect(service.deleteProposal('host-user', 'prop-1')).rejects.toThrow(BadRequestException);
+      expect(prisma.sponsorshipProposal.delete).not.toHaveBeenCalled();
     });
   });
 
