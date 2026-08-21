@@ -2370,6 +2370,14 @@ export class AdminService {
       createdAt: d.createdAt,
       updatedAt: d.updatedAt,
       hasReport: !!d.report,
+      paymentStatus: d.paymentStatus,
+      platformFeeAmount: d.platformFeeAmount,
+      taxAmount: d.taxAmount,
+      totalAmount: d.totalAmount,
+      paymentExpiresAt: d.paymentExpiresAt,
+      paidAt: d.paidAt,
+      razorpayPaymentId: d.razorpayPaymentId,
+      invoicePdfKey: d.invoicePdfKey,
     }));
   }
 

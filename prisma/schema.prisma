@@ -1128,6 +1128,11 @@ enum SponsorshipDealStatus {
   APPROVED // brand approved — deal is locked, preserved as the final record
 }
 
+enum SponsorshipDealPaymentStatus {
+  UNPAID
+  PAID
+}
+
 // The negotiated, final terms of a sponsorship — filled in manually by the host once chat
 // negotiation is done ("Lock the Deal"), reviewed/approved by the brand. Editable in place by
 // the host until approved; every edit resets status back to PENDING_APPROVAL.
@@ -1156,6 +1161,19 @@ model SponsorshipDeal {
   createdBy   User   @relation("SponsorshipDealCreatedBy", fields: [createdById], references: [id])
 
   approvedAt DateTime?
+
+  // Brand's payment of the sponsorshipAmount (+ platform fee + GST) via Razorpay, due within
+  // 3 days of the deal being locked. Breakdown is fixed at order-creation time so it stays
+  // accurate even if fee/GST rates change later.
+  paymentStatus     SponsorshipDealPaymentStatus @default(UNPAID)
+  platformFeeAmount Decimal?
+  taxAmount         Decimal?
+  totalAmount       Decimal?
+  paymentExpiresAt  DateTime?
+  razorpayOrderId   String?
+  razorpayPaymentId String?
+  paidAt            DateTime?
+  invoicePdfKey     String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

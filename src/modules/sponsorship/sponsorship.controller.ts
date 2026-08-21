@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  NotFoundException,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -42,6 +43,8 @@ import { UpdateChatMessageDto } from './dto/update-chat-message.dto';
 import { UpsertSponsorshipDealDto } from './dto/upsert-sponsorship-deal.dto';
 import { RequestDealChangesDto } from './dto/request-deal-changes.dto';
 import { UpsertSponsorshipDealReportDto } from './dto/upsert-sponsorship-deal-report.dto';
+import { VerifySponsorshipDealPaymentDto } from './dto/verify-sponsorship-deal-payment.dto';
+import { SponsorshipInvoicePdfService } from './sponsorship-invoice-pdf.service';
 
 @ApiTags('Sponsorship Proposals')
 @ApiBearerAuth('firebase-token')
@@ -50,6 +53,7 @@ export class SponsorshipController {
   constructor(
     private readonly sponsorshipService: SponsorshipService,
     private readonly proposalCopilotService: ProposalCopilotService,
+    private readonly sponsorshipInvoicePdfService: SponsorshipInvoicePdfService,
   ) {}
 
   @Post('copilot/generate-draft')
@@ -358,6 +362,54 @@ export class SponsorshipController {
     @Body() dto: UpsertSponsorshipDealReportDto,
   ) {
     return this.sponsorshipService.upsertDealReport(userId, interestId, dto);
+  }
+
+  @Post('chats/:interestId/deal/payment/initiate')
+  @UseGuards(RolesGuard)
+  @Roles('BRAND')
+  @ApiOperation({ summary: 'Create a Razorpay order to pay for a locked deal — brand only' })
+  @ApiOkResponse({ description: 'Razorpay order details for the checkout widget.' })
+  @ApiNotFoundResponse({ description: 'No deal exists yet for this chat.' })
+  @ApiBadRequestResponse({ description: 'Deal is not locked, or already paid.' })
+  initiateDealPayment(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string) {
+    return this.sponsorshipService.initiateDealPayment(userId, interestId);
+  }
+
+  @Post('chats/:interestId/deal/payment/verify')
+  @UseGuards(RolesGuard)
+  @Roles('BRAND')
+  @ApiOperation({ summary: 'Verify a completed Razorpay payment for a locked deal — brand only' })
+  @ApiOkResponse({ description: 'Deal marked as paid.' })
+  @ApiNotFoundResponse({ description: 'No deal exists yet for this chat.' })
+  @ApiForbiddenResponse({ description: 'Invalid payment signature.' })
+  verifyDealPayment(
+    @GetUser('id') userId: string,
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Body() dto: VerifySponsorshipDealPaymentDto,
+  ) {
+    return this.sponsorshipService.verifyDealPayment(userId, interestId, dto);
+  }
+
+  @Get('billing')
+  @UseGuards(RolesGuard)
+  @Roles('BRAND')
+  @ApiOperation({ summary: 'List all locked deals for the brand, with payment breakdown and status — brand only' })
+  @ApiOkResponse({ description: 'List of locked deals across all chats.' })
+  listBrandDealsBilling(@GetUser('id') userId: string) {
+    return this.sponsorshipService.listBrandDealsBilling(userId);
+  }
+
+  @Get('chats/:interestId/deal/invoice')
+  @UseGuards(RolesGuard)
+  @Roles('HOST', 'BRAND')
+  @ApiOperation({ summary: 'Get a presigned download URL for the paid deal\'s receipt PDF' })
+  @ApiOkResponse({ description: 'Presigned invoice PDF URL.' })
+  @ApiNotFoundResponse({ description: 'No deal exists, or it has not been paid for yet.' })
+  async getDealInvoiceUrl(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string) {
+    const deal = await this.sponsorshipService.getDeal(userId, interestId);
+    if (!deal || deal.paymentStatus !== 'PAID') throw new NotFoundException('No paid deal found for this chat');
+    const url = await this.sponsorshipInvoicePdfService.getDownloadUrl(deal.id);
+    return { url };
   }
 
   @Get(':id')

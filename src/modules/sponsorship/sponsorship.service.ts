@@ -2,12 +2,15 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  InternalServerErrorException,
   Logger,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { ConfigService } from '@nestjs/config';
+import { createHmac } from 'crypto';
 import { Prisma, SponsorshipStatus, SponsorshipChatStatus, ChatSenderType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
@@ -23,10 +26,21 @@ import { UpdateChatMessageDto } from './dto/update-chat-message.dto';
 import { UpsertSponsorshipDealDto } from './dto/upsert-sponsorship-deal.dto';
 import { RequestDealChangesDto } from './dto/request-deal-changes.dto';
 import { UpsertSponsorshipDealReportDto } from './dto/upsert-sponsorship-deal-report.dto';
+import { VerifySponsorshipDealPaymentDto } from './dto/verify-sponsorship-deal-payment.dto';
 import { ADMIN_ALERT_EMAILS } from '../../common/mail/admin-recipients.constant';
 import { redactPersonalInfo } from '../../common/utils/redact-personal-info.util';
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const Razorpay = require('razorpay');
+
 const ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'];
+
+// Fixed 5% Meetday commission on the sponsorship amount. GST is charged on (amount + platform
+// fee) — same taxable-value convention used for ticket orders (see OrdersService) — and falls
+// back to the `gst_rate` platform config, defaulting to 18% if unset.
+const SPONSORSHIP_PLATFORM_FEE_RATE = 0.05;
+const DEFAULT_GST_RATE = 0.18;
+const DEAL_PAYMENT_DUE_DAYS = 3;
 
 // Shape of one raw stored past-event entry (HostCommunityProfile.pastEvents JSON column).
 type PastEventLike = { name?: string; description?: string; imageKeys?: string[] };
@@ -34,6 +48,9 @@ type PastEventLike = { name?: string; description?: string; imageKeys?: string[]
 @Injectable()
 export class SponsorshipService {
   private readonly logger = new Logger(SponsorshipService.name);
+  private readonly razorpay: any;
+  private readonly razorpayKeyId: string;
+  private readonly razorpayKeySecret: string;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -42,7 +59,11 @@ export class SponsorshipService {
     private readonly auditLogService: AuditLogService,
     private readonly configService: ConfigService,
     @InjectQueue('mail') private readonly mailQueue: Queue,
-  ) {}
+  ) {
+    this.razorpayKeyId = this.configService.get<string>('razorpay.keyId');
+    this.razorpayKeySecret = this.configService.get<string>('razorpay.keySecret');
+    this.razorpay = new Razorpay({ key_id: this.razorpayKeyId, key_secret: this.razorpayKeySecret });
+  }
 
   // Schedules the fallback "you have unread messages" email check — deduped by jobId so several
   // messages to the same recipient within the grace period collapse into a single check/email.
@@ -1054,9 +1075,12 @@ export class SponsorshipService {
     if (!existing) throw new NotFoundException('No deal found for this chat');
     if (existing.status === 'APPROVED') return existing;
 
+    const paymentExpiresAt = new Date();
+    paymentExpiresAt.setDate(paymentExpiresAt.getDate() + DEAL_PAYMENT_DUE_DAYS);
+
     const deal = await this.prisma.sponsorshipDeal.update({
       where: { id: existing.id },
-      data: { status: 'APPROVED', approvedAt: new Date() },
+      data: { status: 'APPROVED', approvedAt: new Date(), paymentExpiresAt },
     });
 
     await this.postDealSystemMessage(interest.id, ChatSenderType.BRAND, userId, '🎉 Congratulations! The deal is locked.');
@@ -1168,5 +1192,146 @@ export class SponsorshipService {
 
     const proofUrls = await Promise.all(report.proofKeys.map((key) => this.storageService.getPresignedDownloadUrl(key)));
     return { ...report, proofUrls };
+  }
+
+  async initiateDealPayment(userId: string, interestId: string) {
+    const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
+    if (senderType !== ChatSenderType.BRAND) throw new ForbiddenException('Only the brand can pay for this deal');
+
+    const deal = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
+    if (!deal) throw new NotFoundException('No deal found for this chat');
+    if (deal.status !== 'APPROVED') throw new BadRequestException('The deal must be locked before it can be paid for');
+    if (deal.paymentStatus === 'PAID') throw new BadRequestException('This deal has already been paid for');
+
+    if (deal.razorpayOrderId && deal.totalAmount) {
+      const amountInPaise = Math.round(Number(deal.totalAmount) * 100);
+      return { razorpayOrderId: deal.razorpayOrderId, amount: amountInPaise, currency: 'INR', keyId: this.razorpayKeyId };
+    }
+
+    const { platformFeeAmount, taxAmount, totalAmount } = await this.computeDealPaymentBreakdown(Number(deal.sponsorshipAmount));
+    const amountInPaise = Math.round(totalAmount * 100);
+    if (amountInPaise < 100) throw new BadRequestException('Deal amount is below the minimum chargeable amount');
+
+    let razorpayOrder: any;
+    try {
+      razorpayOrder = await this.razorpay.orders.create({
+        amount: amountInPaise,
+        currency: 'INR',
+        receipt: deal.id,
+      });
+    } catch (err: any) {
+      const rzpError = err?.error ?? err;
+      this.logger.error(`Razorpay order creation failed [${rzpError?.code ?? 'UNKNOWN'}]: ${rzpError?.description ?? err?.message}`);
+      if (err?.statusCode === 400) throw new BadRequestException(rzpError?.description ?? 'Payment initiation failed');
+      throw new InternalServerErrorException('Payment gateway error. Please try again later.');
+    }
+
+    await this.prisma.sponsorshipDeal.update({
+      where: { id: deal.id },
+      data: { razorpayOrderId: razorpayOrder.id, platformFeeAmount, taxAmount, totalAmount },
+    });
+
+    this.logger.log(`Razorpay order created: ${razorpayOrder.id} for sponsorship deal: ${deal.id}`);
+
+    return { razorpayOrderId: razorpayOrder.id, amount: amountInPaise, currency: 'INR', keyId: this.razorpayKeyId };
+  }
+
+  async verifyDealPayment(userId: string, interestId: string, dto: VerifySponsorshipDealPaymentDto) {
+    const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
+    if (senderType !== ChatSenderType.BRAND) throw new ForbiddenException('Only the brand can pay for this deal');
+
+    const deal = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
+    if (!deal) throw new NotFoundException('No deal found for this chat');
+    if (deal.paymentStatus === 'PAID') return deal;
+    if (deal.razorpayOrderId !== dto.razorpayOrderId) throw new BadRequestException('Razorpay order ID does not match this deal');
+
+    const expectedSignature = createHmac('sha256', this.razorpayKeySecret)
+      .update(`${dto.razorpayOrderId}|${dto.razorpayPaymentId}`)
+      .digest('hex');
+    if (expectedSignature !== dto.razorpaySignature) {
+      this.logger.warn(`Signature mismatch for sponsorship deal ${deal.id}`);
+      throw new UnauthorizedException('Invalid payment signature');
+    }
+
+    const updated = await this.prisma.sponsorshipDeal.update({
+      where: { id: deal.id },
+      data: { paymentStatus: 'PAID', razorpayPaymentId: dto.razorpayPaymentId, paidAt: new Date() },
+    });
+
+    const paidAmount = Number(deal.totalAmount ?? deal.sponsorshipAmount);
+    await this.postDealSystemMessage(
+      interest.id,
+      ChatSenderType.BRAND,
+      userId,
+      `💳 ${interest.brandProfile.brandName} paid ₹${paidAmount.toLocaleString('en-IN')} for the deal.`,
+    );
+
+    void this.notificationsService
+      .create(
+        interest.sponsorshipProposal.hostProfile.userId,
+        'sponsorship_deal_paid',
+        interest.brandProfile.brandName,
+        `💳 Paid ₹${paidAmount.toLocaleString('en-IN')} for the deal: ${deal.projectName}`,
+        { sponsorshipInterestId: interest.id },
+      )
+      .catch((err) => this.logger.error('Failed to notify host of deal payment', err));
+
+    return updated;
+  }
+
+  private async getGstRate(): Promise<number> {
+    const config = await this.prisma.platformConfig.findUnique({ where: { key: 'gst_rate' } });
+    return config ? parseFloat(config.value) : DEFAULT_GST_RATE;
+  }
+
+  private async computeDealPaymentBreakdown(sponsorshipAmount: number) {
+    const gstRate = await this.getGstRate();
+    const platformFeeAmount = Math.round(sponsorshipAmount * SPONSORSHIP_PLATFORM_FEE_RATE * 100) / 100;
+    const taxAmount = Math.round((sponsorshipAmount + platformFeeAmount) * gstRate * 100) / 100;
+    const totalAmount = Math.round((sponsorshipAmount + platformFeeAmount + taxAmount) * 100) / 100;
+    return { platformFeeAmount, taxAmount, totalAmount };
+  }
+
+  // ── Billing: brand-facing list of all locked deals across chats, with payment breakdown ──
+
+  async listBrandDealsBilling(userId: string) {
+    const brandProfile = await this.prisma.brandProfile.findUnique({ where: { userId }, select: { id: true } });
+    if (!brandProfile) throw new NotFoundException('Brand profile not found');
+
+    const deals = await this.prisma.sponsorshipDeal.findMany({
+      where: { status: 'APPROVED', sponsorshipInterest: { brandProfileId: brandProfile.id } },
+      include: {
+        sponsorshipInterest: {
+          select: {
+            id: true,
+            sponsorshipProposal: {
+              select: { id: true, name: true, hostProfile: { select: { displayName: true, communityProfile: { select: { name: true } } } } },
+            },
+          },
+        },
+      },
+      orderBy: [{ approvedAt: 'desc' }],
+    });
+
+    return deals.map((d) => ({
+      id: d.id,
+      sponsorshipInterestId: d.sponsorshipInterest.id,
+      proposalName: d.sponsorshipInterest.sponsorshipProposal.name,
+      communityName:
+        d.sponsorshipInterest.sponsorshipProposal.hostProfile.communityProfile?.name ??
+        d.sponsorshipInterest.sponsorshipProposal.hostProfile.displayName ??
+        'Community',
+      projectName: d.projectName,
+      sponsorshipAmount: d.sponsorshipAmount,
+      platformFeeAmount: d.platformFeeAmount,
+      taxAmount: d.taxAmount,
+      totalAmount: d.totalAmount,
+      paymentStatus: d.paymentStatus,
+      paymentExpiresAt: d.paymentExpiresAt,
+      paidAt: d.paidAt,
+      approvedAt: d.approvedAt,
+      razorpayPaymentId: d.razorpayPaymentId,
+      invoicePdfKey: d.invoicePdfKey,
+    }));
   }
 }
