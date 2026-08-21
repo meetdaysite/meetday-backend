@@ -57,4 +57,4 @@ seed-images
 seed-community-covers
 seed-meetday-host.ts
 
-*.xlsx
+*.xlsxdb-backups/
