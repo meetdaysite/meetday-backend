@@ -9,6 +9,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -40,6 +41,7 @@ import { SendChatMessageDto } from './dto/send-chat-message.dto';
 import { UpdateChatMessageDto } from './dto/update-chat-message.dto';
 import { UpsertSponsorshipDealDto } from './dto/upsert-sponsorship-deal.dto';
 import { RequestDealChangesDto } from './dto/request-deal-changes.dto';
+import { UpsertSponsorshipDealReportDto } from './dto/upsert-sponsorship-deal-report.dto';
 
 @ApiTags('Sponsorship Proposals')
 @ApiBearerAuth('firebase-token')
@@ -328,6 +330,34 @@ export class SponsorshipController {
     @Body() dto: RequestDealChangesDto,
   ) {
     return this.sponsorshipService.requestDealChanges(userId, interestId, dto);
+  }
+
+  @Get('chats/:interestId/deal/report')
+  @UseGuards(RolesGuard)
+  @Roles('HOST', 'BRAND')
+  @ApiOperation({ summary: 'Get the submitted deliverables report for a locked deal, if any' })
+  @ApiOkResponse({ description: 'Report, or null if none has been submitted yet.' })
+  @ApiNotFoundResponse({ description: 'No deal exists yet for this chat.' })
+  getDealReport(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string) {
+    return this.sponsorshipService.getDealReport(userId, interestId);
+  }
+
+  @Put('chats/:interestId/deal/report')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'Submit (or resubmit) the deliverables report — community only',
+    description: 'Only enabled once the deal is APPROVED/locked.',
+  })
+  @ApiOkResponse({ description: 'Report saved.' })
+  @ApiNotFoundResponse({ description: 'No deal exists yet for this chat.' })
+  @ApiBadRequestResponse({ description: 'Deal is not yet locked/approved.' })
+  upsertDealReport(
+    @GetUser('id') userId: string,
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Body() dto: UpsertSponsorshipDealReportDto,
+  ) {
+    return this.sponsorshipService.upsertDealReport(userId, interestId, dto);
   }
 
   @Get(':id')

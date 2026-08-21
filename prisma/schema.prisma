@@ -84,6 +84,7 @@ model User {
 
   sponsorshipChatMessages SponsorshipChatMessage[] @relation("SponsorshipChatSender")
   sponsorshipDealsCreated SponsorshipDeal[]        @relation("SponsorshipDealCreatedBy")
+  sponsorshipDealReportsSubmitted SponsorshipDealReport[] @relation("SponsorshipDealReportSubmittedBy")
 
   meetdayChatThread    MeetdayChatThread?   @relation("MeetdayChatThreadUser")
   meetdayChatMessages  MeetdayChatMessage[] @relation("MeetdayChatMessageSender")
@@ -1159,8 +1160,30 @@ model SponsorshipDeal {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  report SponsorshipDealReport?
+
   @@index([status])
   @@map("sponsorship_deals")
+}
+
+// Submitted by the host once the deal is APPROVED ("locked") — what deliverables were actually
+// completed, with optional photo/screenshot evidence. One report per deal, editable/resubmittable.
+model SponsorshipDealReport {
+  id                String          @id @default(uuid())
+  sponsorshipDealId String          @unique
+  sponsorshipDeal   SponsorshipDeal @relation(fields: [sponsorshipDealId], references: [id], onDelete: Cascade)
+
+  summary   String   @db.Text
+  // GCS object keys for supporting photos/screenshots proving the deliverables were completed.
+  proofKeys String[]
+  notes     String?  @db.Text
+
+  submittedById String
+  submittedBy   User     @relation("SponsorshipDealReportSubmittedBy", fields: [submittedById], references: [id])
+  submittedAt   DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("sponsorship_deal_reports")
 }
 
 // General "Talk to Meetday" support chat — one thread per Host/Brand user, separate from

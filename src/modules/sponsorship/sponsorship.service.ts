@@ -22,6 +22,7 @@ import { SendChatMessageDto } from './dto/send-chat-message.dto';
 import { UpdateChatMessageDto } from './dto/update-chat-message.dto';
 import { UpsertSponsorshipDealDto } from './dto/upsert-sponsorship-deal.dto';
 import { RequestDealChangesDto } from './dto/request-deal-changes.dto';
+import { UpsertSponsorshipDealReportDto } from './dto/upsert-sponsorship-deal-report.dto';
 import { ADMIN_ALERT_EMAILS } from '../../common/mail/admin-recipients.constant';
 import { redactPersonalInfo } from '../../common/utils/redact-personal-info.util';
 
@@ -1105,5 +1106,67 @@ export class SponsorshipService {
       .catch((err) => this.logger.error('Failed to notify host of requested deal changes', err));
 
     return deal;
+  }
+
+  // ── Submit Report: host reports on completed deliverables once the deal is locked ──────
+
+  async getDealReport(userId: string, interestId: string) {
+    const { interest } = await this.getInterestForParticipant(userId, interestId);
+    const deal = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
+    if (!deal) throw new NotFoundException('No deal found for this chat');
+
+    const report = await this.prisma.sponsorshipDealReport.findUnique({ where: { sponsorshipDealId: deal.id } });
+    if (!report) return null;
+
+    const proofUrls = await Promise.all(report.proofKeys.map((key) => this.storageService.getPresignedDownloadUrl(key)));
+    return { ...report, proofUrls };
+  }
+
+  async upsertDealReport(userId: string, interestId: string, dto: UpsertSponsorshipDealReportDto) {
+    const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
+    if (senderType !== ChatSenderType.HOST) throw new ForbiddenException('Only the community can submit the deliverables report');
+
+    const deal = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
+    if (!deal) throw new NotFoundException('No deal found for this chat');
+    if (deal.status !== 'APPROVED') {
+      throw new BadRequestException('The deal must be locked and approved before submitting a report');
+    }
+
+    const report = await this.prisma.sponsorshipDealReport.upsert({
+      where: { sponsorshipDealId: deal.id },
+      create: {
+        sponsorshipDealId: deal.id,
+        summary: dto.summary,
+        proofKeys: dto.proofKeys ?? [],
+        notes: dto.notes,
+        submittedById: userId,
+      },
+      update: {
+        summary: dto.summary,
+        proofKeys: dto.proofKeys ?? [],
+        notes: dto.notes,
+        submittedById: userId,
+      },
+    });
+
+    await this.postDealSystemMessage(
+      interest.id,
+      ChatSenderType.HOST,
+      userId,
+      `📝 ${this.hostNameOf(interest)} submitted the deliverables report.`,
+    );
+
+    void this.notificationsService
+      .create(
+        interest.brandProfile.userId,
+        'sponsorship_deal_report_submitted',
+        this.hostNameOf(interest),
+        'Submitted the deliverables report for your locked deal',
+        { sponsorshipInterestId: interest.id },
+      )
+      .catch((err) => this.logger.error('Failed to notify brand of submitted deal report', err));
+
+    const proofUrls = await Promise.all(report.proofKeys.map((key) => this.storageService.getPresignedDownloadUrl(key)));
+    return { ...report, proofUrls };
   }
 }

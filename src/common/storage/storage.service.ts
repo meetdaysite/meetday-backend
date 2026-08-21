@@ -55,6 +55,7 @@ const CONTEXT_CONTENT_TYPES: Record<UploadContext, readonly string[]> = {
   [UploadContext.SPONSORSHIP_CHAT_MEDIA]: IMAGE_TYPES,
   [UploadContext.MEETDAY_CHAT_MEDIA]: IMAGE_TYPES,
   [UploadContext.COMMUNITY_PAST_EVENT_MEDIA]: IMAGE_TYPES,
+  [UploadContext.SPONSORSHIP_DEAL_REPORT_MEDIA]: IMAGE_TYPES,
 };
 
 // Platform-admin roles required by the admin-only contexts.
@@ -406,6 +407,24 @@ export class StorageService {
             : await this.prisma.hostProfile.findUnique({ where: { userId }, select: { id: true } });
         if (!hostProfile) throw new NotFoundException('Host profile not found');
         key = `hosts/${hostProfile.id}/community-profile/past-events/${randomUUID()}.${ext}`;
+        break;
+      }
+
+      case UploadContext.SPONSORSHIP_DEAL_REPORT_MEDIA: {
+        // Proof photos for the "Submit Report" deliverables report. resourceId is the
+        // sponsorship interest id — only the host who owns it (or an admin) may attach evidence.
+        if (!dto.resourceId) {
+          throw new BadRequestException('resourceId (sponsorship interest UUID) is required for SPONSORSHIP_DEAL_REPORT_MEDIA');
+        }
+        const interest = await this.prisma.sponsorshipInterest.findUnique({
+          where: { id: dto.resourceId },
+          select: { sponsorshipProposal: { select: { hostProfile: { select: { userId: true } } } } },
+        });
+        if (!interest) throw new NotFoundException('Chat thread not found');
+        const isOwner =
+          interest.sponsorshipProposal.hostProfile.userId === userId || SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '');
+        if (!isOwner) throw new ForbiddenException('You do not own this sponsorship deal');
+        key = `sponsorship-deal-reports/${dto.resourceId}/${randomUUID()}.${ext}`;
         break;
       }
 

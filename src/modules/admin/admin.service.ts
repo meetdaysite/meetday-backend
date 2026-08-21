@@ -2337,6 +2337,7 @@ export class AdminService {
             brandProfile: { select: { id: true, brandName: true } },
           },
         },
+        report: { select: { id: true } },
       },
       orderBy: [{ approvedAt: 'desc' }, { updatedAt: 'desc' }],
     });
@@ -2368,6 +2369,7 @@ export class AdminService {
       approvedAt: d.approvedAt,
       createdAt: d.createdAt,
       updatedAt: d.updatedAt,
+      hasReport: !!d.report,
     }));
   }
 
