@@ -56,7 +56,7 @@ import { AdminActionAlertInterceptor } from './common/interceptors/admin-action-
       envFilePath: '.env',
       validate,
     }),
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
     BullModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
