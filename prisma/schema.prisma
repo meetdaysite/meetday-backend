@@ -1192,6 +1192,19 @@ model SponsorshipDealReport {
   sponsorshipDealId String          @unique
   sponsorshipDeal   SponsorshipDeal @relation(fields: [sponsorshipDealId], references: [id], onDelete: Cascade)
 
+  // NEW COLUMNS:
+  projectName  String
+  eventDate    String
+  venue        String
+  time         String?
+  guestCount   String?
+  ageRange     String?
+  deliverables Json     @default("[]")
+  videoLinks   String[] @default([])
+  socialLinks  String[] @default([])
+  status       String   @default("PENDING") // PENDING, APPROVED, REVISION_REQUESTED
+  revisionNote String?
+
   summary   String   @db.Text
   // GCS object keys for supporting photos/screenshots proving the deliverables were completed.
   proofKeys String[]
