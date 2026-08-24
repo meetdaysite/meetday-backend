@@ -153,6 +153,34 @@ describe('MeetdayChatService', () => {
       fetchSpy.mockRestore();
     });
 
+    it('forces a handoff instead of asking a 3rd time when the classifier keeps returning NEEDS_DETAIL', async () => {
+      prisma.meetdayChatThread.upsert.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
+      prisma.meetdayChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
+      prisma.meetdayChatMessage.findMany.mockResolvedValue([
+        { content: 'Please describe your issue/query in detail.' },
+        { content: 'Please describe your issue/query in detail.' },
+      ]);
+      prisma.user.findMany.mockResolvedValue([{ id: 'admin-1' }]);
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ category: 'NEEDS_DETAIL' }),
+      } as Response);
+
+      await service.sendMyMessage('user-1', { content: 'issue in choosing a brand' });
+      await new Promise(process.nextTick);
+
+      expect(prisma.meetdayChatMessage.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ senderType: 'BOT', senderId: null, content: 'Thank you. Your issue has been logged. An agent will revert to you within 2 hours.' }),
+        }),
+      );
+      expect(prisma.meetdayChatThread.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'thread-1' }, data: { botDormant: true } }),
+      );
+      expect(mockNotifications.create).toHaveBeenCalledTimes(1);
+      fetchSpy.mockRestore();
+    });
+
     it('logs the issue, goes dormant, and notifies admins when classified as DETAILED', async () => {
       prisma.meetdayChatThread.upsert.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
       prisma.meetdayChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });

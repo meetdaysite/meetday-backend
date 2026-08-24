@@ -125,11 +125,37 @@ export class MeetdayChatService {
     }
 
     if (category === 'NEEDS_DETAIL') {
+      // Avoid looping forever if the classifier never scores a message as "detailed enough" —
+      // after asking twice, just log whatever the user has said and hand off to a human.
+      const trailingAsks = await this.countTrailingNeedsDetailAsks(threadId);
+      if (trailingAsks >= 2) {
+        await this.logAndHandOff(threadId);
+        return;
+      }
       await this.postBotMessage(threadId, NEEDS_DETAIL_MESSAGE);
       return;
     }
 
     // DETAILED — log the issue, hand off to a human, and go dormant until resolved.
+    await this.logAndHandOff(threadId);
+  }
+
+  private async countTrailingNeedsDetailAsks(threadId: string): Promise<number> {
+    const recentBotMessages = await this.prisma.meetdayChatMessage.findMany({
+      where: { threadId, senderType: 'BOT' },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+      select: { content: true },
+    });
+    let count = 0;
+    for (const m of recentBotMessages) {
+      if (m.content !== NEEDS_DETAIL_MESSAGE) break;
+      count++;
+    }
+    return count;
+  }
+
+  private async logAndHandOff(threadId: string): Promise<void> {
     await this.postBotMessage(threadId, HANDOFF_MESSAGE);
     await this.prisma.meetdayChatThread.update({ where: { id: threadId }, data: { botDormant: true } });
     await this.notifyAdminsOfNewIssue(threadId);
