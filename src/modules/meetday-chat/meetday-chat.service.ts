@@ -85,9 +85,14 @@ export class MeetdayChatService {
 
     const mediaUrl = dto.mediaKey ? await this.storageService.getPresignedDownloadUrl(dto.mediaKey) : null;
 
-    void this.maybeSendBotReply(thread.id, content).catch((err) =>
-      this.logger.error('Failed to generate Meetday chat bot reply', err),
-    );
+    // Awaited (not fire-and-forget) — a background task started after the response is sent can
+    // get killed mid-flight by Cloud Run during a deploy/instance-recycle, silently dropping the
+    // bot's reply. Awaiting adds ~1s of classification latency but guarantees it actually runs.
+    try {
+      await this.maybeSendBotReply(thread.id, content);
+    } catch (err) {
+      this.logger.error('Failed to generate Meetday chat bot reply', err);
+    }
 
     return { ...message, mediaUrl, wasRedacted };
   }
