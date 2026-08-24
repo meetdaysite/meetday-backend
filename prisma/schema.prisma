@@ -82,12 +82,12 @@ model User {
 
   sentAdminAnnouncements AdminAnnouncement[] @relation("AdminAnnouncementSentBy")
 
-  sponsorshipChatMessages SponsorshipChatMessage[] @relation("SponsorshipChatSender")
-  sponsorshipDealsCreated SponsorshipDeal[]        @relation("SponsorshipDealCreatedBy")
-  sponsorshipDealReportsSubmitted SponsorshipDealReport[] @relation("SponsorshipDealReportSubmittedBy")
+  sponsorshipChatMessages         SponsorshipChatMessage[] @relation("SponsorshipChatSender")
+  sponsorshipDealsCreated         SponsorshipDeal[]        @relation("SponsorshipDealCreatedBy")
+  sponsorshipDealReportsSubmitted SponsorshipDealReport[]  @relation("SponsorshipDealReportSubmittedBy")
 
-  meetdayChatThread    MeetdayChatThread?   @relation("MeetdayChatThreadUser")
-  meetdayChatMessages  MeetdayChatMessage[] @relation("MeetdayChatMessageSender")
+  meetdayChatThread   MeetdayChatThread?   @relation("MeetdayChatThreadUser")
+  meetdayChatMessages MeetdayChatMessage[] @relation("MeetdayChatMessageSender")
 
   createdCommunities   Community[]       @relation("CommunityCreatedBy")
   communityMemberships CommunityMember[]
@@ -444,9 +444,9 @@ model BrandProfile {
 }
 
 model Campaign {
-  id             String         @id @default(uuid())
+  id             String       @id @default(uuid())
   brandProfileId String
-  brandProfile   BrandProfile   @relation(fields: [brandProfileId], references: [id], onDelete: Cascade)
+  brandProfile   BrandProfile @relation(fields: [brandProfileId], references: [id], onDelete: Cascade)
 
   name           String
   goal           String
@@ -454,17 +454,17 @@ model Campaign {
   audience       String[]
   startDate      DateTime
   endDate        DateTime
-  offerType      String         // "CASH" | "BARTER" | "BOTH"
+  offerType      String // "CASH" | "BARTER" | "BOTH"
   budgetAmount   Decimal
-  budgetCurrency String         // e.g. "INR", "USD"
-  barterElements String?        @db.Text
-  description    String?        @db.Text
+  budgetCurrency String // e.g. "INR", "USD"
+  barterElements String?  @db.Text
+  description    String?  @db.Text
 
-  status         SponsorshipStatus @default(DRAFT)
-  adminRejectionRemark String?        @db.Text
+  status               SponsorshipStatus @default(DRAFT)
+  adminRejectionRemark String?           @db.Text
 
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([brandProfileId])
   @@index([status])
@@ -1083,7 +1083,7 @@ model SponsorshipInterest {
   // TriChat — Host ↔ Brand (+ Admin observing/participating) conversation tied to this interest.
   // REQUESTED: brand has expressed interest, host hasn't accepted yet (shows in host's "Requests").
   // ACCEPTED: host accepted, chat window is open both sides (shows in "General"/"Accepted").
-  chatStatus     SponsorshipChatStatus     @default(REQUESTED)
+  chatStatus     SponsorshipChatStatus    @default(REQUESTED)
   chatAcceptedAt DateTime?
   chatMessages   SponsorshipChatMessage[]
   lastMessageAt  DateTime?
@@ -1178,9 +1178,9 @@ model SponsorshipDeal {
   sponsorshipAmount   Decimal
   venue               String
   barterElements      String?
-  deliverables        String                @db.Text
-  otherTerms          String?               @db.Text
-  additionalNotes     String?               @db.Text
+  deliverables        String    @db.Text
+  otherTerms          String?   @db.Text
+  additionalNotes     String?   @db.Text
 
   status            SponsorshipDealStatus @default(PENDING_APPROVAL)
   version           Int                   @default(1)
@@ -1194,16 +1194,16 @@ model SponsorshipDeal {
   // Brand's payment of the sponsorshipAmount (+ platform fee + transaction fee + GST) via
   // Razorpay, due within 3 days of the deal being locked. Breakdown is fixed at order-creation
   // time so it stays accurate even if fee/GST rates change later.
-  paymentStatus       SponsorshipDealPaymentStatus @default(UNPAID)
-  platformFeeAmount   Decimal?
+  paymentStatus        SponsorshipDealPaymentStatus @default(UNPAID)
+  platformFeeAmount    Decimal?
   transactionFeeAmount Decimal?
-  taxAmount           Decimal?
-  totalAmount         Decimal?
-  paymentExpiresAt    DateTime?
-  razorpayOrderId     String?
-  razorpayPaymentId   String?
-  paidAt              DateTime?
-  invoicePdfKey       String?
+  taxAmount            Decimal?
+  totalAmount          Decimal?
+  paymentExpiresAt     DateTime?
+  razorpayOrderId      String?
+  razorpayPaymentId    String?
+  paidAt               DateTime?
+  invoicePdfKey        String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
