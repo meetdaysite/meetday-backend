@@ -688,8 +688,11 @@ export class SponsorshipService {
   }
 
   async listMyChats(userId: string, query: ListSponsorshipChatsQueryDto) {
-    const { hostProfile, brandProfile } = await this.getOwnProfiles(userId);
-    if (!hostProfile && !brandProfile) throw new NotFoundException('No host or brand profile found for this account');
+    const { hostProfile: originalHost, brandProfile: originalBrand } = await this.getOwnProfiles(userId);
+    if (!originalHost && !originalBrand) throw new NotFoundException('No host or brand profile found for this account');
+
+    const hostProfile = query.role === 'BRAND' ? null : originalHost;
+    const brandProfile = query.role === 'HOST' ? null : originalBrand;
 
     const where: Prisma.SponsorshipInterestWhereInput = {
       ...(query.status && { chatStatus: query.status }),

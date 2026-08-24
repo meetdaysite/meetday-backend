@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional } from 'class-validator';
+import { IsEnum, IsOptional, IsString } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { SponsorshipChatStatus } from '@prisma/client';
 
@@ -7,4 +7,9 @@ export class ListSponsorshipChatsQueryDto {
   @IsOptional()
   @IsEnum(SponsorshipChatStatus)
   status?: SponsorshipChatStatus;
+
+  @ApiPropertyOptional({ description: 'Filter/context by role: HOST or BRAND.' })
+  @IsOptional()
+  @IsString()
+  role?: 'HOST' | 'BRAND';
 }

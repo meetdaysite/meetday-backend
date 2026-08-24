@@ -2144,7 +2144,10 @@ export class AdminService {
 
   async listSponsorshipChats(query: ListSponsorshipChatsQueryDto) {
     const threads = await this.prisma.sponsorshipInterest.findMany({
-      where: query.status ? { chatStatus: query.status } : undefined,
+      where: {
+        sponsorshipProposalId: { not: null },
+        ...(query.status && { chatStatus: query.status }),
+      },
       include: {
         sponsorshipProposal: {
           select: { id: true, name: true, hostProfile: { select: { displayName: true, communityProfile: { select: { name: true, logoKey: true } } } } },
@@ -2200,7 +2203,12 @@ export class AdminService {
   // Count of chats a brand has requested that the host hasn't accepted yet — backs the admin
   // sidebar's "Ongoing Chats" badge so pending requests aren't missed.
   async countPendingSponsorshipChats() {
-    return this.prisma.sponsorshipInterest.count({ where: { chatStatus: 'REQUESTED' } });
+    return this.prisma.sponsorshipInterest.count({
+      where: {
+        chatStatus: 'REQUESTED',
+        sponsorshipProposalId: { not: null },
+      },
+    });
   }
 
   // Schedules the fallback "you have unread messages" email check — deduped by jobId so several
