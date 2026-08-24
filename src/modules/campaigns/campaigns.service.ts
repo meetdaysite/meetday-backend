@@ -104,4 +104,39 @@ export class CampaignsService {
     });
     return { success: true };
   }
+
+  async getPublishedCampaigns() {
+    return this.prisma.campaign.findMany({
+      where: { status: 'PUBLISHED' },
+      include: {
+        brandProfile: {
+          select: {
+            id: true,
+            brandName: true,
+            user: { select: { firstName: true, lastName: true, email: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getPublishedCampaign(campaignId: string) {
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id: campaignId },
+      include: {
+        brandProfile: {
+          select: {
+            id: true,
+            brandName: true,
+            user: { select: { firstName: true, lastName: true, email: true } },
+          },
+        },
+      },
+    });
+    if (!campaign || campaign.status !== 'PUBLISHED') {
+      throw new NotFoundException('Campaign not found');
+    }
+    return campaign;
+  }
 }

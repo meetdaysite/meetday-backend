@@ -53,6 +53,7 @@ import { UpdateInterestDto } from './dto/update-interest.dto';
 import { SetInterestCategoriesDto } from './dto/set-interest-categories.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
 import { ListSponsorshipsQueryDto } from './dto/list-sponsorships-query.dto';
+import { ListCampaignsQueryDto } from './dto/list-campaigns-query.dto';
 import { ListCommunityProfilesQueryDto } from './dto/list-community-profiles-query.dto';
 import { ListBrandsQueryDto } from './dto/list-brands-query.dto';
 import { CreateAdminSponsorshipDto } from './dto/create-admin-sponsorship.dto';
@@ -1840,6 +1841,27 @@ export class AdminController {
     return this.adminService.rejectCampaign(id, adminId, dto);
   }
 
+  @Get('campaigns/pending')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({
+    summary: 'List brand campaigns pending admin review',
+    description: 'Returns campaigns in UNDER_REVIEW status, oldest submission first.',
+  })
+  @ApiOkResponse({ description: 'Paginated list of campaigns pending review.' })
+  listPendingCampaigns(@Query('page') page = 1, @Query('limit') limit = 20) {
+    return this.adminService.listPendingCampaigns(Number(page), Number(limit));
+  }
+
+  @Get('campaigns/:id')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({ summary: 'Get full campaign details (admin view)' })
+  @ApiParam({ name: 'id', description: 'Campaign UUID' })
+  @ApiOkResponse({ description: 'Full campaign details.' })
+  @ApiNotFoundResponse({ description: 'Campaign not found.' })
+  getCampaignDetail(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.getCampaignDetail(id);
+  }
+
   @Post('community-profiles/:id/approve')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @HttpCode(HttpStatus.OK)
@@ -2530,5 +2552,13 @@ export class AdminController {
     @Body() dto: UpdateHostFeePromoDto,
   ) {
     return this.adminService.updateHostFeePromo(hostProfileId, promoId, dto);
+  }
+
+  @Get('campaigns')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({ summary: 'List all campaigns' })
+  @ApiOkResponse({ description: 'Paginated list of campaigns.' })
+  listAllCampaigns(@Query() query: ListCampaignsQueryDto) {
+    return this.adminService.listAllCampaigns(query);
   }
 }

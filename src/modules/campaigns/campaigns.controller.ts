@@ -44,6 +44,22 @@ export class CampaignsController {
     return this.campaignsService.createCampaign(userId, dto);
   }
 
+  @Get('published')
+  @Roles('HOST', 'BRAND')
+  @ApiOperation({ summary: 'List all published campaigns' })
+  @ApiOkResponse({ description: 'List of published campaigns.' })
+  getPublishedCampaigns() {
+    return this.campaignsService.getPublishedCampaigns();
+  }
+
+  @Get('published/:id')
+  @Roles('HOST', 'BRAND')
+  @ApiOperation({ summary: 'Get details of a published campaign' })
+  @ApiOkResponse({ description: 'Campaign details.' })
+  getPublishedCampaign(@Param('id', ParseUUIDPipe) campaignId: string) {
+    return this.campaignsService.getPublishedCampaign(campaignId);
+  }
+
   @Get()
   @ApiOperation({ summary: "List brand's own campaigns" })
   @ApiOkResponse({ description: 'List of campaigns.' })

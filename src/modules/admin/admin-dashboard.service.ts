@@ -149,13 +149,14 @@ export class AdminDashboardService {
 
   async getReviewQueue() {
     return withCache(this.redis, 'admin:dashboard:review-queue', 30, async () => {
-      const [hostApprovals, eventApprovals, contributorRequests, postReports, chatReports] =
+      const [hostApprovals, eventApprovals, contributorRequests, postReports, chatReports, campaignApprovals] =
         await this.prisma.$transaction([
           this.prisma.hostProfile.count({ where: { approvalStatus: 'PENDING', kycStatus: 'VERIFIED' } }),
           this.prisma.event.count({ where: { status: 'UNDER_REVIEW' } }),
           this.prisma.communityMember.count({ where: { status: 'PENDING' } }),
           this.prisma.communityPostReport.count({ where: { status: 'PENDING' } }),
           this.prisma.channelMessageReport.count({ where: { status: 'PENDING' } }),
+          this.prisma.campaign.count({ where: { status: 'UNDER_REVIEW' } }),
         ]);
 
       return {
@@ -163,6 +164,7 @@ export class AdminDashboardService {
         eventApprovals,
         contributorRequests,
         reportedContent: postReports + chatReports,
+        campaignApprovals,
       };
     });
   }

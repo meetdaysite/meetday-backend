@@ -31,6 +31,7 @@ import { CreateInterestDto } from './dto/create-interest.dto';
 import { UpdateInterestDto } from './dto/update-interest.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
 import { ListSponsorshipsQueryDto } from './dto/list-sponsorships-query.dto';
+import { ListCampaignsQueryDto } from './dto/list-campaigns-query.dto';
 import { ListCommunityProfilesQueryDto } from './dto/list-community-profiles-query.dto';
 import { ListBrandsQueryDto, BrandProfileStatus } from './dto/list-brands-query.dto';
 import { CreateAdminSponsorshipDto } from './dto/create-admin-sponsorship.dto';
@@ -3381,5 +3382,81 @@ export class AdminService {
       .catch((err) => this.logger.error('Failed to create campaign_rejected notification', err));
 
     return { message: 'Campaign rejected successfully' };
+  }
+
+  async listPendingCampaigns(page: number, limit: number) {
+    const where = { status: 'UNDER_REVIEW' as const };
+    const [campaigns, total] = await Promise.all([
+      this.prisma.campaign.findMany({
+        where,
+        include: {
+          brandProfile: {
+            select: {
+              id: true,
+              brandName: true,
+              user: { select: { firstName: true, lastName: true, email: true } },
+            },
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.campaign.count({ where }),
+    ]);
+
+    return { campaigns, total, page, limit };
+  }
+
+  async getCampaignDetail(id: string) {
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id },
+      include: {
+        brandProfile: {
+          select: {
+            id: true,
+            brandName: true,
+            user: { select: { firstName: true, lastName: true, email: true } },
+          },
+        },
+      },
+    });
+    if (!campaign) throw new NotFoundException('Campaign not found');
+    return campaign;
+  }
+
+  async listAllCampaigns(query: ListCampaignsQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const where: any = {};
+    if (query.status) where.status = query.status;
+    if (query.city) {
+      where.locations = {
+        has: query.city,
+      };
+    }
+    if (query.brandProfileId) where.brandProfileId = query.brandProfileId;
+
+    const [campaigns, total] = await Promise.all([
+      this.prisma.campaign.findMany({
+        where,
+        include: {
+          brandProfile: {
+            select: {
+              id: true,
+              brandName: true,
+              user: { select: { firstName: true, lastName: true, email: true } },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.campaign.count({ where }),
+    ]);
+
+    return { campaigns, total, page, limit };
   }
 }
