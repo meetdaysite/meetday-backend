@@ -3299,4 +3299,84 @@ export class AdminService {
       },
     });
   }
+
+  async approveCampaign(id: string, adminId: string) {
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id },
+      include: { brandProfile: { include: { user: { select: { id: true } } } } },
+    });
+    if (!campaign) throw new NotFoundException('Campaign not found');
+    if (campaign.status !== 'UNDER_REVIEW')
+      throw new BadRequestException('Only campaigns in UNDER_REVIEW status can be approved');
+
+    const { count } = await this.prisma.campaign.updateMany({
+      where: { id, status: 'UNDER_REVIEW' },
+      data: { status: 'PUBLISHED' },
+    });
+    if (count === 0)
+      throw new BadRequestException('Campaign is no longer under review');
+
+    const brandUser = campaign.brandProfile.user;
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'CAMPAIGN_APPROVED' as any,
+      entityType: 'CAMPAIGN',
+      entityId: id,
+      metadata: { name: campaign.name },
+    });
+
+    void this.notificationsService
+      .create(
+        brandUser.id,
+        'campaign_approved',
+        'Campaign Approved',
+        `Your campaign "${campaign.name}" has been approved and is now published.`,
+        { campaignId: id },
+      )
+      .catch((err) => this.logger.error('Failed to create campaign_approved notification', err));
+
+    return { message: 'Campaign approved successfully' };
+  }
+
+  async rejectCampaign(id: string, adminId: string, dto: RejectEventDto) {
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id },
+      include: { brandProfile: { include: { user: { select: { id: true } } } } },
+    });
+    if (!campaign) throw new NotFoundException('Campaign not found');
+    if (campaign.status !== 'UNDER_REVIEW')
+      throw new BadRequestException('Only campaigns in UNDER_REVIEW status can be rejected');
+
+    const { count } = await this.prisma.campaign.updateMany({
+      where: { id, status: 'UNDER_REVIEW' },
+      data: { status: 'REJECTED', adminRejectionRemark: dto.remark },
+    });
+    if (count === 0)
+      throw new BadRequestException('Campaign is no longer under review');
+
+    const brandUser = campaign.brandProfile.user;
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'CAMPAIGN_REJECTED' as any,
+      entityType: 'CAMPAIGN',
+      entityId: id,
+      metadata: { name: campaign.name, remark: dto.remark },
+    });
+
+    void this.notificationsService
+      .create(
+        brandUser.id,
+        'campaign_rejected',
+        'Campaign Not Approved',
+        `Your campaign "${campaign.name}" was not approved. Remark: ${dto.remark}`,
+        { campaignId: id },
+      )
+      .catch((err) => this.logger.error('Failed to create campaign_rejected notification', err));
+
+    return { message: 'Campaign rejected successfully' };
+  }
 }

@@ -433,6 +433,7 @@ model BrandProfile {
 
   categories BrandExperienceCategory[]
   interests  SponsorshipInterest[]
+  campaigns  Campaign[]
 
   approvalStatus HostApprovalStatus @default(PENDING)
 
@@ -440,6 +441,34 @@ model BrandProfile {
   updatedAt DateTime @updatedAt
 
   @@map("brand_profiles")
+}
+
+model Campaign {
+  id             String         @id @default(uuid())
+  brandProfileId String
+  brandProfile   BrandProfile   @relation(fields: [brandProfileId], references: [id], onDelete: Cascade)
+
+  name           String
+  goal           String
+  locations      String[]
+  audience       String[]
+  startDate      DateTime
+  endDate        DateTime
+  offerType      String         // "CASH" | "BARTER" | "BOTH"
+  budgetAmount   Decimal
+  budgetCurrency String         // e.g. "INR", "USD"
+  barterElements String?        @db.Text
+  description    String?        @db.Text
+
+  status         SponsorshipStatus @default(DRAFT)
+  adminRejectionRemark String?        @db.Text
+
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([brandProfileId])
+  @@index([status])
+  @@map("campaigns")
 }
 
 enum CompanyType {
