@@ -128,11 +128,14 @@ export class MeetdayChatService {
       return; // stay silent rather than send a broken/empty bot message
     }
 
-    await this.prisma.meetdayChatMessage.createMany({
-      data: [
-        { threadId, senderType: 'BOT', senderId: null, content: reply },
-        { threadId, senderType: 'BOT', senderId: null, content: AGENT_OFFER_MESSAGE },
-      ],
+    // Two sequential creates (not createMany) — createMany shares one `now()` across all its
+    // rows in Postgres, which made these two messages tie on createdAt and broke the "was the
+    // last message the agent offer?" check above.
+    await this.prisma.meetdayChatMessage.create({
+      data: { threadId, senderType: 'BOT', senderId: null, content: reply },
+    });
+    await this.prisma.meetdayChatMessage.create({
+      data: { threadId, senderType: 'BOT', senderId: null, content: AGENT_OFFER_MESSAGE },
     });
     await this.prisma.meetdayChatThread.update({
       where: { id: threadId },

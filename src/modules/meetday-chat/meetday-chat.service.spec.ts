@@ -126,12 +126,12 @@ describe('MeetdayChatService', () => {
       await service.sendMyMessage('user-1', { content: 'how do sponsorships work?' });
       await new Promise(process.nextTick);
 
-      expect(prisma.meetdayChatMessage.createMany).toHaveBeenCalledWith({
-        data: [
-          { threadId: 'thread-1', senderType: 'BOT', senderId: null, content: 'Here is how sponsorships work...' },
-          { threadId: 'thread-1', senderType: 'BOT', senderId: null, content: 'Would you like to talk to a Meetday agent?' },
-        ],
-      });
+      expect(prisma.meetdayChatMessage.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ senderType: 'BOT', senderId: null, content: 'Here is how sponsorships work...' }) }),
+      );
+      expect(prisma.meetdayChatMessage.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ senderType: 'BOT', senderId: null, content: 'Would you like to talk to a Meetday agent?' }) }),
+      );
       fetchSpy.mockRestore();
     });
 
@@ -183,10 +183,8 @@ describe('MeetdayChatService', () => {
       await new Promise(process.nextTick);
 
       expect(fetchSpy).toHaveBeenCalled();
-      expect(prisma.meetdayChatMessage.createMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.arrayContaining([expect.objectContaining({ content: 'Refunds are processed via Razorpay...' })]),
-        }),
+      expect(prisma.meetdayChatMessage.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ content: 'Refunds are processed via Razorpay...' }) }),
       );
       fetchSpy.mockRestore();
     });
