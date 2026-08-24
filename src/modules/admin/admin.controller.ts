@@ -1795,6 +1795,41 @@ export class AdminController {
     return this.adminService.rejectBrandProfile(id, adminId, dto);
   }
 
+  @Post('campaigns/:id/approve')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Approve a brand campaign',
+    description: 'Approves a campaign in UNDER_REVIEW status, making it PUBLISHED.',
+  })
+  @ApiParam({ name: 'id', description: 'Campaign UUID' })
+  @ApiOkResponse({ description: 'Campaign approved and published.' })
+  @ApiNotFoundResponse({ description: 'Campaign not found.' })
+  @ApiBadRequestResponse({ description: 'Campaign is not in UNDER_REVIEW status.' })
+  approveCampaign(@Param('id', ParseUUIDPipe) id: string, @GetUser('id') adminId: string) {
+    return this.adminService.approveCampaign(id, adminId);
+  }
+
+  @Post('campaigns/:id/reject')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reject a brand campaign',
+    description: 'Rejects a campaign in UNDER_REVIEW status. Brand can edit and resubmit.',
+  })
+  @ApiParam({ name: 'id', description: 'Campaign UUID' })
+  @ApiBody({ type: RejectEventDto })
+  @ApiOkResponse({ description: 'Campaign rejected.' })
+  @ApiNotFoundResponse({ description: 'Campaign not found.' })
+  @ApiBadRequestResponse({ description: 'Campaign is not in UNDER_REVIEW status.' })
+  rejectCampaign(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') adminId: string,
+    @Body() dto: RejectEventDto,
+  ) {
+    return this.adminService.rejectCampaign(id, adminId, dto);
+  }
+
   @Post('community-profiles/:id/approve')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @HttpCode(HttpStatus.OK)
