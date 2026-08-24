@@ -1239,6 +1239,7 @@ model MeetdayChatThread {
 enum MeetdayChatSenderType {
   USER
   ADMIN
+  BOT
 }
 
 model MeetdayChatMessage {
@@ -1247,8 +1248,9 @@ model MeetdayChatMessage {
   thread   MeetdayChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
 
   senderType MeetdayChatSenderType
-  senderId   String
-  sender     User                  @relation("MeetdayChatMessageSender", fields: [senderId], references: [id])
+  // Null only for BOT messages (auto-generated support replies have no real User).
+  senderId   String?
+  sender     User?                 @relation("MeetdayChatMessageSender", fields: [senderId], references: [id])
 
   content  String  @db.Text
   mediaKey String?

@@ -1,5 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { MeetdayChatService } from './meetday-chat.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
@@ -7,12 +8,13 @@ import { StorageService } from '../../common/storage/storage.service';
 function makePrisma() {
   const prisma: any = {
     meetdayChatThread: { upsert: jest.fn(), update: jest.fn().mockResolvedValue({}) },
-    meetdayChatMessage: { findMany: jest.fn(), create: jest.fn() },
+    meetdayChatMessage: { findMany: jest.fn(), findFirst: jest.fn().mockResolvedValue({ id: 'admin-msg-1' }), create: jest.fn(), createMany: jest.fn().mockResolvedValue({}) },
   };
   return prisma;
 }
 
 const mockStorage = { getPresignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/x') };
+const mockConfig = { get: jest.fn().mockReturnValue('https://ai.example.com') };
 
 describe('MeetdayChatService', () => {
   let service: MeetdayChatService;
@@ -27,6 +29,7 @@ describe('MeetdayChatService', () => {
         MeetdayChatService,
         { provide: PrismaService, useValue: prisma },
         { provide: StorageService, useValue: mockStorage },
+        { provide: ConfigService, useValue: mockConfig },
       ],
     }).compile();
 
@@ -78,6 +81,45 @@ describe('MeetdayChatService', () => {
         expect.objectContaining({ data: expect.objectContaining({ content: '', mediaKey: 'meetday-chats/user-1/x.jpg' }) }),
       );
       expect(result.mediaUrl).toBe('https://cdn.example.com/x');
+    });
+  });
+
+  describe('bot auto-reply', () => {
+    it('does not attempt a bot reply once an admin has replied in the thread', async () => {
+      prisma.meetdayChatThread.upsert.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
+      prisma.meetdayChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
+      prisma.meetdayChatMessage.findFirst.mockResolvedValue({ id: 'admin-msg-1' });
+      const fetchSpy = jest.spyOn(global, 'fetch');
+
+      await service.sendMyMessage('user-1', { content: 'hello' });
+      await new Promise(process.nextTick);
+
+      expect(prisma.meetdayChatMessage.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { threadId: 'thread-1', senderType: 'ADMIN' } }),
+      );
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
+
+    it('creates two BOT messages (answer + follow-up) when no admin has replied yet', async () => {
+      prisma.meetdayChatThread.upsert.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
+      prisma.meetdayChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
+      prisma.meetdayChatMessage.findFirst.mockResolvedValue(null);
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ reply: 'Here is how sponsorships work...' }),
+      } as Response);
+
+      await service.sendMyMessage('user-1', { content: 'how do sponsorships work?' });
+      await new Promise(process.nextTick);
+
+      expect(prisma.meetdayChatMessage.createMany).toHaveBeenCalledWith({
+        data: [
+          { threadId: 'thread-1', senderType: 'BOT', senderId: null, content: 'Here is how sponsorships work...' },
+          { threadId: 'thread-1', senderType: 'BOT', senderId: null, content: expect.stringContaining('2 hours') },
+        ],
+      });
+      fetchSpy.mockRestore();
     });
   });
 });
