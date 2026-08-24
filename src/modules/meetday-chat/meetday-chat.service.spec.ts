@@ -8,13 +8,16 @@ import { NotificationsService } from '../notifications/notifications.service';
 
 function makePrisma() {
   const prisma: any = {
-    meetdayChatThread: { upsert: jest.fn(), update: jest.fn().mockResolvedValue({}) },
-    // Defaults to "an admin is already active" so unrelated tests don't trigger a real
-    // fire-and-forget fetch to the AI service — bot-specific tests override this explicitly.
+    meetdayChatThread: {
+      upsert: jest.fn(),
+      update: jest.fn().mockResolvedValue({}),
+      // Defaults to "not dormant" so unrelated sendMyMessage tests still attempt a (mocked-away)
+      // classification fetch rather than skipping silently for a different reason.
+      findUnique: jest.fn().mockResolvedValue({ botDormant: false }),
+    },
     meetdayChatMessage: {
-      findMany: jest.fn().mockResolvedValue([{ senderType: 'USER', content: 'noop' }, { senderType: 'ADMIN', content: 'noop' }]),
+      findMany: jest.fn().mockResolvedValue([]),
       create: jest.fn(),
-      createMany: jest.fn().mockResolvedValue({}),
     },
     user: { findMany: jest.fn().mockResolvedValue([]) },
   };
@@ -32,6 +35,9 @@ describe('MeetdayChatService', () => {
   beforeEach(async () => {
     prisma = makePrisma();
     jest.clearAllMocks();
+    // Safe default so tests that don't care about the bot's classification call don't hit the
+    // real network — bot-specific tests override this with their own mock.
+    global.fetch = jest.fn().mockRejectedValue(new Error('fetch not mocked in this test'));
 
     const module = await Test.createTestingModule({
       providers: [
@@ -95,13 +101,10 @@ describe('MeetdayChatService', () => {
   });
 
   describe('bot auto-reply', () => {
-    it('stays silent when an admin is the most recently active sender in the thread', async () => {
+    it('stays silent when the thread is already dormant (handed off to a human)', async () => {
       prisma.meetdayChatThread.upsert.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
       prisma.meetdayChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
-      prisma.meetdayChatMessage.findMany.mockResolvedValue([
-        { senderType: 'USER', content: 'hello' },
-        { senderType: 'ADMIN', content: 'lol' },
-      ]);
+      prisma.meetdayChatThread.findUnique.mockResolvedValue({ botDormant: true });
       const originalFetch = global.fetch;
       const fetchSpy = jest.fn();
       global.fetch = fetchSpy as unknown as typeof fetch;
@@ -110,81 +113,77 @@ describe('MeetdayChatService', () => {
       await new Promise(process.nextTick);
 
       expect(fetchSpy).not.toHaveBeenCalled();
-      expect(prisma.meetdayChatMessage.createMany).not.toHaveBeenCalled();
       global.fetch = originalFetch;
     });
 
-    it('answers the query and offers to bring in an agent when no admin has taken over', async () => {
+    it('replies with the greeting message when classified as GREETING', async () => {
       prisma.meetdayChatThread.upsert.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
       prisma.meetdayChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
-      prisma.meetdayChatMessage.findMany.mockResolvedValue([{ senderType: 'USER', content: 'how do sponsorships work?' }]);
       const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({ reply: 'Here is how sponsorships work...' }),
+        json: () => Promise.resolve({ category: 'GREETING' }),
       } as Response);
 
-      await service.sendMyMessage('user-1', { content: 'how do sponsorships work?' });
+      await service.sendMyMessage('user-1', { content: 'hi' });
       await new Promise(process.nextTick);
 
       expect(prisma.meetdayChatMessage.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ senderType: 'BOT', senderId: null, content: 'Here is how sponsorships work...' }) }),
+        expect.objectContaining({
+          data: expect.objectContaining({ senderType: 'BOT', senderId: null, content: 'Hello, welcome to Meetday Support! How can we help you today?' }),
+        }),
       );
+      expect(prisma.meetdayChatThread.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ botDormant: true }) }));
+      fetchSpy.mockRestore();
+    });
+
+    it('asks for more detail when classified as NEEDS_DETAIL', async () => {
+      prisma.meetdayChatThread.upsert.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
+      prisma.meetdayChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ category: 'NEEDS_DETAIL' }),
+      } as Response);
+
+      await service.sendMyMessage('user-1', { content: 'payment issue' });
+      await new Promise(process.nextTick);
+
       expect(prisma.meetdayChatMessage.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ senderType: 'BOT', senderId: null, content: 'Would you like to talk to a Meetday agent?' }) }),
+        expect.objectContaining({ data: expect.objectContaining({ senderType: 'BOT', senderId: null, content: 'Please describe your issue/query in detail.' }) }),
       );
       fetchSpy.mockRestore();
     });
 
-    it('escalates to admins and posts the wait message when the user accepts the agent offer', async () => {
+    it('logs the issue, goes dormant, and notifies admins when classified as DETAILED', async () => {
       prisma.meetdayChatThread.upsert.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
       prisma.meetdayChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
-      prisma.meetdayChatMessage.findMany.mockResolvedValue([
-        { senderType: 'USER', content: 'yes please' },
-        { senderType: 'BOT', content: 'Would you like to talk to a Meetday agent?' },
-      ]);
       prisma.user.findMany.mockResolvedValue([{ id: 'admin-1' }, { id: 'admin-2' }]);
-      const originalFetch = global.fetch;
-      const fetchSpy = jest.fn();
-      global.fetch = fetchSpy as unknown as typeof fetch;
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ category: 'DETAILED' }),
+      } as Response);
 
-      await service.sendMyMessage('user-1', { content: 'yes please' });
+      await service.sendMyMessage('user-1', { content: 'My deal payment failed on 20 Aug for interest #123, error code X.' });
       await new Promise(process.nextTick);
 
-      expect(fetchSpy).not.toHaveBeenCalled(); // no fresh AI call needed, just escalate
       expect(prisma.meetdayChatMessage.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ senderType: 'BOT', senderId: null, content: 'Our support team will get back to you within 2 hours.' }),
+          data: expect.objectContaining({
+            senderType: 'BOT',
+            senderId: null,
+            content: 'Thank you. Your issue has been logged. An agent will revert to you within 2 hours.',
+          }),
         }),
+      );
+      expect(prisma.meetdayChatThread.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'thread-1' }, data: { botDormant: true } }),
       );
       expect(mockNotifications.create).toHaveBeenCalledTimes(2);
       expect(mockNotifications.create).toHaveBeenCalledWith(
         'admin-1',
         'meetday_chat_escalation',
-        'User requested a Meetday agent',
+        'New support issue logged',
         expect.any(String),
         { meetdayChatThreadId: 'thread-1' },
-      );
-      global.fetch = originalFetch;
-    });
-
-    it('treats a non-affirmative reply to the agent offer as a new question', async () => {
-      prisma.meetdayChatThread.upsert.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
-      prisma.meetdayChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
-      prisma.meetdayChatMessage.findMany.mockResolvedValue([
-        { senderType: 'USER', content: 'what about refunds?' },
-        { senderType: 'BOT', content: 'Would you like to talk to a Meetday agent?' },
-      ]);
-      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ reply: 'Refunds are processed via Razorpay...' }),
-      } as Response);
-
-      await service.sendMyMessage('user-1', { content: 'what about refunds?' });
-      await new Promise(process.nextTick);
-
-      expect(fetchSpy).toHaveBeenCalled();
-      expect(prisma.meetdayChatMessage.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ content: 'Refunds are processed via Razorpay...' }) }),
       );
       fetchSpy.mockRestore();
     });

@@ -11,9 +11,11 @@ import { redactPersonalInfo } from '../../common/utils/redact-personal-info.util
 import { NotificationsService } from '../notifications/notifications.service';
 
 const ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'];
-const AGENT_WAIT_MESSAGE = 'Our support team will get back to you within 2 hours.';
-const AGENT_OFFER_MESSAGE = 'Would you like to talk to a Meetday agent?';
-const AFFIRMATIVE_RE = /^\s*(yes|yeah|yep|yup|sure|ok(ay)?|please|pls|haan?|han|ji|zaroor)\b/i;
+const GREETING_MESSAGE = 'Hello, welcome to Meetday Support! How can we help you today?';
+const NEEDS_DETAIL_MESSAGE = 'Please describe your issue/query in detail.';
+const HANDOFF_MESSAGE = 'Thank you. Your issue has been logged. An agent will revert to you within 2 hours.';
+export const RESOLVED_SYSTEM_MESSAGE = '[System] This issue has been marked as resolved.';
+type Category = 'GREETING' | 'NEEDS_DETAIL' | 'DETAILED';
 
 // General "Talk to Meetday" support chat — one thread per Host/Brand user, independent of any
 // specific sponsorship interest (unlike TriChat).
@@ -90,52 +92,52 @@ export class MeetdayChatService {
     return { ...message, mediaUrl, wasRedacted };
   }
 
-  // Auto-replies to every user message with an AI-generated answer, then offers to bring in a
-  // human agent. Stays quiet only when an admin is the most recently active party in the thread
-  // (i.e. a human has already taken over) — otherwise the bot keeps responding.
+  // Runs the scripted intake flow: classifies the message as GREETING / NEEDS_DETAIL / DETAILED
+  // and replies with the matching canned message. On DETAILED, logs the issue, notifies admins,
+  // and goes dormant (no further auto-replies) until an admin marks the thread resolved.
   private async maybeSendBotReply(threadId: string, userMessage: string): Promise<void> {
-    if (!userMessage.trim()) return; // nothing to answer for image-only messages
+    if (!userMessage.trim()) return; // nothing to classify for image-only messages
 
-    // Most recent messages, most-recent-first — index 0 is the user message we just created,
-    // index 1 is whatever preceded it (if any).
-    const recent = await this.prisma.meetdayChatMessage.findMany({
-      where: { threadId },
-      orderBy: { createdAt: 'desc' },
-      take: 2,
-      select: { senderType: true, content: true },
+    const thread = await this.prisma.meetdayChatThread.findUnique({
+      where: { id: threadId },
+      select: { botDormant: true },
     });
-    const previous = recent[1];
+    if (thread?.botDormant) return; // handed off to a human — stay silent until resolved
 
-    if (previous?.senderType === 'ADMIN') return; // a human has taken over — stay out of the way
-
-    if (previous?.senderType === 'BOT' && previous.content === AGENT_OFFER_MESSAGE && AFFIRMATIVE_RE.test(userMessage)) {
-      await this.escalateToAdmin(threadId);
-      return;
-    }
-
-    let reply: string;
+    let category: Category;
     try {
-      const res = await fetch(`${this.aiServerUrl}/support-chatbot/reply`, {
+      const res = await fetch(`${this.aiServerUrl}/support-chatbot/classify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: userMessage }),
       });
       if (!res.ok) throw new Error(`AI server returned ${res.status}`);
-      const data = (await res.json()) as { reply: string };
-      reply = data.reply;
+      const data = (await res.json()) as { category: Category };
+      category = data.category;
     } catch (err) {
-      this.logger.error(`Support chatbot reply failed: ${(err as Error).message}`);
+      this.logger.error(`Support chatbot classification failed: ${(err as Error).message}`);
       return; // stay silent rather than send a broken/empty bot message
     }
 
-    // Two sequential creates (not createMany) — createMany shares one `now()` across all its
-    // rows in Postgres, which made these two messages tie on createdAt and broke the "was the
-    // last message the agent offer?" check above.
+    if (category === 'GREETING') {
+      await this.postBotMessage(threadId, GREETING_MESSAGE);
+      return;
+    }
+
+    if (category === 'NEEDS_DETAIL') {
+      await this.postBotMessage(threadId, NEEDS_DETAIL_MESSAGE);
+      return;
+    }
+
+    // DETAILED — log the issue, hand off to a human, and go dormant until resolved.
+    await this.postBotMessage(threadId, HANDOFF_MESSAGE);
+    await this.prisma.meetdayChatThread.update({ where: { id: threadId }, data: { botDormant: true } });
+    await this.notifyAdminsOfNewIssue(threadId);
+  }
+
+  private async postBotMessage(threadId: string, content: string): Promise<void> {
     await this.prisma.meetdayChatMessage.create({
-      data: { threadId, senderType: 'BOT', senderId: null, content: reply },
-    });
-    await this.prisma.meetdayChatMessage.create({
-      data: { threadId, senderType: 'BOT', senderId: null, content: AGENT_OFFER_MESSAGE },
+      data: { threadId, senderType: 'BOT', senderId: null, content },
     });
     await this.prisma.meetdayChatThread.update({
       where: { id: threadId },
@@ -143,16 +145,7 @@ export class MeetdayChatService {
     });
   }
 
-  // Posts the wait-time message and pings admins so a human actually follows up.
-  private async escalateToAdmin(threadId: string): Promise<void> {
-    await this.prisma.meetdayChatMessage.create({
-      data: { threadId, senderType: 'BOT', senderId: null, content: AGENT_WAIT_MESSAGE },
-    });
-    await this.prisma.meetdayChatThread.update({
-      where: { id: threadId },
-      data: { lastMessageAt: new Date() },
-    });
-
+  private async notifyAdminsOfNewIssue(threadId: string): Promise<void> {
     const admins = await this.prisma.user.findMany({
       where: { isActive: true, role: { name: { in: ADMIN_ROLES } } },
       select: { id: true },
@@ -162,8 +155,8 @@ export class MeetdayChatService {
         this.notificationsService.create(
           admin.id,
           'meetday_chat_escalation',
-          'User requested a Meetday agent',
-          'A user asked to speak with a Meetday agent in the support chat.',
+          'New support issue logged',
+          "A user's issue has been logged in the Talk to Meetday chat and needs a human follow-up.",
           { meetdayChatThreadId: threadId },
         ),
       ),

@@ -1230,6 +1230,9 @@ model MeetdayChatThread {
   userLastReadAt  DateTime?
   // Shared across all admins for simplicity — any admin opening the thread marks it read for all.
   adminLastReadAt DateTime?
+  // True once the bot has logged the issue and handed off (or an admin has taken over) — bot
+  // stays silent until an admin marks the issue resolved, which resets this to false.
+  botDormant      Boolean   @default(false)
 
   messages MeetdayChatMessage[]
 

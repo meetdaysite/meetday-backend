@@ -48,6 +48,7 @@ import { SendAnnouncementDto } from './dto/send-announcement.dto';
 import { ListAnnouncementsQueryDto } from './dto/list-announcements-query.dto';
 import { ListSponsorshipChatsQueryDto } from '../sponsorship/dto/list-sponsorship-chats-query.dto';
 import { SendChatMessageDto } from '../sponsorship/dto/send-chat-message.dto';
+import { RESOLVED_SYSTEM_MESSAGE } from '../meetday-chat/meetday-chat.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RedisService } from '../../common/redis/redis.service';
@@ -2485,7 +2486,8 @@ export class AdminService {
     });
     await this.prisma.meetdayChatThread.update({
       where: { id: threadId },
-      data: { lastMessageAt: message.createdAt, adminLastReadAt: message.createdAt },
+      // A human has taken over — stop the bot's auto-replies until this is marked resolved.
+      data: { lastMessageAt: message.createdAt, adminLastReadAt: message.createdAt, botDormant: true },
     });
 
     const preview = dto.content?.trim() ? dto.content.slice(0, 80) : '📷 Sent a photo';
@@ -2495,6 +2497,23 @@ export class AdminService {
 
     const mediaUrl = dto.mediaKey ? await this.storageService.getPresignedDownloadUrl(dto.mediaKey) : null;
     return { ...message, mediaUrl };
+  }
+
+  // Marks a Talk to Meetday thread resolved: posts a system message and resets the bot so it
+  // resumes the scripted intake flow the next time the user writes in.
+  async resolveMeetdayChat(threadId: string) {
+    const thread = await this.prisma.meetdayChatThread.findUnique({ where: { id: threadId } });
+    if (!thread) throw new NotFoundException('Chat thread not found');
+
+    const message = await this.prisma.meetdayChatMessage.create({
+      data: { threadId, senderType: 'BOT', senderId: null, content: RESOLVED_SYSTEM_MESSAGE },
+    });
+    await this.prisma.meetdayChatThread.update({
+      where: { id: threadId },
+      data: { lastMessageAt: message.createdAt, botDormant: false },
+    });
+
+    return { ...message, mediaUrl: null };
   }
 
   // Total threads with an unread user message — backs the admin sidebar's "Meetday Chats" badge.

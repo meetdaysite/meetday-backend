@@ -1364,9 +1364,41 @@ describe('AdminService', () => {
       );
     });
 
+    it('sendMeetdayChatMessage() marks the thread bot-dormant so the bot stops auto-replying', async () => {
+      prisma.meetdayChatThread.findUnique.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
+      prisma.meetdayChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
+
+      await service.sendMeetdayChatMessage('thread-1', 'admin-uuid', { content: 'Hi from Meetday' });
+
+      expect(prisma.meetdayChatThread.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'thread-1' }, data: expect.objectContaining({ botDormant: true }) }),
+      );
+    });
+
     it('sendMeetdayChatMessage() rejects a message with no text and no image', async () => {
       prisma.meetdayChatThread.findUnique.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
       await expect(service.sendMeetdayChatMessage('thread-1', 'admin-uuid', {})).rejects.toThrow(BadRequestException);
+    });
+
+    it('resolveMeetdayChat() posts a system message and clears botDormant', async () => {
+      prisma.meetdayChatThread.findUnique.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
+      prisma.meetdayChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
+
+      await service.resolveMeetdayChat('thread-1');
+
+      expect(prisma.meetdayChatMessage.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ threadId: 'thread-1', senderType: 'BOT', senderId: null, content: '[System] This issue has been marked as resolved.' }),
+        }),
+      );
+      expect(prisma.meetdayChatThread.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'thread-1' }, data: expect.objectContaining({ botDormant: false }) }),
+      );
+    });
+
+    it('resolveMeetdayChat() throws NotFoundException for an unknown thread', async () => {
+      prisma.meetdayChatThread.findUnique.mockResolvedValue(null);
+      await expect(service.resolveMeetdayChat('bad-id')).rejects.toThrow(NotFoundException);
     });
 
     it('countUnreadMeetdayChats() counts only threads with an unread user message', async () => {

@@ -1760,6 +1760,16 @@ export class AdminController {
     return this.adminService.sendMeetdayChatMessage(threadId, adminId, dto);
   }
 
+  @Post('meetday-chats/:threadId/resolve')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Mark a "Talk to Meetday" thread resolved', description: 'Posts a system message and resets the bot to run its scripted intake flow again on the next message.' })
+  @ApiOkResponse({ description: 'Thread marked resolved.' })
+  @ApiNotFoundResponse({ description: 'Chat thread not found.' })
+  resolveMeetdayChat(@Param('threadId', ParseUUIDPipe) threadId: string) {
+    return this.adminService.resolveMeetdayChat(threadId);
+  }
+
   @Post('brands/:id/approve')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @HttpCode(HttpStatus.OK)
