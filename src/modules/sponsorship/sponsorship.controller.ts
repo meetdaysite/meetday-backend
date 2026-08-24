@@ -51,6 +51,7 @@ import { UpsertSponsorshipDealReportDto } from './dto/upsert-sponsorship-deal-re
 import { VerifySponsorshipDealPaymentDto } from './dto/verify-sponsorship-deal-payment.dto';
 import { SponsorshipInvoicePdfService } from './sponsorship-invoice-pdf.service';
 import { SponsorshipReportPdfService } from './sponsorship-report-pdf.service';
+import { DocumentExtractionService } from '../../common/document-extraction/document-extraction.service';
 
 @ApiTags('Sponsorship Proposals')
 @ApiBearerAuth('firebase-token')
@@ -61,6 +62,7 @@ export class SponsorshipController {
     private readonly proposalCopilotService: ProposalCopilotService,
     private readonly sponsorshipInvoicePdfService: SponsorshipInvoicePdfService,
     private readonly sponsorshipReportPdfService: SponsorshipReportPdfService,
+    private readonly documentExtractionService: DocumentExtractionService,
   ) {}
 
   @Post('copilot/generate-draft')
@@ -93,7 +95,7 @@ export class SponsorshipController {
   @ApiOkResponse({ description: 'Extracted text.' })
   @ApiBadRequestResponse({ description: 'Unsupported file type or unreadable document.' })
   async extractCopilotDocument(@UploadedFile() file: { buffer: Buffer; originalname: string }) {
-    const text = await this.proposalCopilotService.extractDocumentText(file.buffer, file.originalname);
+    const text = await this.documentExtractionService.extractText(file.buffer, file.originalname);
     return { text };
   }
 

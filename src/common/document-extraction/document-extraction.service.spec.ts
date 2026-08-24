@@ -1,29 +1,26 @@
 import { Test } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { ProposalCopilotService } from './proposal-copilot.service';
+import { DocumentExtractionService } from './document-extraction.service';
 import { OfficeParser } from 'officeparser';
 
 jest.mock('officeparser', () => ({
   OfficeParser: { parseOffice: jest.fn() },
 }));
 
-const mockConfig = { get: jest.fn().mockReturnValue('https://ai.example.com') };
-
-describe('ProposalCopilotService', () => {
-  let service: ProposalCopilotService;
+describe('DocumentExtractionService', () => {
+  let service: DocumentExtractionService;
 
   beforeEach(async () => {
     jest.clearAllMocks();
     const module = await Test.createTestingModule({
-      providers: [ProposalCopilotService, { provide: ConfigService, useValue: mockConfig }],
+      providers: [DocumentExtractionService],
     }).compile();
-    service = module.get(ProposalCopilotService);
+    service = module.get(DocumentExtractionService);
   });
 
-  describe('extractDocumentText()', () => {
+  describe('extractText()', () => {
     it('rejects unsupported file extensions', async () => {
-      await expect(service.extractDocumentText(Buffer.from('x'), 'notes.txt')).rejects.toThrow(BadRequestException);
+      await expect(service.extractText(Buffer.from('x'), 'notes.txt')).rejects.toThrow(BadRequestException);
     });
 
     it('extracts and trims text for a supported pdf', async () => {
@@ -31,7 +28,7 @@ describe('ProposalCopilotService', () => {
         to: jest.fn().mockResolvedValue({ value: '  Community deck content  ' }),
       });
 
-      const result = await service.extractDocumentText(Buffer.from('x'), 'deck.pdf');
+      const result = await service.extractText(Buffer.from('x'), 'deck.pdf');
 
       expect(OfficeParser.parseOffice).toHaveBeenCalledWith(expect.any(Buffer), { fileType: 'pdf' });
       expect(result).toBe('Community deck content');
@@ -42,10 +39,10 @@ describe('ProposalCopilotService', () => {
         to: jest.fn().mockResolvedValue({ value: 'text' }),
       });
 
-      await service.extractDocumentText(Buffer.from('x'), 'deck.docx');
+      await service.extractText(Buffer.from('x'), 'deck.docx');
       expect(OfficeParser.parseOffice).toHaveBeenCalledWith(expect.any(Buffer), { fileType: 'docx' });
 
-      await service.extractDocumentText(Buffer.from('x'), 'deck.pptx');
+      await service.extractText(Buffer.from('x'), 'deck.pptx');
       expect(OfficeParser.parseOffice).toHaveBeenCalledWith(expect.any(Buffer), { fileType: 'pptx' });
     });
 
@@ -54,7 +51,7 @@ describe('ProposalCopilotService', () => {
         to: jest.fn().mockResolvedValue({ value: '   ' }),
       });
 
-      await expect(service.extractDocumentText(Buffer.from('x'), 'deck.pdf')).rejects.toThrow(BadRequestException);
+      await expect(service.extractText(Buffer.from('x'), 'deck.pdf')).rejects.toThrow(BadRequestException);
     });
 
     it('truncates very long extracted text', async () => {
@@ -63,7 +60,7 @@ describe('ProposalCopilotService', () => {
         to: jest.fn().mockResolvedValue({ value: longText }),
       });
 
-      const result = await service.extractDocumentText(Buffer.from('x'), 'deck.pdf');
+      const result = await service.extractText(Buffer.from('x'), 'deck.pdf');
 
       expect(result.length).toBe(6000);
     });
@@ -71,7 +68,7 @@ describe('ProposalCopilotService', () => {
     it('wraps a parse failure as BadRequestException', async () => {
       (OfficeParser.parseOffice as jest.Mock).mockRejectedValue(new Error('corrupt file'));
 
-      await expect(service.extractDocumentText(Buffer.from('x'), 'deck.pdf')).rejects.toThrow(BadRequestException);
+      await expect(service.extractText(Buffer.from('x'), 'deck.pdf')).rejects.toThrow(BadRequestException);
     });
   });
 });
