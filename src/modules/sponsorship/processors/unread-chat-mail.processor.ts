@@ -31,12 +31,15 @@ export class UnreadChatMailProcessor {
         where: { id: interestId },
         include: {
           sponsorshipProposal: { select: { hostProfile: { select: { userId: true } } } },
+          hostProfile: { select: { userId: true } },
           brandProfile: { select: { userId: true } },
         },
       });
       if (!interest) return;
 
-      const isHostRecipient = interest.sponsorshipProposal.hostProfile.userId === recipientUserId;
+      const isCampaign = !!interest.campaignId;
+      const hostUserId = isCampaign ? interest.hostProfile?.userId : interest.sponsorshipProposal?.hostProfile?.userId;
+      const isHostRecipient = hostUserId === recipientUserId;
       const isBrandRecipient = interest.brandProfile.userId === recipientUserId;
       if (!isHostRecipient && !isBrandRecipient) return;
 

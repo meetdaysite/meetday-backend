@@ -402,6 +402,7 @@ model HostProfile {
   feePromos            HostFeePromo[]
   sponsorshipProposals SponsorshipProposal[]
   communityProfile     HostCommunityProfile?
+  campaignInterests    SponsorshipInterest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -462,6 +463,8 @@ model Campaign {
 
   status               SponsorshipStatus @default(DRAFT)
   adminRejectionRemark String?           @db.Text
+
+  interests            SponsorshipInterest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1071,12 +1074,16 @@ enum SponsorshipStatus {
 // A brand expressing interest in a published sponsorship proposal — notifies the admin team
 // and the hosting community. One row per (proposal, brand) pair.
 model SponsorshipInterest {
-  id                    String @id @default(uuid())
-  sponsorshipProposalId String
+  id                    String  @id @default(uuid())
+  sponsorshipProposalId String?
+  campaignId            String?
   brandProfileId        String
+  hostProfileId         String?
 
-  sponsorshipProposal SponsorshipProposal @relation(fields: [sponsorshipProposalId], references: [id], onDelete: Cascade)
-  brandProfile        BrandProfile        @relation(fields: [brandProfileId], references: [id], onDelete: Cascade)
+  sponsorshipProposal SponsorshipProposal? @relation(fields: [sponsorshipProposalId], references: [id], onDelete: Cascade)
+  brandProfile        BrandProfile         @relation(fields: [brandProfileId], references: [id], onDelete: Cascade)
+  campaign            Campaign?            @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  hostProfile         HostProfile?         @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
 

@@ -693,7 +693,14 @@ export class SponsorshipService {
 
     const where: Prisma.SponsorshipInterestWhereInput = {
       ...(query.status && { chatStatus: query.status }),
-      ...(hostProfile ? { sponsorshipProposal: { hostProfileId: hostProfile.id } } : { brandProfileId: brandProfile!.id }),
+      ...(hostProfile
+        ? {
+            OR: [
+              { sponsorshipProposal: { hostProfileId: hostProfile.id } },
+              { hostProfileId: hostProfile.id },
+            ],
+          }
+        : { brandProfileId: brandProfile!.id }),
     };
 
     const interests = await this.prisma.sponsorshipInterest.findMany({
@@ -706,13 +713,26 @@ export class SponsorshipService {
             hostProfile: { select: { displayName: true, communityProfile: { select: { name: true, logoKey: true } } } },
           },
         },
+        campaign: {
+          select: {
+            id: true,
+            name: true,
+            brandProfile: { select: { brandName: true, logoKey: true } },
+          },
+        },
+        hostProfile: {
+          select: {
+            id: true,
+            displayName: true,
+            communityProfile: { select: { name: true, logoKey: true } },
+          },
+        },
         brandProfile: { select: { id: true, brandName: true, logoKey: true } },
         chatMessages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true, mediaKey: true, senderType: true, createdAt: true } },
       },
       orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
     });
 
-    // Unread = messages from the other side sent after I last opened this thread.
     const unreadCounts = await Promise.all(
       interests.map((i) => {
         const lastReadAt = hostProfile ? i.hostLastReadAt : i.brandLastReadAt;
@@ -729,22 +749,42 @@ export class SponsorshipService {
 
     return Promise.all(
       interests.map(async (i, idx) => {
-        const counterpartLogoKey = hostProfile ? i.brandProfile.logoKey : i.sponsorshipProposal.hostProfile.communityProfile?.logoKey;
+        const isCampaign = !!i.campaignId;
+        let counterpartLogoKey: string | null = null;
+        if (hostProfile) {
+          counterpartLogoKey = isCampaign ? i.campaign?.brandProfile.logoKey : i.brandProfile.logoKey;
+        } else {
+          counterpartLogoKey = isCampaign
+            ? i.hostProfile?.communityProfile?.logoKey || null
+            : i.sponsorshipProposal?.hostProfile.communityProfile?.logoKey || null;
+        }
+
+        const proposalId = isCampaign ? i.campaign?.id : i.sponsorshipProposal?.id;
+        const proposalName = isCampaign ? i.campaign?.name : i.sponsorshipProposal?.name;
+
+        let counterpartName = 'Community';
+        if (hostProfile) {
+          counterpartName = isCampaign ? i.campaign?.brandProfile.brandName : i.brandProfile.brandName;
+        } else {
+          counterpartName = isCampaign
+            ? i.hostProfile?.communityProfile?.name ?? i.hostProfile?.displayName ?? 'Community'
+            : i.sponsorshipProposal?.hostProfile.communityProfile?.name ?? i.sponsorshipProposal?.hostProfile.displayName ?? 'Community';
+        }
+
         return {
           id: i.id,
-          proposalId: i.sponsorshipProposal.id,
-          proposalName: i.sponsorshipProposal.name,
+          proposalId,
+          proposalName,
           chatStatus: i.chatStatus,
           createdAt: i.createdAt,
           chatAcceptedAt: i.chatAcceptedAt,
           lastMessageAt: i.lastMessageAt,
           lastMessagePreview: i.chatMessages[0] ? (i.chatMessages[0].content || (i.chatMessages[0].mediaKey ? '📷 Photo' : '')).slice(0, 120) : null,
           unreadCount: unreadCounts[idx],
-          // From the host's side, the counterpart is the brand; from the brand's side, it's the community.
-          counterpartName: hostProfile
-            ? i.brandProfile.brandName
-            : i.sponsorshipProposal.hostProfile.communityProfile?.name ?? i.sponsorshipProposal.hostProfile.displayName ?? 'Community',
+          counterpartName,
           counterpartAvatarUrl: counterpartLogoKey ? await this.storageService.getPresignedDownloadUrl(counterpartLogoKey) : null,
+          sponsorshipProposalId: i.sponsorshipProposalId,
+          campaignId: i.campaignId,
         };
       }),
     );
@@ -775,12 +815,30 @@ export class SponsorshipService {
             hostProfile: { select: { id: true, userId: true, displayName: true, communityProfile: { select: { name: true } } } },
           },
         },
+        campaign: {
+          select: {
+            id: true,
+            name: true,
+            brandProfile: { select: { id: true, userId: true, brandName: true } },
+          },
+        },
+        hostProfile: {
+          select: {
+            id: true,
+            userId: true,
+            displayName: true,
+            communityProfile: { select: { name: true } },
+          },
+        },
         brandProfile: { select: { id: true, userId: true, brandName: true } },
       },
     });
     if (!interest) throw new NotFoundException('Chat thread not found');
 
-    const isHost = interest.sponsorshipProposal.hostProfile.userId === userId;
+    const isCampaign = !!interest.campaignId;
+    const isHost = isCampaign
+      ? interest.hostProfile?.userId === userId
+      : interest.sponsorshipProposal?.hostProfile.userId === userId;
     const isBrand = interest.brandProfile.userId === userId;
     if (!isHost && !isBrand) throw new ForbiddenException('You do not have access to this chat');
 
@@ -918,12 +976,18 @@ export class SponsorshipService {
       },
     });
 
+    const isCampaign = !!interest.campaignId;
+    const hostUserId = isCampaign ? interest.hostProfile?.userId : interest.sponsorshipProposal?.hostProfile?.userId;
     const recipientUserId =
-      senderType === ChatSenderType.HOST ? interest.brandProfile.userId : interest.sponsorshipProposal.hostProfile.userId;
-    const senderName =
-      senderType === ChatSenderType.HOST
-        ? interest.sponsorshipProposal.hostProfile.communityProfile?.name ?? interest.sponsorshipProposal.hostProfile.displayName ?? 'The community'
-        : interest.brandProfile.brandName;
+      senderType === ChatSenderType.HOST ? interest.brandProfile.userId : hostUserId;
+    
+    let senderName = 'The community';
+    if (senderType === ChatSenderType.HOST) {
+      const host = isCampaign ? interest.hostProfile : interest.sponsorshipProposal?.hostProfile;
+      senderName = host?.communityProfile?.name ?? host?.displayName ?? 'The community';
+    } else {
+      senderName = interest.brandProfile.brandName;
+    }
     const preview = content.trim() ? content.slice(0, 80) : '📷 Sent a photo';
     void this.notificationsService
       .create(recipientUserId, 'sponsorship_chat_message', senderName, preview, {
@@ -943,11 +1007,14 @@ export class SponsorshipService {
       where: { id: interestId },
       include: {
         sponsorshipProposal: { select: { hostProfile: { select: { userId: true } } } },
+        hostProfile: { select: { userId: true } },
         brandProfile: { select: { userId: true, brandName: true } },
       },
     });
     if (!interest) throw new NotFoundException('Chat thread not found');
-    if (interest.sponsorshipProposal.hostProfile.userId !== userId) {
+    const isCampaign = !!interest.campaignId;
+    const hostUserId = isCampaign ? interest.hostProfile?.userId : interest.sponsorshipProposal?.hostProfile?.userId;
+    if (hostUserId !== userId) {
       throw new ForbiddenException('Only the host can accept this request');
     }
     if (interest.chatStatus === SponsorshipChatStatus.ACCEPTED) {
@@ -989,8 +1056,11 @@ export class SponsorshipService {
     return message;
   }
 
-  private hostNameOf(interest: { sponsorshipProposal: { hostProfile: { displayName: string | null; communityProfile: { name: string } | null } } }) {
-    return interest.sponsorshipProposal.hostProfile.communityProfile?.name ?? interest.sponsorshipProposal.hostProfile.displayName ?? 'The community';
+  private hostNameOf(interest: any) {
+    if (interest.campaignId && interest.hostProfile) {
+      return interest.hostProfile.communityProfile?.name ?? interest.hostProfile.displayName ?? 'The community';
+    }
+    return interest.sponsorshipProposal?.hostProfile?.communityProfile?.name ?? interest.sponsorshipProposal?.hostProfile?.displayName ?? 'The community';
   }
 
   async createDeal(userId: string, interestId: string, dto: UpsertSponsorshipDealDto) {
@@ -1093,7 +1163,7 @@ export class SponsorshipService {
 
     void this.notificationsService
       .create(
-        interest.sponsorshipProposal.hostProfile.userId,
+        interest.campaignId ? interest.hostProfile?.userId : interest.sponsorshipProposal?.hostProfile?.userId,
         'sponsorship_deal_locked',
         interest.brandProfile.brandName,
         `🎉 Approved and locked the deal: ${existing.projectName}`,
@@ -1143,7 +1213,7 @@ export class SponsorshipService {
 
     void this.notificationsService
       .create(
-        interest.sponsorshipProposal.hostProfile.userId,
+        interest.campaignId ? interest.hostProfile?.userId : interest.sponsorshipProposal?.hostProfile?.userId,
         'sponsorship_deal_changes_requested',
         interest.brandProfile.brandName,
         dto.note?.trim() ? `Requested changes: ${dto.note.trim()}` : 'Requested changes to the deal',
@@ -1257,7 +1327,7 @@ export class SponsorshipService {
 
       void this.notificationsService
         .create(
-          interest.sponsorshipProposal.hostProfile.userId,
+          interest.campaignId ? interest.hostProfile?.userId : interest.sponsorshipProposal?.hostProfile?.userId,
           'sponsorship_deal_report_reviewed',
           interest.brandProfile.brandName,
           `${brandStatus === 'approved' ? 'Approved' : 'Requested changes to'} your deliverables report`,
@@ -1344,7 +1414,7 @@ export class SponsorshipService {
 
     void this.notificationsService
       .create(
-        interest.sponsorshipProposal.hostProfile.userId,
+        interest.campaignId ? interest.hostProfile?.userId : interest.sponsorshipProposal?.hostProfile?.userId,
         'sponsorship_deal_paid',
         interest.brandProfile.brandName,
         `💳 Paid ₹${paidAmount.toLocaleString('en-IN')} for the deal: ${deal.projectName}`,
@@ -1377,8 +1447,16 @@ export class SponsorshipService {
         sponsorshipInterest: {
           select: {
             id: true,
+            campaignId: true,
+            sponsorshipProposalId: true,
             sponsorshipProposal: {
               select: { id: true, name: true, hostProfile: { select: { displayName: true, communityProfile: { select: { name: true } } } } },
+            },
+            campaign: {
+              select: { id: true, name: true },
+            },
+            hostProfile: {
+              select: { id: true, displayName: true, communityProfile: { select: { name: true } } },
             },
           },
         },
@@ -1395,14 +1473,23 @@ export class SponsorshipService {
             ? { platformFeeAmount: d.platformFeeAmount, transactionFeeAmount: d.transactionFeeAmount, taxAmount: d.taxAmount, totalAmount: d.totalAmount }
             : await this.computeDealPaymentBreakdown(Number(d.sponsorshipAmount));
 
+        const isCampaign = !!d.sponsorshipInterest.campaignId;
+        const proposalName = isCampaign
+          ? d.sponsorshipInterest.campaign?.name
+          : d.sponsorshipInterest.sponsorshipProposal?.name;
+
+        let communityName = 'Community';
+        if (isCampaign) {
+          communityName = d.sponsorshipInterest.hostProfile?.communityProfile?.name ?? d.sponsorshipInterest.hostProfile?.displayName ?? 'Community';
+        } else {
+          communityName = d.sponsorshipInterest.sponsorshipProposal?.hostProfile.communityProfile?.name ?? d.sponsorshipInterest.sponsorshipProposal?.hostProfile.displayName ?? 'Community';
+        }
+
         return {
           id: d.id,
           sponsorshipInterestId: d.sponsorshipInterest.id,
-          proposalName: d.sponsorshipInterest.sponsorshipProposal.name,
-          communityName:
-            d.sponsorshipInterest.sponsorshipProposal.hostProfile.communityProfile?.name ??
-            d.sponsorshipInterest.sponsorshipProposal.hostProfile.displayName ??
-            'Community',
+          proposalName,
+          communityName,
           projectName: d.projectName,
           sponsorshipAmount: d.sponsorshipAmount,
           ...breakdown,

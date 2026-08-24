@@ -1717,6 +1717,17 @@ export class AdminController {
     return this.adminService.listSponsorshipDeals(query.status);
   }
 
+  @Get('campaign-deals')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({
+    summary: 'List negotiated/locked campaign deals',
+    description: 'Filter by `status` (PENDING_APPROVAL, CHANGES_REQUESTED, APPROVED). Omit for all.',
+  })
+  @ApiOkResponse({ description: 'List of campaign deals.' })
+  listCampaignDeals(@Query() query: ListSponsorshipDealsQueryDto) {
+    return this.adminService.listCampaignDeals(query.status);
+  }
+
   // ─── "Talk to Meetday" general support chat ────────────────────────────
 
   @Get('meetday-chats')

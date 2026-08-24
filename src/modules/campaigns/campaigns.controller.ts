@@ -139,4 +139,16 @@ export class CampaignsController {
   ) {
     return this.campaignsService.deleteCampaign(userId, campaignId);
   }
+
+  @Post('published/:id/interest')
+  @Roles('HOST')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Express interest in a brand campaign' })
+  @ApiCreatedResponse({ description: 'Interest recorded.' })
+  markInterest(
+    @GetUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) campaignId: string,
+  ) {
+    return this.campaignsService.markInterest(userId, campaignId);
+  }
 }
