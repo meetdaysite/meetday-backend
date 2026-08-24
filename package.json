@@ -52,6 +52,7 @@
     "firebase-admin": "^12.0.0",
     "helmet": "^8.1.0",
     "ioredis": "^5.10.1",
+    "officeparser": "^7.8.0",
     "pg": "^8.20.0",
     "puppeteer": "^24.43.1",
     "qrcode": "^1.5.4",

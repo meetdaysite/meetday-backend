@@ -12,11 +12,16 @@ import {
   Post,
   Put,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNoContentResponse,
@@ -73,6 +78,23 @@ export class SponsorshipController {
     @Body() dto: GenerateProposalDraftDto,
   ) {
     return this.proposalCopilotService.generateDraft(dto.prompt, uid);
+  }
+
+  @Post('copilot/extract-document')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
+  @ApiOperation({
+    summary: 'Extract text from an uploaded document for AI Copilot context',
+    description: 'Accepts a PDF, DOCX, or PPTX file (e.g. an existing pitch deck) and returns its text so it can be combined with the Copilot prompt.',
+  })
+  @ApiOkResponse({ description: 'Extracted text.' })
+  @ApiBadRequestResponse({ description: 'Unsupported file type or unreadable document.' })
+  async extractCopilotDocument(@UploadedFile() file: { buffer: Buffer; originalname: string }) {
+    const text = await this.proposalCopilotService.extractDocumentText(file.buffer, file.originalname);
+    return { text };
   }
 
   @Post()
