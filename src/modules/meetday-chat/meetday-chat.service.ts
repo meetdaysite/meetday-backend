@@ -14,7 +14,7 @@ const ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'];
 const GREETING_MESSAGE = 'Hello, welcome to Meetday Support! How can we help you today?';
 const NEEDS_DETAIL_MESSAGE = 'Please describe your issue/query in detail.';
 const HANDOFF_MESSAGE = 'Thank you. Your issue has been logged. An agent will revert to you within 2 hours.';
-export const RESOLVED_SYSTEM_MESSAGE = '[System] This issue has been marked as resolved.';
+export const RESOLVED_SYSTEM_MESSAGE = '[System] The issue has been resolved.';
 type Category = 'GREETING' | 'NEEDS_DETAIL' | 'DETAILED';
 
 // General "Talk to Meetday" support chat — one thread per Host/Brand user, independent of any

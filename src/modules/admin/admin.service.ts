@@ -2444,6 +2444,7 @@ export class AdminService {
           lastMessageAt: t.lastMessageAt,
           lastMessagePreview: t.messages[0] ? (t.messages[0].content || (t.messages[0].mediaKey ? '📷 Photo' : '')).slice(0, 120) : null,
           unreadCount: unreadCounts[idx],
+          botDormant: t.botDormant,
           userLogoUrl: logoKey ? await this.storageService.getPresignedDownloadUrl(logoKey) : null,
         };
       }),
@@ -2500,10 +2501,12 @@ export class AdminService {
   }
 
   // Marks a Talk to Meetday thread resolved: posts a system message and resets the bot so it
-  // resumes the scripted intake flow the next time the user writes in.
+  // resumes the scripted intake flow the next time the user writes in. No-op (doesn't post a
+  // second system message) if the thread is already resolved/not dormant.
   async resolveMeetdayChat(threadId: string) {
     const thread = await this.prisma.meetdayChatThread.findUnique({ where: { id: threadId } });
     if (!thread) throw new NotFoundException('Chat thread not found');
+    if (!thread.botDormant) return { alreadyResolved: true };
 
     const message = await this.prisma.meetdayChatMessage.create({
       data: { threadId, senderType: 'BOT', senderId: null, content: RESOLVED_SYSTEM_MESSAGE },

@@ -1381,19 +1381,28 @@ describe('AdminService', () => {
     });
 
     it('resolveMeetdayChat() posts a system message and clears botDormant', async () => {
-      prisma.meetdayChatThread.findUnique.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
+      prisma.meetdayChatThread.findUnique.mockResolvedValue({ id: 'thread-1', userId: 'user-1', botDormant: true });
       prisma.meetdayChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
 
       await service.resolveMeetdayChat('thread-1');
 
       expect(prisma.meetdayChatMessage.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ threadId: 'thread-1', senderType: 'BOT', senderId: null, content: '[System] This issue has been marked as resolved.' }),
+          data: expect.objectContaining({ threadId: 'thread-1', senderType: 'BOT', senderId: null, content: '[System] The issue has been resolved.' }),
         }),
       );
       expect(prisma.meetdayChatThread.update).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 'thread-1' }, data: expect.objectContaining({ botDormant: false }) }),
       );
+    });
+
+    it('resolveMeetdayChat() is a no-op when the thread is not dormant (already resolved)', async () => {
+      prisma.meetdayChatThread.findUnique.mockResolvedValue({ id: 'thread-1', userId: 'user-1', botDormant: false });
+
+      const result = await service.resolveMeetdayChat('thread-1');
+
+      expect(result).toEqual({ alreadyResolved: true });
+      expect(prisma.meetdayChatMessage.create).not.toHaveBeenCalled();
     });
 
     it('resolveMeetdayChat() throws NotFoundException for an unknown thread', async () => {
