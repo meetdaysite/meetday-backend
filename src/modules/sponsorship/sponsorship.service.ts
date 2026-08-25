@@ -750,7 +750,7 @@ export class SponsorshipService {
       }),
     );
 
-    return Promise.all(
+    const threads = await Promise.all(
       interests.map(async (i, idx) => {
         const isCampaign = !!i.campaignId;
         let counterpartLogoKey: string | null = null;
@@ -791,6 +791,12 @@ export class SponsorshipService {
         };
       }),
     );
+
+    return threads.sort((a, b) => {
+      const timeA = new Date(a.lastMessageAt || a.createdAt).getTime();
+      const timeB = new Date(b.lastMessageAt || b.createdAt).getTime();
+      return timeB - timeA;
+    });
   }
 
   // Shapes a replied-to message into the small quoted preview returned alongside a reply — shows
