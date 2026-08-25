@@ -46,7 +46,7 @@ export class AdminDashboardController {
   }
 
   @Get('review-queue')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'Review queue counts',
     description: 'Returns per-category counts for the review queue section. Cached 30s.',
@@ -67,7 +67,7 @@ export class AdminDashboardController {
   }
 
   @Get('live-operations')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'Live operations metrics',
     description: 'Returns currently live event count, today\'s check-ins, and capacity alerts. Cached 30s.',
@@ -87,7 +87,7 @@ export class AdminDashboardController {
   }
 
   @Get('revenue')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'Revenue overview with time series',
     description: 'Returns revenue totals, breakdown, and daily time series for the selected period. Cached 5 min.',
@@ -111,7 +111,7 @@ export class AdminDashboardController {
   }
 
   @Get('recent-activity')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'SUPPORT')
   @ApiOperation({
     summary: 'Recent platform activity feed',
     description: 'Returns the most recent admin-relevant audit log events with human-readable labels. Cached 15s.',
@@ -139,7 +139,7 @@ export class AdminDashboardController {
   }
 
   @Get('health')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'Platform health check',
     description: 'Returns operational status for Server, Payment Gateway, Notifications, and Check-in System. Cached 10s.',

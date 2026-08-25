@@ -76,7 +76,7 @@ import { ListSponsorshipDealsQueryDto } from '../sponsorship/dto/list-sponsorshi
 @ApiTags('Admin')
 @ApiBearerAuth('firebase-token')
 @UseGuards(RolesGuard)
-@Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+@Roles('SUPER_ADMIN', 'CITY_ADMIN', 'SUPPORT')
 @ApiUnauthorizedResponse({ description: 'Missing or invalid Firebase JWT' })
 @ApiForbiddenResponse({ description: 'Authenticated user does not have a required admin role' })
 @Controller('admin')
@@ -88,7 +88,7 @@ export class AdminController {
   ) {}
 
   @Get('admins')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'List all admin users',
     description:
@@ -181,7 +181,7 @@ export class AdminController {
   }
 
   @Post('invite')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Invite a new admin user',
@@ -223,7 +223,7 @@ export class AdminController {
   }
 
   @Patch('admins/:id/deactivate')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Deactivate an admin account',
@@ -254,7 +254,7 @@ export class AdminController {
   }
 
   @Patch('admins/:id/reactivate')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Reactivate a deactivated admin account',
@@ -284,6 +284,7 @@ export class AdminController {
   }
 
   @Get('me')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
   @ApiOperation({
     summary: 'Get own admin profile',
     description: 'Returns the profile of the authenticated admin user including their role.',
@@ -315,6 +316,7 @@ export class AdminController {
   }
 
   @Patch('me')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
   @ApiOperation({
     summary: 'Update own admin profile',
     description:
@@ -375,7 +377,7 @@ export class AdminController {
   }
 
   @Get('hosts/pending')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'List hosts pending admin review',
     description:
@@ -664,7 +666,7 @@ export class AdminController {
   // ─── Coupon endpoints ────────────────────────────────────────────────────────
 
   @Post('coupons')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Create a coupon',
@@ -726,7 +728,7 @@ export class AdminController {
   }
 
   @Get('coupons')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'List coupons',
     description: 'Returns a paginated list of coupons. Filter by target audience or active status.',
@@ -763,7 +765,7 @@ export class AdminController {
   }
 
   @Get('coupons/:id')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'Get coupon detail',
     description: 'Returns a single coupon with full redemption history.',
@@ -802,7 +804,7 @@ export class AdminController {
   }
 
   @Patch('coupons/:id/disable')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Disable a coupon',
@@ -826,7 +828,7 @@ export class AdminController {
   }
 
   @Patch('coupons/:id/enable')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Enable a coupon', description: 'Sets the coupon isActive to true.' })
   @ApiParam({ name: 'id', description: 'Coupon UUID', example: 'coupon-uuid-1234' })
@@ -841,7 +843,7 @@ export class AdminController {
   }
 
   @Patch('coupons/:id')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Update a coupon',
@@ -894,7 +896,7 @@ export class AdminController {
   // ─── Category endpoints ──────────────────────────────────────────────────────
 
   @Post('categories')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Create an experience category',
@@ -927,7 +929,7 @@ export class AdminController {
   }
 
   @Patch('categories/:id')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Update an experience category',
@@ -990,7 +992,7 @@ export class AdminController {
   // ─── Event review endpoints ───────────────────────────────────────────────────
 
   @Get('events/pending')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'List events pending admin review',
     description:
@@ -1037,7 +1039,7 @@ export class AdminController {
   }
 
   @Get('events')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'List all events (admin view)',
     description:
@@ -1083,7 +1085,7 @@ export class AdminController {
   }
 
   @Get('events/:id')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'Get full event detail (admin view)',
     description:
@@ -1244,7 +1246,7 @@ export class AdminController {
   // ─── Event revisions (edits to published events) ─────────────────────────────
 
   @Get('events/revisions/pending')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'List pending event revisions',
     description:
@@ -1261,7 +1263,7 @@ export class AdminController {
   }
 
   @Get('events/:id/revision')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'Get the pending revision for an event',
     description:
@@ -1361,7 +1363,7 @@ export class AdminController {
   }
 
   @Get('sponsorships/pending')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'List sponsorship proposals pending admin review',
     description: 'Returns proposals in UNDER_REVIEW status, oldest submission first (FIFO).',
@@ -1372,7 +1374,7 @@ export class AdminController {
   }
 
   @Get('sponsorships')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'List all sponsorship proposals (admin view)',
     description: 'Paginated list across all statuses. Filter by status, city, or hostProfileId.',
@@ -1383,7 +1385,7 @@ export class AdminController {
   }
 
   @Get('sponsorships/revisions/pending')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'List pending sponsorship proposal revisions',
     description: 'Proposals (UNDER_REVIEW or PUBLISHED) that have an edit awaiting review.',
@@ -1396,7 +1398,7 @@ export class AdminController {
 
 
   @Get('sponsorships/:id')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({ summary: 'Get full sponsorship proposal detail (admin view)' })
   @ApiParam({ name: 'id', description: 'Proposal UUID' })
   @ApiOkResponse({ description: 'Full proposal detail with presigned media URLs.' })
@@ -1425,7 +1427,7 @@ export class AdminController {
   }
 
   @Get('sponsorships/brands/interested')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'List brands interested in sponsorship proposals ("Brands" section)',
     description: 'Every brand-proposal "I am Interested" click, across all proposals, newest first.',
@@ -1508,7 +1510,7 @@ export class AdminController {
   // ─── Host community profile review ─────────────────────────────────────────
 
   @Get('community-profiles/pending')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'List community profiles pending admin review',
     description: 'Returns profiles in PENDING status, oldest submission first (FIFO).',
@@ -1519,7 +1521,7 @@ export class AdminController {
   }
 
   @Get('community-profiles/eligible-hosts')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'List hosts without a community profile',
     description: 'Hosts eligible to have a community profile created for them directly by an admin.',
@@ -1545,7 +1547,7 @@ export class AdminController {
   }
 
   @Get('community-profiles')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'List all community profiles',
     description: 'Returns every community profile regardless of status. Filter by `status`.',
@@ -1556,7 +1558,7 @@ export class AdminController {
   }
 
   @Get('community-profiles/revisions/pending')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'List pending community profile revisions',
     description: 'Already-APPROVED profiles that have an edit awaiting review.',
@@ -1567,7 +1569,7 @@ export class AdminController {
   }
 
   @Get('community-profiles/:id')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({ summary: 'Get full community profile detail (admin view)' })
   @ApiParam({ name: 'id', description: 'Community profile UUID' })
   @ApiOkResponse({ description: 'Full community profile detail with presigned logo URL.' })
@@ -1617,7 +1619,7 @@ export class AdminController {
   // ─── Brands ─────────────────────────────────────────────────────────────
 
   @Get('brands')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'List all signed-up brands',
     description:
@@ -1630,7 +1632,7 @@ export class AdminController {
   }
 
   @Post('announcements/send')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Send a mass announcement email to brands and/or hosts',
@@ -1649,7 +1651,7 @@ export class AdminController {
   }
 
   @Get('announcements')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'List past announcements sent to brands/hosts',
     description: 'Paginated history of mass-emails sent via `POST /admin/announcements/send`, newest first.',
@@ -1842,7 +1844,7 @@ export class AdminController {
   }
 
   @Get('campaigns/pending')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'List brand campaigns pending admin review',
     description: 'Returns campaigns in UNDER_REVIEW status, oldest submission first.',
@@ -1853,7 +1855,7 @@ export class AdminController {
   }
 
   @Get('campaigns/:id')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({ summary: 'Get full campaign details (admin view)' })
   @ApiParam({ name: 'id', description: 'Campaign UUID' })
   @ApiOkResponse({ description: 'Full campaign details.' })
@@ -2032,7 +2034,7 @@ export class AdminController {
   // ─── Interests ───────────────────────────────────────────────────────────────
 
   @Post('interests')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Create an interest',
@@ -2082,7 +2084,7 @@ export class AdminController {
   }
 
   @Get('interests')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'List all interests',
     description:
@@ -2115,7 +2117,7 @@ export class AdminController {
   }
 
   @Get('interests/:id')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({ summary: 'Get interest by ID', description: 'Returns a single interest with its category mappings. Only SUPER_ADMIN.' })
   @ApiParam({ name: 'id', description: 'Interest UUID', example: 'interest-uuid-1234' })
   @ApiOkResponse({
@@ -2143,7 +2145,7 @@ export class AdminController {
   }
 
   @Patch('interests/:id')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'Update an interest',
     description:
@@ -2184,7 +2186,7 @@ export class AdminController {
   }
 
   @Put('interests/:id/categories')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'Replace category mappings for an interest',
     description:
@@ -2370,7 +2372,7 @@ export class AdminController {
   // ─── Platform Config ───────────────────────────────────────────────────────
 
   @Get('platform-config')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'Get all platform config values',
     description: 'Returns every platform config entry as a key-value map. Values are stored as strings. Only SUPER_ADMIN.',
@@ -2390,7 +2392,7 @@ export class AdminController {
   }
 
   @Patch('platform-config/gst-rate')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({ summary: 'Update platform GST rate', description: 'Updates the GST rate applied to all new orders. Value is a decimal (e.g. 0.18 = 18%). Only SUPER_ADMIN.' })
   @ApiBody({
     type: UpdateGstRateDto,
@@ -2407,7 +2409,7 @@ export class AdminController {
   }
 
   @Patch('subscription-plans/:plan/fee-rate')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({ summary: 'Update platform fee rate for a subscription plan', description: 'Updates the platformFeeRate on a subscription plan (DISCOVER, SELL, COMMUNITY). Value is a decimal (e.g. 0.15 = 15%). Only SUPER_ADMIN.' })
   @ApiParam({ name: 'plan', enum: ['DISCOVER', 'SELL', 'COMMUNITY'], example: 'SELL' })
   @ApiBody({
@@ -2428,7 +2430,7 @@ export class AdminController {
   // ─── Host Fee Promos ───────────────────────────────────────────────────────
 
   @Post('hosts/:hostProfileId/fee-promos')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'Create a platform fee promo for a host',
     description:
@@ -2480,7 +2482,7 @@ export class AdminController {
   }
 
   @Get('hosts/:hostProfileId/fee-promos')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({ summary: 'List fee promos for a host', description: 'Returns all fee promos for the host, newest first. Only SUPER_ADMIN.' })
   @ApiParam({ name: 'hostProfileId', description: 'Host profile UUID', example: 'hp-uuid-1234' })
   @ApiOkResponse({
@@ -2511,7 +2513,7 @@ export class AdminController {
   }
 
   @Patch('hosts/:hostProfileId/fee-promos/:promoId')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({
     summary: 'Deactivate or update a host fee promo',
     description: 'Update a promo\'s active flag and/or expiry date. Send only the fields you want to change. Only SUPER_ADMIN.',
@@ -2555,7 +2557,7 @@ export class AdminController {
   }
 
   @Get('campaigns')
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({ summary: 'List all campaigns' })
   @ApiOkResponse({ description: 'Paginated list of campaigns.' })
   listAllCampaigns(@Query() query: ListCampaignsQueryDto) {
