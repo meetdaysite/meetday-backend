@@ -1,11 +1,19 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
+import { StorageService } from '../../common/storage/storage.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class CampaignsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(CampaignsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storageService: StorageService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   private async getBrandProfile(userId: string) {
     const brandProfile = await this.prisma.brandProfile.findUnique({
@@ -106,19 +114,38 @@ export class CampaignsService {
   }
 
   async getPublishedCampaigns() {
-    return this.prisma.campaign.findMany({
+    const campaigns = await this.prisma.campaign.findMany({
       where: { status: 'PUBLISHED' },
       include: {
         brandProfile: {
           select: {
             id: true,
             brandName: true,
+            logoKey: true,
             user: { select: { firstName: true, lastName: true, email: true } },
           },
         },
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    return Promise.all(
+      campaigns.map(async (c) => {
+        if (c.brandProfile) {
+          const logoUrl = c.brandProfile.logoKey
+            ? await this.storageService.getPresignedDownloadUrl(c.brandProfile.logoKey)
+            : null;
+          return {
+            ...c,
+            brandProfile: {
+              ...c.brandProfile,
+              logoUrl,
+            },
+          };
+        }
+        return c;
+      }),
+    );
   }
 
   async getPublishedCampaign(campaignId: string) {
@@ -129,6 +156,7 @@ export class CampaignsService {
           select: {
             id: true,
             brandName: true,
+            logoKey: true,
             user: { select: { firstName: true, lastName: true, email: true } },
           },
         },
@@ -137,6 +165,85 @@ export class CampaignsService {
     if (!campaign || campaign.status !== 'PUBLISHED') {
       throw new NotFoundException('Campaign not found');
     }
+    if (campaign.brandProfile) {
+      const logoUrl = campaign.brandProfile.logoKey
+        ? await this.storageService.getPresignedDownloadUrl(campaign.brandProfile.logoKey)
+        : null;
+      return {
+        ...campaign,
+        brandProfile: {
+          ...campaign.brandProfile,
+          logoUrl,
+        },
+      };
+    }
     return campaign;
+  }
+
+  async markInterest(userId: string, campaignId: string) {
+    const hostProfile = await this.prisma.hostProfile.findUnique({
+      where: { userId },
+      include: { communityProfile: true },
+    });
+    if (!hostProfile) {
+      throw new NotFoundException('Host profile not found');
+    }
+    if (hostProfile.approvalStatus !== 'APPROVED') {
+      throw new ForbiddenException('Your community profile must be approved by an admin to express interest in a campaign.');
+    }
+
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id: campaignId },
+      include: { brandProfile: { select: { userId: true } } },
+    });
+    if (!campaign || campaign.status !== 'PUBLISHED') {
+      throw new NotFoundException('Published campaign not found');
+    }
+
+    const existingInterest = await this.prisma.sponsorshipInterest.findFirst({
+      where: {
+        campaignId,
+        hostProfileId: hostProfile.id,
+      },
+    });
+
+    if (existingInterest) {
+      return { message: 'Interest already expressed', alreadyInterested: true };
+    }
+
+    const interest = await this.prisma.sponsorshipInterest.create({
+      data: {
+        campaignId,
+        hostProfileId: hostProfile.id,
+        brandProfileId: campaign.brandProfileId,
+        chatStatus: 'REQUESTED',
+      },
+    });
+
+    const communityName = hostProfile.communityProfile?.name ?? hostProfile.displayName ?? 'A community';
+
+    // Notify the Brand of host interest in their campaign
+    void this.notificationsService
+      .create(
+        campaign.brandProfile.userId,
+        'host_interested_in_campaign',
+        `${communityName} is interested!`,
+        `This community is interested in your campaign: "${campaign.name}". Check your campaign requests.`,
+        { campaignId, sponsorshipInterestId: interest.id },
+      )
+      .catch((err) => this.logger.error('Failed to notify brand of host interest', err));
+
+    // Confirm to the host that interest has been sent
+    void this.notificationsService
+      .create(
+        userId,
+        'host_interest_confirmed',
+        'Interest sent!',
+        'The brand has been notified of your interest.',
+        { campaignId },
+      )
+      .catch((err) => this.logger.error('Failed to notify host of confirmed interest', err));
+
+    return { message: 'Interest expressed successfully', alreadyInterested: false, interestId: interest.id };
   }
 }

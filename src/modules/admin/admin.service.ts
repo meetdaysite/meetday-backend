@@ -2144,7 +2144,10 @@ export class AdminService {
 
   async listSponsorshipChats(query: ListSponsorshipChatsQueryDto) {
     const threads = await this.prisma.sponsorshipInterest.findMany({
-      where: query.status ? { chatStatus: query.status } : undefined,
+      where: {
+        sponsorshipProposalId: { not: null },
+        ...(query.status && { chatStatus: query.status }),
+      },
       include: {
         sponsorshipProposal: {
           select: { id: true, name: true, hostProfile: { select: { displayName: true, communityProfile: { select: { name: true, logoKey: true } } } } },
@@ -2200,7 +2203,12 @@ export class AdminService {
   // Count of chats a brand has requested that the host hasn't accepted yet — backs the admin
   // sidebar's "Ongoing Chats" badge so pending requests aren't missed.
   async countPendingSponsorshipChats() {
-    return this.prisma.sponsorshipInterest.count({ where: { chatStatus: 'REQUESTED' } });
+    return this.prisma.sponsorshipInterest.count({
+      where: {
+        chatStatus: 'REQUESTED',
+        sponsorshipProposalId: { not: null },
+      },
+    });
   }
 
   // Schedules the fallback "you have unread messages" email check — deduped by jobId so several
@@ -2329,7 +2337,10 @@ export class AdminService {
 
   async listSponsorshipDeals(status?: 'PENDING_APPROVAL' | 'CHANGES_REQUESTED' | 'APPROVED') {
     const deals = await this.prisma.sponsorshipDeal.findMany({
-      where: status ? { status } : undefined,
+      where: {
+        ...(status && { status }),
+        sponsorshipInterest: { sponsorshipProposalId: { not: null } },
+      },
       include: {
         sponsorshipInterest: {
           select: {
@@ -3458,5 +3469,78 @@ export class AdminService {
     ]);
 
     return { campaigns, total, page, limit };
+  }
+
+  async listCampaignDeals(status?: 'PENDING_APPROVAL' | 'CHANGES_REQUESTED' | 'APPROVED') {
+    const deals = await this.prisma.sponsorshipDeal.findMany({
+      where: {
+        ...(status && { status }),
+        sponsorshipInterest: { campaignId: { not: null } },
+      },
+      include: {
+        sponsorshipInterest: {
+          select: {
+            id: true,
+            campaign: { select: { id: true, name: true } },
+            hostProfile: { select: { displayName: true, communityProfile: { select: { name: true } } } },
+            brandProfile: { select: { id: true, brandName: true } },
+          },
+        },
+        report: { select: { id: true } },
+      },
+      orderBy: [{ approvedAt: 'desc' }, { updatedAt: 'desc' }],
+    });
+
+    return Promise.all(
+      deals.map(async (d) => {
+        let breakdown: { platformFeeAmount: Prisma.Decimal | number | null; transactionFeeAmount: Prisma.Decimal | number | null; taxAmount: Prisma.Decimal | number | null; totalAmount: Prisma.Decimal | number | null } = {
+          platformFeeAmount: d.platformFeeAmount,
+          transactionFeeAmount: d.transactionFeeAmount,
+          taxAmount: d.taxAmount,
+          totalAmount: d.totalAmount,
+        };
+        if (d.platformFeeAmount == null) {
+          const gstConfig = await this.prisma.platformConfig.findUnique({ where: { key: 'gst_rate' } });
+          const gstRate = gstConfig ? parseFloat(gstConfig.value) : DEFAULT_SPONSORSHIP_GST_RATE;
+          breakdown = computeDealPaymentBreakdown(Number(d.sponsorshipAmount), gstRate);
+        }
+
+        return {
+          id: d.id,
+          sponsorshipInterestId: d.sponsorshipInterest.id,
+          proposalId: d.sponsorshipInterest.campaign?.id,
+          proposalName: d.sponsorshipInterest.campaign?.name,
+          communityName:
+            d.sponsorshipInterest.hostProfile?.communityProfile?.name ??
+            d.sponsorshipInterest.hostProfile?.displayName ??
+            'Community',
+          brandName: d.sponsorshipInterest.brandProfile.brandName,
+          projectName: d.projectName,
+          startDate: d.startDate,
+          endDate: d.endDate,
+          time: d.time,
+          sponsorshipCategory: d.sponsorshipCategory,
+          sponsorshipAmount: d.sponsorshipAmount,
+          venue: d.venue,
+          barterElements: d.barterElements,
+          deliverables: d.deliverables,
+          otherTerms: d.otherTerms,
+          additionalNotes: d.additionalNotes,
+          status: d.status,
+          version: d.version,
+          changeRequestNote: d.changeRequestNote,
+          approvedAt: d.approvedAt,
+          createdAt: d.createdAt,
+          updatedAt: d.updatedAt,
+          hasReport: !!d.report,
+          paymentStatus: d.paymentStatus,
+          ...breakdown,
+          paymentExpiresAt: d.paymentExpiresAt,
+          paidAt: d.paidAt,
+          razorpayPaymentId: d.razorpayPaymentId,
+          invoicePdfKey: d.invoicePdfKey,
+        };
+      }),
+    );
   }
 }
