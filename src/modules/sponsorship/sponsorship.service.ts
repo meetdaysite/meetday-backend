@@ -1004,7 +1004,7 @@ export class SponsorshipService {
   }
 
 
-  // Host accepts a brand's interest — opens the chat window both sides ("Requests" → "General").
+  // Host accepts a brand's interest OR brand accepts a host's interest (for campaigns) — opens the chat window both sides ("Requests" → "General").
   async acceptChatRequest(userId: string, interestId: string) {
     const interest = await this.prisma.sponsorshipInterest.findUnique({
       where: { id: interestId },
@@ -1017,9 +1017,17 @@ export class SponsorshipService {
     if (!interest) throw new NotFoundException('Chat thread not found');
     const isCampaign = !!interest.campaignId;
     const hostUserId = isCampaign ? interest.hostProfile?.userId : interest.sponsorshipProposal?.hostProfile?.userId;
-    if (hostUserId !== userId) {
-      throw new ForbiddenException('Only the host can accept this request');
+
+    if (isCampaign) {
+      if (interest.brandProfile.userId !== userId) {
+        throw new ForbiddenException('Only the brand can accept this request');
+      }
+    } else {
+      if (hostUserId !== userId) {
+        throw new ForbiddenException('Only the host can accept this request');
+      }
     }
+
     if (interest.chatStatus === SponsorshipChatStatus.ACCEPTED) {
       return { message: 'Already accepted', chatStatus: interest.chatStatus };
     }
@@ -1029,15 +1037,23 @@ export class SponsorshipService {
       data: { chatStatus: SponsorshipChatStatus.ACCEPTED, chatAcceptedAt: new Date() },
     });
 
-    void this.notificationsService
-      .create(
-        interest.brandProfile.userId,
-        'sponsorship_chat_accepted',
-        'Request accepted!',
-        'The community accepted your interest — you can now chat with them.',
-        { sponsorshipInterestId: interestId },
-      )
-      .catch((err) => this.logger.error('Failed to notify brand of accepted chat request', err));
+    const recipientUserId = isCampaign ? hostUserId : interest.brandProfile.userId;
+    const title = 'Request accepted!';
+    const body = isCampaign
+      ? `${interest.brandProfile.brandName} accepted your interest — you can now chat with them.`
+      : 'The community accepted your interest — you can now chat with them.';
+
+    if (recipientUserId) {
+      void this.notificationsService
+        .create(
+          recipientUserId,
+          'sponsorship_chat_accepted',
+          title,
+          body,
+          { sponsorshipInterestId: interestId },
+        )
+        .catch((err) => this.logger.error('Failed to notify of accepted chat request', err));
+    }
 
     return { message: 'Request accepted', chatStatus: updated.chatStatus };
   }
