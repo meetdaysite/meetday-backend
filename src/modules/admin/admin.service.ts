@@ -2159,19 +2159,36 @@ export class AdminService {
       orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
     });
 
-    // Unread = messages from the host or brand (not Meetday itself) sent after an admin last
-    // opened this thread — shared across all admins, same as adminLastReadAt on the interest.
-    const unreadCounts = await Promise.all(
-      threads.map((t) =>
-        this.prisma.sponsorshipChatMessage.count({
+    const unreadStats = await Promise.all(
+      threads.map(async (t) => {
+        const unreadMessages = await this.prisma.sponsorshipChatMessage.findMany({
           where: {
             sponsorshipInterestId: t.id,
             senderType: { not: 'ADMIN' },
             deletedAt: null,
             ...(t.adminLastReadAt && { createdAt: { gt: t.adminLastReadAt } }),
           },
-        }),
-      ),
+          select: {
+            id: true,
+            content: true,
+            replyTo: { select: { senderType: true } },
+          },
+        });
+
+        const hasUnreadMention = unreadMessages.some((msg) => {
+          if (msg.replyTo && msg.replyTo.senderType === 'ADMIN') return true;
+          if (msg.content) {
+            const lower = msg.content.toLowerCase();
+            return lower.includes('@meetday') || lower.includes('@admin');
+          }
+          return false;
+        });
+
+        return {
+          unreadCount: unreadMessages.length,
+          hasUnreadMention,
+        };
+      }),
     );
 
     return Promise.all(
@@ -2193,7 +2210,8 @@ export class AdminService {
           chatAcceptedAt: t.chatAcceptedAt,
           lastMessageAt: t.lastMessageAt,
           lastMessagePreview: t.chatMessages[0] ? (t.chatMessages[0].content || (t.chatMessages[0].mediaKey ? '📷 Photo' : '')).slice(0, 120) : null,
-          unreadCount: unreadCounts[idx],
+          unreadCount: unreadStats[idx].unreadCount,
+          hasUnreadMention: unreadStats[idx].hasUnreadMention,
           brandLogoUrl,
           communityLogoUrl,
           isDealLocked: t.deal?.status === 'APPROVED',
@@ -2433,16 +2451,33 @@ export class AdminService {
       orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
     });
 
-    const unreadCounts = await Promise.all(
-      threads.map((t) =>
-        this.prisma.meetdayChatMessage.count({
+    const unreadStats = await Promise.all(
+      threads.map(async (t) => {
+        const unreadMessages = await this.prisma.meetdayChatMessage.findMany({
           where: {
             threadId: t.id,
             senderType: 'USER',
             ...(t.adminLastReadAt && { createdAt: { gt: t.adminLastReadAt } }),
           },
-        }),
-      ),
+          select: {
+            id: true,
+            content: true,
+          },
+        });
+
+        const hasUnreadMention = unreadMessages.some((msg) => {
+          if (msg.content) {
+            const lower = msg.content.toLowerCase();
+            return lower.includes('@meetday') || lower.includes('@admin');
+          }
+          return false;
+        });
+
+        return {
+          unreadCount: unreadMessages.length,
+          hasUnreadMention,
+        };
+      }),
     );
 
     return Promise.all(
@@ -2457,7 +2492,8 @@ export class AdminService {
           createdAt: t.createdAt,
           lastMessageAt: t.lastMessageAt,
           lastMessagePreview: t.messages[0] ? (t.messages[0].content || (t.messages[0].mediaKey ? '📷 Photo' : '')).slice(0, 120) : null,
-          unreadCount: unreadCounts[idx],
+          unreadCount: unreadStats[idx].unreadCount,
+          hasUnreadMention: unreadStats[idx].hasUnreadMention,
           botDormant: t.botDormant,
           userLogoUrl: logoKey ? await this.storageService.getPresignedDownloadUrl(logoKey) : null,
         };

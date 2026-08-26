@@ -737,17 +737,52 @@ export class SponsorshipService {
       orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
     });
 
-    const unreadCounts = await Promise.all(
-      interests.map((i) => {
+    const unreadStats = await Promise.all(
+      interests.map(async (i) => {
         const lastReadAt = hostProfile ? i.hostLastReadAt : i.brandLastReadAt;
-        const otherSenderType = hostProfile ? ChatSenderType.BRAND : ChatSenderType.HOST;
-        return this.prisma.sponsorshipChatMessage.count({
+        const mySenderType = hostProfile ? ChatSenderType.HOST : ChatSenderType.BRAND;
+        const unreadMessages = await this.prisma.sponsorshipChatMessage.findMany({
           where: {
             sponsorshipInterestId: i.id,
-            senderType: otherSenderType,
+            senderType: { not: mySenderType },
+            deletedAt: null,
             ...(lastReadAt && { createdAt: { gt: lastReadAt } }),
           },
+          select: {
+            id: true,
+            content: true,
+            replyTo: { select: { senderType: true } },
+          },
         });
+
+        const myKeywords: string[] = [];
+        if (hostProfile) {
+          myKeywords.push('host', 'community');
+          const isCamp = !!i.campaignId;
+          const hostName = isCamp
+            ? i.hostProfile?.communityProfile?.name || i.hostProfile?.displayName
+            : i.sponsorshipProposal?.hostProfile.communityProfile?.name || i.sponsorshipProposal?.hostProfile.displayName;
+          if (hostName) myKeywords.push(hostName.toLowerCase());
+        } else {
+          myKeywords.push('brand');
+          const isCamp = !!i.campaignId;
+          const brandName = isCamp ? i.campaign?.brandProfile.brandName : i.brandProfile.brandName;
+          if (brandName) myKeywords.push(brandName.toLowerCase());
+        }
+
+        const hasUnreadMention = unreadMessages.some((msg) => {
+          if (msg.replyTo && msg.replyTo.senderType === mySenderType) return true;
+          if (msg.content) {
+            const lower = msg.content.toLowerCase();
+            return myKeywords.some((kw) => lower.includes(`@${kw}`) || (kw.length > 3 && lower.includes(`@${kw.replace(/\s+/g, '')}`)));
+          }
+          return false;
+        });
+
+        return {
+          unreadCount: unreadMessages.length,
+          hasUnreadMention,
+        };
       }),
     );
 
@@ -784,7 +819,8 @@ export class SponsorshipService {
           chatAcceptedAt: i.chatAcceptedAt,
           lastMessageAt: i.lastMessageAt,
           lastMessagePreview: i.chatMessages[0] ? (i.chatMessages[0].content || (i.chatMessages[0].mediaKey ? '📷 Photo' : '')).slice(0, 120) : null,
-          unreadCount: unreadCounts[idx],
+          unreadCount: unreadStats[idx].unreadCount,
+          hasUnreadMention: unreadStats[idx].hasUnreadMention,
           counterpartName,
           counterpartAvatarUrl: counterpartLogoKey ? await this.storageService.getPresignedDownloadUrl(counterpartLogoKey) : null,
           sponsorshipProposalId: i.sponsorshipProposalId,
