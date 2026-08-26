@@ -52,20 +52,43 @@ export class MeetdayChatService {
     );
   }
 
+  private replyToPreview(
+    replyTo: { id: string; senderType: string; content: string; mediaKey: string | null } | null,
+  ) {
+    if (!replyTo) return null;
+    return { id: replyTo.id, senderType: replyTo.senderType, content: replyTo.content, hasMedia: !!replyTo.mediaKey };
+  }
+
   async getMyChat(userId: string) {
     const thread = await this.getOrCreateThread(userId);
     const messages = await this.prisma.meetdayChatMessage.findMany({
       where: { threadId: thread.id },
       orderBy: { createdAt: 'asc' },
       take: 200,
-      select: { id: true, senderType: true, senderId: true, content: true, mediaKey: true, createdAt: true },
+      select: {
+        id: true,
+        senderType: true,
+        senderId: true,
+        content: true,
+        mediaKey: true,
+        createdAt: true,
+        replyTo: { select: { id: true, senderType: true, content: true, mediaKey: true } },
+      },
     });
 
     void this.prisma.meetdayChatThread
       .update({ where: { id: thread.id }, data: { userLastReadAt: new Date() } })
       .catch((err) => this.logger.error('Failed to update Meetday chat read state', err));
 
-    return { messages: await this.withMediaUrls(messages) };
+    const withMediaUrls = await Promise.all(
+      messages.map(async ({ mediaKey, replyTo, ...m }) => ({
+        ...m,
+        mediaUrl: mediaKey ? await this.storageService.getPresignedDownloadUrl(mediaKey) : null,
+        replyTo: this.replyToPreview(replyTo),
+      })),
+    );
+
+    return { messages: withMediaUrls };
   }
 
   async sendMyMessage(userId: string, dto: SendChatMessageDto) {
@@ -75,8 +98,26 @@ export class MeetdayChatService {
     const thread = await this.getOrCreateThread(userId);
     const { content, wasRedacted } = dto.content ? redactPersonalInfo(dto.content) : { content: '', wasRedacted: false };
 
+    let replyToRow: { id: string; senderType: string; content: string; mediaKey: string | null } | null = null;
+    if (dto.replyToId) {
+      const original = await this.prisma.meetdayChatMessage.findUnique({
+        where: { id: dto.replyToId },
+        select: { id: true, senderType: true, content: true, mediaKey: true, threadId: true },
+      });
+      if (original && original.threadId === thread.id) {
+        replyToRow = original;
+      }
+    }
+
     const message = await this.prisma.meetdayChatMessage.create({
-      data: { threadId: thread.id, senderType: 'USER', senderId: userId, content, mediaKey: dto.mediaKey },
+      data: {
+        threadId: thread.id,
+        senderType: 'USER',
+        senderId: userId,
+        content,
+        mediaKey: dto.mediaKey,
+        replyToId: replyToRow?.id,
+      },
     });
     await this.prisma.meetdayChatThread.update({
       where: { id: thread.id },
@@ -94,7 +135,7 @@ export class MeetdayChatService {
       this.logger.error('Failed to generate Meetday chat bot reply', err);
     }
 
-    return { ...message, mediaUrl, wasRedacted };
+    return { ...message, mediaUrl, wasRedacted, replyTo: this.replyToPreview(replyToRow) };
   }
 
   // Runs the scripted intake flow: classifies the message as GREETING / NEEDS_DETAIL / DETAILED

@@ -2462,10 +2462,12 @@ export class AdminService {
           select: {
             id: true,
             content: true,
+            replyTo: { select: { senderType: true } },
           },
         });
 
         const hasUnreadMention = unreadMessages.some((msg) => {
+          if (msg.replyTo && (msg.replyTo.senderType === 'ADMIN' || msg.replyTo.senderType === 'BOT')) return true;
           if (msg.content) {
             const lower = msg.content.toLowerCase();
             return lower.includes('@meetday') || lower.includes('@admin');
@@ -2509,12 +2511,28 @@ export class AdminService {
       where: { threadId },
       orderBy: { createdAt: 'asc' },
       take: 200,
-      select: { id: true, senderType: true, senderId: true, content: true, mediaKey: true, createdAt: true },
+      select: {
+        id: true,
+        senderType: true,
+        senderId: true,
+        content: true,
+        mediaKey: true,
+        createdAt: true,
+        replyTo: { select: { id: true, senderType: true, content: true, mediaKey: true } },
+      },
     });
     const withMediaUrls = await Promise.all(
-      messages.map(async ({ mediaKey, ...m }) => ({
+      messages.map(async ({ mediaKey, replyTo, ...m }) => ({
         ...m,
         mediaUrl: mediaKey ? await this.storageService.getPresignedDownloadUrl(mediaKey) : null,
+        replyTo: replyTo
+          ? {
+              id: replyTo.id,
+              senderType: replyTo.senderType,
+              content: replyTo.content,
+              hasMedia: !!replyTo.mediaKey,
+            }
+          : null,
       })),
     );
 
@@ -2532,8 +2550,26 @@ export class AdminService {
       throw new BadRequestException('Message must have text or an image');
     }
 
+    let replyToRow: { id: string; senderType: string; content: string; mediaKey: string | null } | null = null;
+    if (dto.replyToId) {
+      const original = await this.prisma.meetdayChatMessage.findUnique({
+        where: { id: dto.replyToId },
+        select: { id: true, senderType: true, content: true, mediaKey: true, threadId: true },
+      });
+      if (original && original.threadId === threadId) {
+        replyToRow = original;
+      }
+    }
+
     const message = await this.prisma.meetdayChatMessage.create({
-      data: { threadId, senderType: 'ADMIN', senderId: adminId, content: dto.content ?? '', mediaKey: dto.mediaKey },
+      data: {
+        threadId,
+        senderType: 'ADMIN',
+        senderId: adminId,
+        content: dto.content ?? '',
+        mediaKey: dto.mediaKey,
+        replyToId: replyToRow?.id,
+      },
     });
     await this.prisma.meetdayChatThread.update({
       where: { id: threadId },
@@ -2547,7 +2583,18 @@ export class AdminService {
       .catch((err) => this.logger.error('Failed to notify of Meetday chat message', err));
 
     const mediaUrl = dto.mediaKey ? await this.storageService.getPresignedDownloadUrl(dto.mediaKey) : null;
-    return { ...message, mediaUrl };
+    return {
+      ...message,
+      mediaUrl,
+      replyTo: replyToRow
+        ? {
+            id: replyToRow.id,
+            senderType: replyToRow.senderType,
+            content: replyToRow.content,
+            hasMedia: !!replyToRow.mediaKey,
+          }
+        : null,
+    };
   }
 
   // Marks a Talk to Meetday thread resolved: posts a system message and resets the bot so it

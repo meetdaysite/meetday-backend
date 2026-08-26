@@ -1294,6 +1294,10 @@ model MeetdayChatMessage {
   content  String  @db.Text
   mediaKey String?
 
+  replyToId String?
+  replyTo   MeetdayChatMessage?  @relation("MeetdayChatReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies   MeetdayChatMessage[] @relation("MeetdayChatReplies")
+
   createdAt DateTime @default(now())
 
   @@index([threadId, createdAt])
