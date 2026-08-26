@@ -2154,6 +2154,7 @@ export class AdminService {
         },
         brandProfile: { select: { id: true, brandName: true, logoKey: true } },
         chatMessages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true, mediaKey: true, senderType: true, createdAt: true } },
+        deal: { select: { id: true, status: true } },
       },
       orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
     });
@@ -2195,6 +2196,7 @@ export class AdminService {
           unreadCount: unreadCounts[idx],
           brandLogoUrl,
           communityLogoUrl,
+          isDealLocked: t.deal?.status === 'APPROVED',
         };
       }),
     );

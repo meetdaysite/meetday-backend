@@ -732,6 +732,7 @@ export class SponsorshipService {
         },
         brandProfile: { select: { id: true, brandName: true, logoKey: true } },
         chatMessages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true, mediaKey: true, senderType: true, createdAt: true } },
+        deal: { select: { id: true, status: true } },
       },
       orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
     });
@@ -788,6 +789,7 @@ export class SponsorshipService {
           counterpartAvatarUrl: counterpartLogoKey ? await this.storageService.getPresignedDownloadUrl(counterpartLogoKey) : null,
           sponsorshipProposalId: i.sponsorshipProposalId,
           campaignId: i.campaignId,
+          isDealLocked: i.deal?.status === 'APPROVED',
         };
       }),
     );
