@@ -52,7 +52,7 @@ const CONTEXT_CONTENT_TYPES: Record<UploadContext, readonly string[]> = {
   [UploadContext.COMMUNITY_FEED_MEDIA]: [...IMAGE_TYPES, 'video/mp4'],
   [UploadContext.SPONSORSHIP_MEDIA]: IMAGE_TYPES,
   [UploadContext.SPONSORSHIP_DOCUMENT]: PITCH_DOC_TYPES,
-  [UploadContext.SPONSORSHIP_CHAT_MEDIA]: IMAGE_TYPES,
+  [UploadContext.SPONSORSHIP_CHAT_MEDIA]: [...IMAGE_TYPES, 'application/pdf'],
   [UploadContext.MEETDAY_CHAT_MEDIA]: IMAGE_TYPES,
   [UploadContext.COMMUNITY_PAST_EVENT_MEDIA]: IMAGE_TYPES,
   [UploadContext.SPONSORSHIP_DEAL_REPORT_MEDIA]: IMAGE_TYPES,
