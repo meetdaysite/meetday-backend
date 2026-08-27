@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Resend } from 'resend';
+import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
+import * as nodemailer from 'nodemailer';
 import { kycFailedTemplate } from './templates/kyc-failed.template';
 import { hostApprovedTemplate } from './templates/host-approved.template';
 import { hostRejectedTemplate } from './templates/host-rejected.template';
@@ -33,20 +34,21 @@ const ADMIN_NOTIFICATIONS_FROM = 'info@meetday.ai';
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
-  private readonly resend: Resend;
+  private readonly transporter: nodemailer.Transporter;
   private readonly from: string;
 
   constructor(private readonly configService: ConfigService) {
     this.from = this.configService.get<string>('mail.from');
-    this.resend = new Resend(this.configService.get<string>('mail.apiKey'));
+    const sesClient = new SESv2Client({ region: this.configService.get<string>('mail.awsRegion') });
+    this.transporter = nodemailer.createTransport({ SES: { sesClient, SendEmailCommand } });
   }
 
   private async sendMail(to: string, subject: string, html: string, from: string = this.from): Promise<void> {
-    const { error } = await this.resend.emails.send({ from, to, subject, html });
-    if (error) {
-      this.logger.error(`Failed to send email to ${to}: ${error.message}`);
-    } else {
+    try {
+      await this.transporter.sendMail({ from, to, subject, html });
       this.logger.log(`Email sent to ${to}: ${subject}`);
+    } catch (err) {
+      this.logger.error(`Failed to send email to ${to}: ${(err as Error).message}`);
     }
   }
 
@@ -64,17 +66,17 @@ export class MailService {
       attachments.push({ filename: 'invoice.pdf', content: invoiceBuffer });
     }
 
-    const { error } = await this.resend.emails.send({
-      from: this.from,
-      to,
-      subject: `Your tickets for ${eventTitle} — Meetday`,
-      html: ticketConfirmationTemplate(eventTitle, { hasInvoice: !!invoiceBuffer }),
-      attachments,
-    });
-    if (error) {
-      this.logger.error(`Failed to send ticket confirmation to ${to}: ${error.message}`);
-    } else {
+    try {
+      await this.transporter.sendMail({
+        from: this.from,
+        to,
+        subject: `Your tickets for ${eventTitle} — Meetday`,
+        html: ticketConfirmationTemplate(eventTitle, { hasInvoice: !!invoiceBuffer }),
+        attachments,
+      });
       this.logger.log(`Ticket confirmation email sent to ${to}`);
+    } catch (err) {
+      this.logger.error(`Failed to send ticket confirmation to ${to}: ${(err as Error).message}`);
     }
   }
 

@@ -21,8 +21,8 @@ export default () => {
       privateKey: env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
     },
     mail: {
-      apiKey: env.RESEND_API_KEY,
       from: env.MAIL_FROM,
+      awsRegion: env.AWS_SES_REGION,
     },
     razorpay: {
       keyId: env.RAZORPAY_KEY_ID,

@@ -13,7 +13,9 @@ export const envSchema = z.object({
   FIREBASE_CLIENT_EMAIL: z.string().email('FIREBASE_CLIENT_EMAIL must be a valid email'),
   FIREBASE_PRIVATE_KEY: z.string().min(1, 'FIREBASE_PRIVATE_KEY is required'),
 
-  RESEND_API_KEY: z.string().min(1, 'RESEND_API_KEY is required'),
+  AWS_SES_REGION: z.string().min(1).default('ap-south-1'),
+  AWS_ACCESS_KEY_ID: z.string().min(1, 'AWS_ACCESS_KEY_ID is required'),
+  AWS_SECRET_ACCESS_KEY: z.string().min(1, 'AWS_SECRET_ACCESS_KEY is required'),
   MAIL_FROM: z.string().email('MAIL_FROM must be a valid email'),
 
   RAZORPAY_KEY_ID: z.string().min(1, 'RAZORPAY_KEY_ID is required'),
