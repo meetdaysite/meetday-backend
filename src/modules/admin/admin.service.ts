@@ -13,7 +13,7 @@ import { Prisma } from '@prisma/client';
 import * as crypto from 'crypto';
 import * as firebaseAdmin from 'firebase-admin';
 import { PrismaService } from '../../prisma/prisma.service';
-import { computeDealPaymentBreakdown, DEFAULT_SPONSORSHIP_GST_RATE } from '../../common/utils/sponsorship-deal-payment.util';
+import { computeDealPaymentBreakdown, computeOfflineDealPaymentBreakdown, DEFAULT_SPONSORSHIP_GST_RATE } from '../../common/utils/sponsorship-deal-payment.util';
 import { ListHostsQueryDto } from './dto/list-hosts-query.dto';
 import { ListAdminsQueryDto } from './dto/list-admins-query.dto';
 import { ListRolesQueryDto } from './dto/list-roles-query.dto';
@@ -33,6 +33,7 @@ import { ListEventsQueryDto } from './dto/list-events-query.dto';
 import { ListSponsorshipsQueryDto } from './dto/list-sponsorships-query.dto';
 import { ListCampaignsQueryDto } from './dto/list-campaigns-query.dto';
 import { ListCommunityProfilesQueryDto } from './dto/list-community-profiles-query.dto';
+import { MarkSponsorshipDealPaidOfflineDto } from './dto/mark-sponsorship-deal-paid-offline.dto';
 import { ListBrandsQueryDto, BrandProfileStatus } from './dto/list-brands-query.dto';
 import { CreateAdminSponsorshipDto } from './dto/create-admin-sponsorship.dto';
 import { UpdateAdminSponsorshipDto } from './dto/update-admin-sponsorship.dto';
@@ -2386,7 +2387,10 @@ export class AdminService {
           taxAmount: d.taxAmount,
           totalAmount: d.totalAmount,
         };
-        if (d.platformFeeAmount == null) {
+        // A breakdown is "persisted" once transactionFeeAmount has been set (order-created, paid,
+        // or admin offline override) — platformFeeAmount is intentionally always null so it can't
+        // be used as that signal.
+        if (d.transactionFeeAmount == null) {
           const gstConfig = await this.prisma.platformConfig.findUnique({ where: { key: 'gst_rate' } });
           const gstRate = gstConfig ? parseFloat(gstConfig.value) : DEFAULT_SPONSORSHIP_GST_RATE;
           breakdown = computeDealPaymentBreakdown(Number(d.sponsorshipAmount), gstRate);
@@ -2421,6 +2425,7 @@ export class AdminService {
           updatedAt: d.updatedAt,
           hasReport: !!d.report,
           paymentStatus: d.paymentStatus,
+          paymentMode: d.paymentMode,
           ...breakdown,
           paymentExpiresAt: d.paymentExpiresAt,
           paidAt: d.paidAt,
@@ -2429,6 +2434,29 @@ export class AdminService {
         };
       }),
     );
+  }
+
+  // Admin manual override for offline (non-Razorpay) sponsorship deal payments — only allowed
+  // while the deal is still UNPAID (covers both the "Pending" and derived "Expired" UI states).
+  async markSponsorshipDealPaidOffline(dealId: string, dto: MarkSponsorshipDealPaidOfflineDto) {
+    const deal = await this.prisma.sponsorshipDeal.findUnique({ where: { id: dealId } });
+    if (!deal) throw new NotFoundException('Deal not found');
+    if (deal.status !== 'APPROVED') throw new BadRequestException('The deal must be locked before it can be marked as paid');
+    if (deal.paymentStatus === 'PAID') throw new BadRequestException('This deal has already been paid for');
+
+    const gstConfig = await this.prisma.platformConfig.findUnique({ where: { key: 'gst_rate' } });
+    const gstRate = gstConfig ? parseFloat(gstConfig.value) : DEFAULT_SPONSORSHIP_GST_RATE;
+    const breakdown = computeOfflineDealPaymentBreakdown(Number(deal.sponsorshipAmount), gstRate, dto.transactionFeeAmount ?? 0);
+
+    return this.prisma.sponsorshipDeal.update({
+      where: { id: dealId },
+      data: {
+        paymentStatus: 'PAID',
+        paymentMode: 'OFFLINE',
+        ...breakdown,
+        paidAt: dto.paidAt ? new Date(dto.paidAt) : new Date(),
+      },
+    });
   }
 
   // ── "Talk to Meetday" general support chat (separate from TriChat) ──────
@@ -3584,7 +3612,7 @@ export class AdminService {
           taxAmount: d.taxAmount,
           totalAmount: d.totalAmount,
         };
-        if (d.platformFeeAmount == null) {
+        if (d.transactionFeeAmount == null) {
           const gstConfig = await this.prisma.platformConfig.findUnique({ where: { key: 'gst_rate' } });
           const gstRate = gstConfig ? parseFloat(gstConfig.value) : DEFAULT_SPONSORSHIP_GST_RATE;
           breakdown = computeDealPaymentBreakdown(Number(d.sponsorshipAmount), gstRate);
@@ -3619,6 +3647,7 @@ export class AdminService {
           updatedAt: d.updatedAt,
           hasReport: !!d.report,
           paymentStatus: d.paymentStatus,
+          paymentMode: d.paymentMode,
           ...breakdown,
           paymentExpiresAt: d.paymentExpiresAt,
           paidAt: d.paidAt,

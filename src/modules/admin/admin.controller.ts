@@ -72,6 +72,7 @@ import { ListAnnouncementsQueryDto } from './dto/list-announcements-query.dto';
 import { ListSponsorshipChatsQueryDto } from '../sponsorship/dto/list-sponsorship-chats-query.dto';
 import { SendChatMessageDto } from '../sponsorship/dto/send-chat-message.dto';
 import { ListSponsorshipDealsQueryDto } from '../sponsorship/dto/list-sponsorship-deals-query.dto';
+import { MarkSponsorshipDealPaidOfflineDto } from './dto/mark-sponsorship-deal-paid-offline.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth('firebase-token')
@@ -1728,6 +1729,18 @@ export class AdminController {
   @ApiOkResponse({ description: 'List of campaign deals.' })
   listCampaignDeals(@Query() query: ListSponsorshipDealsQueryDto) {
     return this.adminService.listCampaignDeals(query.status);
+  }
+
+  @Patch('sponsorship-deals/:id/mark-paid-offline')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @ApiOperation({
+    summary: 'Manually mark a locked deal as paid via an offline/manual payment',
+    description:
+      'Only allowed while the deal is UNPAID (Pending or Expired). Sets paymentMode to OFFLINE, recalculates GST (18% on the sponsorship amount only) and the total, and records the transaction date/time.',
+  })
+  @ApiOkResponse({ description: 'Updated deal.' })
+  markSponsorshipDealPaidOffline(@Param('id', ParseUUIDPipe) id: string, @Body() dto: MarkSponsorshipDealPaidOfflineDto) {
+    return this.adminService.markSponsorshipDealPaidOffline(id, dto);
   }
 
   // ─── "Talk to Meetday" general support chat ────────────────────────────

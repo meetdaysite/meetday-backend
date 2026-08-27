@@ -12,3 +12,13 @@ export function computeDealPaymentBreakdown(sponsorshipAmount: number, gstRate: 
   const totalAmount = Math.round((sponsorshipAmount + transactionFeeAmount + taxAmount) * 100) / 100;
   return { platformFeeAmount: null as number | null, transactionFeeAmount, taxAmount, totalAmount };
 }
+
+// Manual/offline override (admin marks a deal Paid outside Razorpay) — GST is charged on the
+// sponsorship amount ONLY (no transaction fee added to the taxable value, unlike the online
+// flow above), and the transaction fee is excluded from the total since no gateway fee was
+// actually incurred.
+export function computeOfflineDealPaymentBreakdown(sponsorshipAmount: number, gstRate: number, transactionFeeAmount: number) {
+  const taxAmount = Math.round(sponsorshipAmount * gstRate * 100) / 100;
+  const totalAmount = Math.round((sponsorshipAmount + taxAmount) * 100) / 100;
+  return { platformFeeAmount: null as number | null, transactionFeeAmount, taxAmount, totalAmount };
+}

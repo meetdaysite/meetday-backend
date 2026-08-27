@@ -62,6 +62,8 @@ export class SponsorshipInvoicePdfService {
     const legalName = this.configService.get<string>('company.legalName') ?? 'Meetday Global Pvt. Ltd';
     const gstin = this.configService.get<string>('company.gstin') ?? '';
     const address = this.configService.get<string>('company.address') ?? '';
+    const isOffline = deal.paymentMode === 'OFFLINE';
+    const transactionFeeLabel = isOffline ? 'Transaction Fee' : 'Transaction Fee (3%)';
 
     const html = `
 <!DOCTYPE html>
@@ -93,12 +95,13 @@ export class SponsorshipInvoicePdfService {
     <tr><td class="label">Community</td><td class="value">${escapeHtml(communityName)}</td></tr>
     <tr><td class="label">Proposal / Project</td><td class="value">${escapeHtml(deal.sponsorshipInterest.sponsorshipProposal.name)}</td></tr>
     <tr><td class="label">Payment Date</td><td class="value">${escapeHtml(paymentDate)}</td></tr>
-    <tr><td class="label">Payment Reference</td><td class="value">${escapeHtml(deal.razorpayPaymentId ?? '')}</td></tr>
+    <tr><td class="label">Payment Mode</td><td class="value">${isOffline ? 'Offline' : 'Online'}</td></tr>
+    ${deal.razorpayPaymentId ? `<tr><td class="label">Payment Reference</td><td class="value">${escapeHtml(deal.razorpayPaymentId)}</td></tr>` : ''}
   </table>
 
   <table>
     <tr><td class="label">Sponsorship Amount</td><td class="value">₹${money(deal.sponsorshipAmount)}</td></tr>
-    <tr><td class="label">Transaction Fee (3%)</td><td class="value">₹${money(deal.transactionFeeAmount ?? 0)}</td></tr>
+    <tr><td class="label">${transactionFeeLabel}</td><td class="value">₹${money(deal.transactionFeeAmount ?? 0)}</td></tr>
     <tr><td class="label">GST</td><td class="value">₹${money(deal.taxAmount ?? 0)}</td></tr>
     <tr class="total-row"><td>Total Paid</td><td class="value">₹${money(deal.totalAmount ?? deal.sponsorshipAmount)}</td></tr>
   </table>

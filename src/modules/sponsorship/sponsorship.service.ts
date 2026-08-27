@@ -1464,7 +1464,7 @@ export class SponsorshipService {
 
     const updated = await this.prisma.sponsorshipDeal.update({
       where: { id: deal.id },
-      data: { paymentStatus: 'PAID', razorpayPaymentId: dto.razorpayPaymentId, paidAt: new Date() },
+      data: { paymentStatus: 'PAID', paymentMode: 'ONLINE', razorpayPaymentId: dto.razorpayPaymentId, paidAt: new Date() },
     });
 
     const paidAmount = Number(deal.totalAmount ?? deal.sponsorshipAmount);
@@ -1529,10 +1529,12 @@ export class SponsorshipService {
 
     return Promise.all(
       deals.map(async (d) => {
-        // Breakdown is only persisted once a Razorpay order is created (payment initiated).
-        // Before that, compute it live so the brand can see it before ever clicking "Pay".
+        // Breakdown is only persisted once a Razorpay order is created (payment initiated) or an
+        // admin marks it paid offline. Before that, compute it live so the brand can see it before
+        // ever clicking "Pay". platformFeeAmount is intentionally always null so it can't be used
+        // as the "is it persisted" signal.
         const breakdown =
-          d.platformFeeAmount != null
+          d.transactionFeeAmount != null
             ? { platformFeeAmount: d.platformFeeAmount, transactionFeeAmount: d.transactionFeeAmount, taxAmount: d.taxAmount, totalAmount: d.totalAmount }
             : await this.computeDealPaymentBreakdown(Number(d.sponsorshipAmount));
 
@@ -1557,6 +1559,7 @@ export class SponsorshipService {
           sponsorshipAmount: d.sponsorshipAmount,
           ...breakdown,
           paymentStatus: d.paymentStatus,
+          paymentMode: d.paymentMode,
           paymentExpiresAt: d.paymentExpiresAt,
           paidAt: d.paidAt,
           approvedAt: d.approvedAt,
