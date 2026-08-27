@@ -12,4 +12,9 @@ export class ListSponsorshipChatsQueryDto {
   @IsOptional()
   @IsString()
   role?: 'HOST' | 'BRAND';
+
+  @ApiPropertyOptional({ description: 'Filter by type: SPONSORSHIP or CAMPAIGN.' })
+  @IsOptional()
+  @IsString()
+  type?: 'SPONSORSHIP' | 'CAMPAIGN';
 }

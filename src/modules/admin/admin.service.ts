@@ -2144,17 +2144,52 @@ export class AdminService {
   // ── TriChat: admin observes/participates in every Host ↔ Brand chat thread ─────
 
   async listSponsorshipChats(query: ListSponsorshipChatsQueryDto) {
+    let typeFilter: Prisma.SponsorshipInterestWhereInput = {};
+    if (query.type === 'SPONSORSHIP') {
+      typeFilter = { sponsorshipProposalId: { not: null } };
+    } else if (query.type === 'CAMPAIGN') {
+      typeFilter = { campaignId: { not: null } };
+    }
+
     const threads = await this.prisma.sponsorshipInterest.findMany({
       where: {
-        sponsorshipProposalId: { not: null },
+        ...typeFilter,
         ...(query.status && { chatStatus: query.status }),
       },
       include: {
         sponsorshipProposal: {
-          select: { id: true, name: true, hostProfile: { select: { displayName: true, communityProfile: { select: { name: true, logoKey: true } } } } },
+          select: {
+            id: true,
+            name: true,
+            hostProfile: {
+              select: {
+                id: true,
+                displayName: true,
+                communityProfile: { select: { name: true, logoKey: true } },
+              },
+            },
+          },
+        },
+        campaign: {
+          select: {
+            id: true,
+            name: true,
+            brandProfile: { select: { id: true, brandName: true, logoKey: true } },
+          },
+        },
+        hostProfile: {
+          select: {
+            id: true,
+            displayName: true,
+            communityProfile: { select: { name: true, logoKey: true } },
+          },
         },
         brandProfile: { select: { id: true, brandName: true, logoKey: true } },
-        chatMessages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true, mediaKey: true, senderType: true, createdAt: true } },
+        chatMessages: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { content: true, mediaKey: true, senderType: true, createdAt: true },
+        },
         deal: { select: { id: true, status: true } },
       },
       orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
@@ -2194,23 +2229,58 @@ export class AdminService {
 
     return Promise.all(
       threads.map(async (t, idx) => {
+        const isCampaign = Boolean(t.campaignId || t.campaign);
+        const itemType: 'SPONSORSHIP' | 'CAMPAIGN' = isCampaign ? 'CAMPAIGN' : 'SPONSORSHIP';
+
+        const brandProfile = t.brandProfile ?? t.campaign?.brandProfile;
+        const hostProfile = t.hostProfile ?? t.sponsorshipProposal?.hostProfile;
+
+        const brandLogoKey = brandProfile?.logoKey ?? null;
+        const communityLogoKey = hostProfile?.communityProfile?.logoKey ?? null;
+
         const [brandLogoUrl, communityLogoUrl] = await Promise.all([
-          t.brandProfile.logoKey ? this.storageService.getPresignedDownloadUrl(t.brandProfile.logoKey) : null,
-          t.sponsorshipProposal.hostProfile.communityProfile?.logoKey
-            ? this.storageService.getPresignedDownloadUrl(t.sponsorshipProposal.hostProfile.communityProfile.logoKey)
-            : null,
+          brandLogoKey ? this.storageService.getPresignedDownloadUrl(brandLogoKey) : null,
+          communityLogoKey ? this.storageService.getPresignedDownloadUrl(communityLogoKey) : null,
         ]);
+
+        const brandName = brandProfile?.brandName ?? 'Brand';
+        const communityName = hostProfile?.communityProfile?.name ?? hostProfile?.displayName ?? 'Community';
+
+        const senderRole: 'BRAND' | 'HOST' = isCampaign ? 'HOST' : 'BRAND';
+        const senderName = isCampaign ? communityName : brandName;
+        const senderLogoUrl = isCampaign ? communityLogoUrl : brandLogoUrl;
+
+        const receiverRole: 'HOST' | 'BRAND' = isCampaign ? 'BRAND' : 'HOST';
+        const receiverName = isCampaign ? brandName : communityName;
+        const receiverLogoUrl = isCampaign ? brandLogoUrl : communityLogoUrl;
+
+        const targetName = isCampaign
+          ? (t.campaign?.name ?? 'Campaign')
+          : (t.sponsorshipProposal?.name ?? 'Proposal');
+
         return {
           id: t.id,
-          proposalId: t.sponsorshipProposal.id,
-          proposalName: t.sponsorshipProposal.name,
-          communityName: t.sponsorshipProposal.hostProfile.communityProfile?.name ?? t.sponsorshipProposal.hostProfile.displayName ?? 'Community',
-          brandName: t.brandProfile.brandName,
+          type: itemType,
+          proposalId: t.sponsorshipProposal?.id ?? null,
+          proposalName: t.sponsorshipProposal?.name ?? null,
+          campaignId: t.campaign?.id ?? null,
+          campaignName: t.campaign?.name ?? null,
+          communityName,
+          brandName,
+          senderRole,
+          senderName,
+          senderLogoUrl,
+          receiverRole,
+          receiverName,
+          receiverLogoUrl,
+          targetName,
           chatStatus: t.chatStatus,
           createdAt: t.createdAt,
           chatAcceptedAt: t.chatAcceptedAt,
           lastMessageAt: t.lastMessageAt,
-          lastMessagePreview: t.chatMessages[0] ? (t.chatMessages[0].content || (t.chatMessages[0].mediaKey ? '📷 Photo' : '')).slice(0, 120) : null,
+          lastMessagePreview: t.chatMessages[0]
+            ? (t.chatMessages[0].content || (t.chatMessages[0].mediaKey ? '📷 Photo' : '')).slice(0, 120)
+            : null,
           unreadCount: unreadStats[idx].unreadCount,
           hasUnreadMention: unreadStats[idx].hasUnreadMention,
           brandLogoUrl,
@@ -2221,13 +2291,12 @@ export class AdminService {
     );
   }
 
-  // Count of chats a brand has requested that the host hasn't accepted yet — backs the admin
-  // sidebar's "Ongoing Chats" badge so pending requests aren't missed.
+  // Count of chats a brand has requested that the host hasn't accepted yet (or vice-versa for campaigns)
+  // backs the admin sidebar's "Chat Requests" badge.
   async countPendingSponsorshipChats() {
     return this.prisma.sponsorshipInterest.count({
       where: {
         chatStatus: 'REQUESTED',
-        sponsorshipProposalId: { not: null },
       },
     });
   }
@@ -2297,6 +2366,8 @@ export class AdminService {
       where: { id: interestId },
       include: {
         sponsorshipProposal: { select: { hostProfile: { select: { userId: true } } } },
+        campaign: { select: { brandProfile: { select: { userId: true } } } },
+        hostProfile: { select: { userId: true } },
         brandProfile: { select: { userId: true } },
       },
     });
@@ -2329,8 +2400,12 @@ export class AdminService {
     });
     await this.prisma.sponsorshipInterest.update({ where: { id: interestId }, data: { lastMessageAt: message.createdAt } });
 
+    const hostUserId = interest.hostProfile?.userId ?? interest.sponsorshipProposal?.hostProfile?.userId;
+    const brandUserId = interest.brandProfile?.userId ?? interest.campaign?.brandProfile?.userId;
+    const recipients = [hostUserId, brandUserId].filter((id): id is string => Boolean(id));
+
     const preview = dto.content?.trim() ? dto.content.slice(0, 80) : '📷 Sent a photo';
-    for (const to of [interest.sponsorshipProposal.hostProfile.userId, interest.brandProfile.userId]) {
+    for (const to of recipients) {
       void this.notificationsService
         .create(to, 'sponsorship_chat_message', 'Meetday', preview, {
           sponsorshipInterestId: interestId,
