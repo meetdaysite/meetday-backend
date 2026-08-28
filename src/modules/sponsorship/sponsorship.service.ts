@@ -732,7 +732,7 @@ export class SponsorshipService {
         },
         brandProfile: { select: { id: true, brandName: true, logoKey: true } },
         chatMessages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true, mediaKey: true, senderType: true, createdAt: true } },
-        deal: { select: { id: true, status: true } },
+        deal: { select: { id: true, status: true, report: { select: { id: true, status: true } } } },
       },
       orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
     });
@@ -770,7 +770,8 @@ export class SponsorshipService {
           if (brandName) myKeywords.push(brandName.toLowerCase());
         }
 
-        const hasUnreadMention = unreadMessages.some((msg) => {
+        const msgs = unreadMessages || [];
+        const hasUnreadMention = msgs.some((msg) => {
           if (msg.replyTo && msg.replyTo.senderType === mySenderType) return true;
           if (msg.content) {
             const lower = msg.content.toLowerCase();
@@ -780,7 +781,7 @@ export class SponsorshipService {
         });
 
         return {
-          unreadCount: unreadMessages.length,
+          unreadCount: msgs.length,
           hasUnreadMention,
         };
       }),
@@ -826,6 +827,7 @@ export class SponsorshipService {
           sponsorshipProposalId: i.sponsorshipProposalId,
           campaignId: i.campaignId,
           isDealLocked: i.deal?.status === 'APPROVED',
+          isDealClosed: i.deal?.status === 'APPROVED' && i.deal?.report?.status === 'APPROVED',
         };
       }),
     );
@@ -1155,7 +1157,7 @@ export class SponsorshipService {
     });
 
     const hostName = this.hostNameOf(interest);
-    await this.postDealSystemMessage(interest.id, ChatSenderType.HOST, userId, `📝 ${hostName} shared a deal proposal for your approval.`);
+    await this.postDealSystemMessage(interest.id, ChatSenderType.HOST, userId, `${hostName} shared a deal proposal for your approval.`);
 
     void this.notificationsService
       .create(interest.brandProfile.userId, 'sponsorship_deal_submitted', hostName, `Shared a deal proposal: ${dto.projectName}`, {
@@ -1195,7 +1197,7 @@ export class SponsorshipService {
     });
 
     const hostName = this.hostNameOf(interest);
-    await this.postDealSystemMessage(interest.id, ChatSenderType.HOST, userId, `✏️ ${hostName} updated the deal proposal.`);
+    await this.postDealSystemMessage(interest.id, ChatSenderType.HOST, userId, `${hostName} updated the deal proposal.`);
 
     void this.notificationsService
       .create(interest.brandProfile.userId, 'sponsorship_deal_updated', hostName, `Updated the deal proposal: ${dto.projectName}`, {
@@ -1222,14 +1224,14 @@ export class SponsorshipService {
       data: { status: 'APPROVED', approvedAt: new Date(), paymentExpiresAt },
     });
 
-    await this.postDealSystemMessage(interest.id, ChatSenderType.BRAND, userId, '🎉 Congratulations! The deal is locked.');
+    await this.postDealSystemMessage(interest.id, ChatSenderType.BRAND, userId, 'Congratulations! The deal is locked.');
 
     void this.notificationsService
       .create(
         interest.campaignId ? interest.hostProfile?.userId : interest.sponsorshipProposal?.hostProfile?.userId,
         'sponsorship_deal_locked',
         interest.brandProfile.brandName,
-        `🎉 Approved and locked the deal: ${existing.projectName}`,
+        `Approved and locked the deal: ${existing.projectName}`,
         { sponsorshipInterestId: interest.id },
       )
       .catch((err) => this.logger.error('Failed to notify host of locked deal', err));
@@ -1271,7 +1273,7 @@ export class SponsorshipService {
       interest.id,
       ChatSenderType.BRAND,
       userId,
-      `🔁 ${interest.brandProfile.brandName} requested changes to the deal${noteSuffix}`,
+      `${interest.brandProfile.brandName} requested changes to the deal${noteSuffix}`,
     );
 
     void this.notificationsService
@@ -1360,7 +1362,7 @@ export class SponsorshipService {
         interest.id,
         ChatSenderType.HOST,
         userId,
-        `📝 ${this.hostNameOf(interest)} submitted the deliverables report.`,
+        `${this.hostNameOf(interest)} submitted the deliverables report.`,
       );
 
       void this.notificationsService
@@ -1385,7 +1387,7 @@ export class SponsorshipService {
         interest.id,
         ChatSenderType.BRAND,
         userId,
-        `📝 ${interest.brandProfile.brandName} ${brandStatus} the deliverables report.`,
+        `${interest.brandProfile.brandName} ${brandStatus} the deliverables report.`,
       );
 
       void this.notificationsService
@@ -1472,7 +1474,7 @@ export class SponsorshipService {
       interest.id,
       ChatSenderType.BRAND,
       userId,
-      `💳 ${interest.brandProfile.brandName} paid ₹${paidAmount.toLocaleString('en-IN')} for the deal.`,
+      `${interest.brandProfile.brandName} paid ₹${paidAmount.toLocaleString('en-IN')} for the deal.`,
     );
 
     void this.notificationsService
