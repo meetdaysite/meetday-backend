@@ -38,6 +38,8 @@ import { ADMIN_ALERT_EMAILS } from '../../common/mail/admin-recipients.constant'
 
 // Shape of one raw stored past-event entry (HostCommunityProfile.pastEvents JSON column).
 type PastEventLike = { name?: string; description?: string; imageKeys?: string[] };
+// Shape of one raw stored brand-worked-with entry (HostCommunityProfile.brandsWorkedWith JSON column).
+type BrandWorkedWithLike = { brandName?: string; logoKey?: string };
 
 @Injectable()
 export class HostsService {
@@ -227,6 +229,7 @@ export class HostsService {
     secondaryImageKey?: string | null;
     pendingRevision?: Prisma.JsonValue;
     pastEvents?: Prisma.JsonValue;
+    brandsWorkedWith?: Prisma.JsonValue;
     categories: { category: { id: string; name: string } }[];
     [key: string]: unknown;
   }) {
@@ -237,22 +240,29 @@ export class HostsService {
     ]);
 
     let pendingRevision = profile.pendingRevision as
-      | (Record<string, unknown> & { logoKey?: string; secondaryImageKey?: string; pastEvents?: PastEventLike[] })
+      | (Record<string, unknown> & {
+          logoKey?: string;
+          secondaryImageKey?: string;
+          pastEvents?: PastEventLike[];
+          brandsWorkedWith?: BrandWorkedWithLike[];
+        })
       | null
       | undefined;
     if (pendingRevision) {
-      const [revisionLogoUrl, revisionSecondaryImageUrl, revisionPastEvents] = await Promise.all([
+      const [revisionLogoUrl, revisionSecondaryImageUrl, revisionPastEvents, revisionBrandsWorkedWith] = await Promise.all([
         pendingRevision.logoKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.logoKey) : undefined,
         pendingRevision.secondaryImageKey
           ? this.storageService.getPresignedDownloadUrl(pendingRevision.secondaryImageKey)
           : undefined,
         this.withPastEventImageUrls(pendingRevision.pastEvents),
+        this.withBrandsWorkedWithLogoUrls(pendingRevision.brandsWorkedWith),
       ]);
       pendingRevision = {
         ...pendingRevision,
         logoUrl: revisionLogoUrl,
         secondaryImageUrl: revisionSecondaryImageUrl,
         pastEvents: revisionPastEvents,
+        brandsWorkedWith: revisionBrandsWorkedWith,
       };
     }
 
@@ -262,6 +272,7 @@ export class HostsService {
       secondaryImageUrl,
       pendingRevision: pendingRevision ?? null,
       pastEvents: await this.withPastEventImageUrls(profile.pastEvents as PastEventLike[] | undefined),
+      brandsWorkedWith: await this.withBrandsWorkedWithLogoUrls(profile.brandsWorkedWith as BrandWorkedWithLike[] | undefined),
       categories: categories.map((c) => c.category),
     };
   }
@@ -278,6 +289,19 @@ export class HostsService {
         imageUrls: await Promise.all(
           (event?.imageKeys ?? []).map((key) => this.storageService.getPresignedDownloadUrl(key)),
         ),
+      })),
+    );
+  }
+
+  // Signs each brand-worked-with entry's logo key into a downloadable URL — stored as raw JSON
+  // (array of { brandName?, logoKey? }), entirely optional at every level, no maximum count.
+  private async withBrandsWorkedWithLogoUrls(brandsWorkedWith: BrandWorkedWithLike[] | null | undefined) {
+    if (!brandsWorkedWith || !Array.isArray(brandsWorkedWith)) return [];
+    return Promise.all(
+      brandsWorkedWith.map(async (brand) => ({
+        brandName: brand?.brandName ?? null,
+        logoKey: brand?.logoKey ?? null,
+        logoUrl: brand?.logoKey ? await this.storageService.getPresignedDownloadUrl(brand.logoKey) : null,
       })),
     );
   }
@@ -330,15 +354,20 @@ export class HostsService {
         data: { pendingRevision: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue },
       });
     } else {
-      const { categoryIds, pastEvents, ...fields } = dto;
+      const { categoryIds, pastEvents, brandsWorkedWith, ...fields } = dto;
       const pastEventsJson =
         pastEvents !== undefined ? (JSON.parse(JSON.stringify(pastEvents)) as Prisma.InputJsonValue) : Prisma.JsonNull;
+      const brandsWorkedWithJson =
+        brandsWorkedWith !== undefined
+          ? (JSON.parse(JSON.stringify(brandsWorkedWith)) as Prisma.InputJsonValue)
+          : Prisma.JsonNull;
       communityProfile = await this.prisma.hostCommunityProfile.upsert({
         where: { hostProfileId: hostProfile.id },
-        create: { ...fields, hostProfileId: hostProfile.id, pastEvents: pastEventsJson },
+        create: { ...fields, hostProfileId: hostProfile.id, pastEvents: pastEventsJson, brandsWorkedWith: brandsWorkedWithJson },
         update: {
           ...fields,
           pastEvents: pastEventsJson,
+          brandsWorkedWith: brandsWorkedWithJson,
           approvalStatus: 'PENDING',
           adminRejectionRemark: null,
           reviewedBy: null,

@@ -56,6 +56,7 @@ const CONTEXT_CONTENT_TYPES: Record<UploadContext, readonly string[]> = {
   [UploadContext.MEETDAY_CHAT_MEDIA]: IMAGE_TYPES,
   [UploadContext.COMMUNITY_PAST_EVENT_MEDIA]: IMAGE_TYPES,
   [UploadContext.SPONSORSHIP_DEAL_REPORT_MEDIA]: IMAGE_TYPES,
+  [UploadContext.COMMUNITY_BRAND_LOGO_MEDIA]: IMAGE_TYPES,
 };
 
 // Platform-admin roles required by the admin-only contexts.
@@ -425,6 +426,20 @@ export class StorageService {
           interest.sponsorshipProposal.hostProfile.userId === userId || SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '');
         if (!isOwner) throw new ForbiddenException('You do not own this sponsorship deal');
         key = `sponsorship-deal-reports/${dto.resourceId}/${randomUUID()}.${ext}`;
+        break;
+      }
+
+      case UploadContext.COMMUNITY_BRAND_LOGO_MEDIA: {
+        // Logos for the "Brands Worked With" showcase on a community profile. Admins can upload
+        // on behalf of a host (create/edit community profile flow) by passing the target
+        // hostProfile's UUID as resourceId — hosts themselves never need to.
+        const isAdmin = SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '');
+        const hostProfile =
+          dto.resourceId && isAdmin
+            ? await this.prisma.hostProfile.findUnique({ where: { id: dto.resourceId }, select: { id: true } })
+            : await this.prisma.hostProfile.findUnique({ where: { userId }, select: { id: true } });
+        if (!hostProfile) throw new NotFoundException('Host profile not found');
+        key = `hosts/${hostProfile.id}/community-profile/brand-logos/${randomUUID()}.${ext}`;
         break;
       }
 

@@ -2,6 +2,7 @@ import { IsArray, IsOptional, IsString, IsUUID, ValidateNested } from 'class-val
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PastEventDto } from './past-event.dto';
+import { BrandWorkedWithDto } from './brand-worked-with.dto';
 
 export class ActivateCommunityDto {
   @ApiPropertyOptional({ description: 'GCS object key for the secondary 4:5 image, or null to remove it' })
@@ -46,4 +47,14 @@ export class ActivateCommunityDto {
   @ValidateNested({ each: true })
   @Type(() => PastEventDto)
   pastEvents?: PastEventDto[];
+
+  @ApiPropertyOptional({
+    type: [BrandWorkedWithDto],
+    description: 'Optional showcase of brands worked with — entirely optional, no maximum count.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => BrandWorkedWithDto)
+  brandsWorkedWith?: BrandWorkedWithDto[];
 }
