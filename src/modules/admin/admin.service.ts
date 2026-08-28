@@ -2190,7 +2190,7 @@ export class AdminService {
           take: 1,
           select: { content: true, mediaKey: true, senderType: true, createdAt: true },
         },
-        deal: { select: { id: true, status: true } },
+        deal: { select: { id: true, status: true, report: { select: { id: true, status: true } } } },
       },
       orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
     });
@@ -2286,6 +2286,7 @@ export class AdminService {
           brandLogoUrl,
           communityLogoUrl,
           isDealLocked: t.deal?.status === 'APPROVED',
+          isDealClosed: t.deal?.status === 'APPROVED' && t.deal?.report?.status === 'APPROVED',
         };
       }),
     );
