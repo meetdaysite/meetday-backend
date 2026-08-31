@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { SocialLinksDto } from '../../hosts/dto/apply-host.dto';
 import { PastEventDto } from '../../hosts/dto/past-event.dto';
+import { BrandWorkedWithDto } from '../../hosts/dto/brand-worked-with.dto';
 
 // Full admin edit of an existing community profile — every field optional, only the fields
 // provided are updated. Writes directly (no pendingRevision staging) and works regardless of
@@ -69,4 +70,14 @@ export class UpdateAdminCommunityProfileDto {
   @ValidateNested({ each: true })
   @Type(() => PastEventDto)
   pastEvents?: PastEventDto[];
+
+  @ApiPropertyOptional({
+    type: [BrandWorkedWithDto],
+    description: 'Optional showcase of brands worked with',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => BrandWorkedWithDto)
+  brandsWorkedWith?: BrandWorkedWithDto[];
 }

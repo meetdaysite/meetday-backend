@@ -1948,6 +1948,7 @@ export class AdminService {
     avgGuestCount: true,
     experiencesPerYear: true,
     pastEvents: true,
+    brandsWorkedWith: true,
     approvalStatus: true,
     adminRejectionRemark: true,
     reviewedAt: true,
@@ -2746,21 +2747,28 @@ export class AdminService {
     if (!profile) throw new NotFoundException('Community profile not found');
 
     let pendingRevision = profile.pendingRevision as
-      | (Record<string, unknown> & { logoKey?: string; secondaryImageKey?: string; pastEvents?: { name?: string; description?: string; imageKeys?: string[] }[] })
+      | (Record<string, unknown> & {
+          logoKey?: string;
+          secondaryImageKey?: string;
+          pastEvents?: { name?: string; description?: string; imageKeys?: string[] }[];
+          brandsWorkedWith?: { brandName?: string; logoKey?: string }[];
+        })
       | null;
     if (pendingRevision) {
-      const [revisionLogoUrl, revisionSecondaryImageUrl, revisionPastEvents] = await Promise.all([
+      const [revisionLogoUrl, revisionSecondaryImageUrl, revisionPastEvents, revisionBrandsWorkedWith] = await Promise.all([
         pendingRevision.logoKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.logoKey) : undefined,
         pendingRevision.secondaryImageKey
           ? this.storageService.getPresignedDownloadUrl(pendingRevision.secondaryImageKey)
           : undefined,
         this.withPastEventImageUrls(pendingRevision.pastEvents),
+        this.withBrandsWorkedWithLogoUrls(pendingRevision.brandsWorkedWith),
       ]);
       pendingRevision = {
         ...pendingRevision,
         logoUrl: revisionLogoUrl,
         secondaryImageUrl: revisionSecondaryImageUrl,
         pastEvents: revisionPastEvents,
+        brandsWorkedWith: revisionBrandsWorkedWith,
       };
     }
 
@@ -2769,8 +2777,24 @@ export class AdminService {
       logoUrl: await this.storageService.getPresignedDownloadUrl(profile.logoKey),
       secondaryImageUrl: profile.secondaryImageKey ? await this.storageService.getPresignedDownloadUrl(profile.secondaryImageKey) : null,
       pastEvents: await this.withPastEventImageUrls(profile.pastEvents as { name?: string; description?: string; imageKeys?: string[] }[] | null),
+      brandsWorkedWith: await this.withBrandsWorkedWithLogoUrls(profile.brandsWorkedWith as { brandName?: string; logoKey?: string }[] | null),
       pendingRevision,
     };
+  }
+
+  // Signs each brand-worked-with entry's logo key into a downloadable URL — stored as raw JSON
+  // (array of { brandName?, logoKey? }), entirely optional at every level, no maximum count.
+  private async withBrandsWorkedWithLogoUrls(
+    brandsWorkedWith: { brandName?: string | null; logoKey?: string | null }[] | null | undefined,
+  ) {
+    if (!brandsWorkedWith || !Array.isArray(brandsWorkedWith)) return [];
+    return Promise.all(
+      brandsWorkedWith.map(async (brand) => ({
+        brandName: brand?.brandName ?? null,
+        logoKey: brand?.logoKey ?? null,
+        logoUrl: brand?.logoKey ? await this.storageService.getPresignedDownloadUrl(brand.logoKey) : null,
+      })),
+    );
   }
 
   // Signs each past event's image keys into downloadable URLs — pastEvents is stored as raw
@@ -2858,6 +2882,9 @@ export class AdminService {
         reviewedAt: new Date(),
         categories: { create: dto.categoryIds.map((categoryId) => ({ categoryId })) },
         pastEvents: dto.pastEvents ? (JSON.parse(JSON.stringify(dto.pastEvents)) as Prisma.InputJsonValue) : Prisma.JsonNull,
+        brandsWorkedWith: dto.brandsWorkedWith
+          ? (JSON.parse(JSON.stringify(dto.brandsWorkedWith)) as Prisma.InputJsonValue)
+          : Prisma.JsonNull,
       },
     });
 
@@ -2929,6 +2956,9 @@ export class AdminService {
         }),
         ...(dto.pastEvents !== undefined && {
           pastEvents: JSON.parse(JSON.stringify(dto.pastEvents)) as Prisma.InputJsonValue,
+        }),
+        ...(dto.brandsWorkedWith !== undefined && {
+          brandsWorkedWith: JSON.parse(JSON.stringify(dto.brandsWorkedWith)) as Prisma.InputJsonValue,
         }),
         ...(dto.isHidden !== undefined && { isHidden: dto.isHidden }),
       },
@@ -3097,6 +3127,9 @@ export class AdminService {
           ...(fieldChanges.experiencesPerYear !== undefined && { experiencesPerYear: fieldChanges.experiencesPerYear }),
           ...(fieldChanges.pastEvents !== undefined && {
             pastEvents: JSON.parse(JSON.stringify(fieldChanges.pastEvents)) as Prisma.InputJsonValue,
+          }),
+          ...(fieldChanges.brandsWorkedWith !== undefined && {
+            brandsWorkedWith: JSON.parse(JSON.stringify(fieldChanges.brandsWorkedWith)) as Prisma.InputJsonValue,
           }),
           pendingRevision: Prisma.JsonNull,
           reviewedBy: adminId,

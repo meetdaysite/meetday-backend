@@ -41,6 +41,7 @@ const DEAL_PAYMENT_DUE_DAYS = 3;
 
 // Shape of one raw stored past-event entry (HostCommunityProfile.pastEvents JSON column).
 type PastEventLike = { name?: string; description?: string; imageKeys?: string[] };
+type BrandWorkedWithLike = { brandName?: string; logoKey?: string };
 
 @Injectable()
 export class SponsorshipService {
@@ -119,6 +120,19 @@ export class SponsorshipService {
         imageUrls: await Promise.all(
           (event?.imageKeys ?? []).map((key) => this.storageService.getPresignedDownloadUrl(key)),
         ),
+      })),
+    );
+  }
+
+  // Signs each brand-worked-with entry's logo key into a downloadable URL — stored as raw JSON
+  // (array of { brandName?, logoKey? }), entirely optional at every level, no maximum count.
+  private async withBrandsWorkedWithLogoUrls(brandsWorkedWith: BrandWorkedWithLike[] | null | undefined) {
+    if (!brandsWorkedWith || !Array.isArray(brandsWorkedWith)) return [];
+    return Promise.all(
+      brandsWorkedWith.map(async (brand) => ({
+        brandName: brand?.brandName ?? null,
+        logoKey: brand?.logoKey ?? null,
+        logoUrl: brand?.logoKey ? await this.storageService.getPresignedDownloadUrl(brand.logoKey) : null,
       })),
     );
   }
@@ -380,17 +394,19 @@ export class SponsorshipService {
 
     let community: Record<string, unknown> | null = null;
     if (communityProfile && communityProfile.approvalStatus === 'APPROVED') {
-      const { categories, logoKey, secondaryImageKey, pastEvents, ...communityRest } = communityProfile;
-      const [logoUrl, secondaryImageUrl, pastEventsWithUrls] = await Promise.all([
+      const { categories, logoKey, secondaryImageKey, pastEvents, brandsWorkedWith, ...communityRest } = communityProfile;
+      const [logoUrl, secondaryImageUrl, pastEventsWithUrls, brandsWorkedWithWithUrls] = await Promise.all([
         logoKey ? this.storageService.getPresignedDownloadUrl(logoKey) : null,
         secondaryImageKey ? this.storageService.getPresignedDownloadUrl(secondaryImageKey) : null,
         this.withPastEventImageUrls(pastEvents as PastEventLike[] | null),
+        this.withBrandsWorkedWithLogoUrls(brandsWorkedWith as BrandWorkedWithLike[] | null),
       ]);
       community = {
         ...communityRest,
         logoUrl,
         secondaryImageUrl,
         pastEvents: pastEventsWithUrls,
+        brandsWorkedWith: brandsWorkedWithWithUrls,
         categories: categories.map((c) => c.category),
       };
     }
@@ -522,7 +538,7 @@ export class SponsorshipService {
   async listApprovedCommunities() {
     const profiles = await this.prisma.hostCommunityProfile.findMany({
       where: { approvalStatus: 'APPROVED', isHidden: false },
-            select: {
+      select: {
         id: true,
         hostProfileId: true,
         name: true,
@@ -533,6 +549,7 @@ export class SponsorshipService {
         avgGuestCount: true,
         experiencesPerYear: true,
         pastEvents: true,
+        brandsWorkedWith: true,
         categories: { select: { category: { select: { id: true, name: true } } } },
         hostProfile: {
           select: {
@@ -544,7 +561,7 @@ export class SponsorshipService {
       orderBy: { updatedAt: 'desc' },
     });
 
-        const signPastEvents = async (pastEvents) => {
+    const signPastEvents = async (pastEvents) => {
       if (!pastEvents || !Array.isArray(pastEvents)) return [];
       return Promise.all(
         pastEvents.map(async (event) => ({
@@ -559,7 +576,7 @@ export class SponsorshipService {
     };
 
     const communities = await Promise.all(
-      profiles.map(async ({ logoKey, secondaryImageKey, categories, hostProfile, pastEvents, ...rest }) => ({
+      profiles.map(async ({ logoKey, secondaryImageKey, categories, hostProfile, pastEvents, brandsWorkedWith, ...rest }) => ({
         ...rest,
         logoUrl: logoKey ? await this.storageService.getPresignedDownloadUrl(logoKey) : null,
         secondaryImageUrl: secondaryImageKey ? await this.storageService.getPresignedDownloadUrl(secondaryImageKey) : null,
@@ -567,6 +584,7 @@ export class SponsorshipService {
         operatingCities: hostProfile?.operatingCities ?? [],
         socialLinks: hostProfile?.socialLinks ?? null,
         pastEvents: await signPastEvents(pastEvents),
+        brandsWorkedWith: await this.withBrandsWorkedWithLogoUrls(brandsWorkedWith as BrandWorkedWithLike[] | null),
       })),
     );
 
