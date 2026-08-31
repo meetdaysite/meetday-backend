@@ -57,10 +57,22 @@ export class AuthService {
     // Re-registering for a profile type they already have (or a plain USER re-register) is
     // still a conflict.
     if (existing) {
+      const existingEmail = existing.email ?? tokenUser.email;
+
       if (dto.accountType === 'HOST' && !existing.hostProfile) {
+        const pendingHostInvite = existingEmail ? await this.teamAccessService.matchPendingHostInvite(existingEmail) : null;
+        if (pendingHostInvite) {
+          await this.teamAccessService.attachUserToHostInvite(pendingHostInvite.id, existing.id);
+          return this.loadUserWithHostProfile(existing.id, pendingHostInvite.hostProfileId);
+        }
         return this.attachHostProfile(existing.id, dto);
       }
       if (dto.accountType === 'BRAND' && !existing.brandProfile) {
+        const pendingBrandInvite = existingEmail ? await this.teamAccessService.matchPendingBrandInvite(existingEmail) : null;
+        if (pendingBrandInvite) {
+          await this.teamAccessService.attachUserToBrandInvite(pendingBrandInvite.id, existing.id);
+          return this.loadUserWithBrandProfile(existing.id, pendingBrandInvite.brandProfileId);
+        }
         return this.attachBrandProfile(existing.id, dto);
       }
       throw new ConflictException('User already registered');
@@ -343,6 +355,55 @@ export class AuthService {
     void this.notifyAdminsOfNewSignup('brand-welcome', { brandName: result.brandProfile.brandName, brandEmail: result.email });
 
     return result;
+  }
+
+  // Re-fetches an already-existing user together with the (existing, shared) host/brand
+  // profile they've just been attached to as a team member — used both for a brand-new
+  // signup that matched a pending invite and for an EXISTING user (already has a plain USER
+  // or admin account) whose email matched one.
+  private async loadUserWithHostProfile(userId: string, hostProfileId: string) {
+    const [user, hostProfile] = await Promise.all([
+      this.prisma.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          firstName: true,
+          lastName: true,
+          avatarUrl: true,
+          isActive: true,
+          role: { select: { name: true } },
+          createdAt: true,
+        },
+      }),
+      this.prisma.hostProfile.findUniqueOrThrow({
+        where: { id: hostProfileId },
+        include: { categories: { include: { category: true } }, address: true },
+      }),
+    ]);
+    return { ...user, hostProfile };
+  }
+
+  private async loadUserWithBrandProfile(userId: string, brandProfileId: string) {
+    const [user, brandProfile] = await Promise.all([
+      this.prisma.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          firstName: true,
+          lastName: true,
+          avatarUrl: true,
+          isActive: true,
+          role: { select: { name: true } },
+          createdAt: true,
+        },
+      }),
+      this.prisma.brandProfile.findUniqueOrThrow({ where: { id: brandProfileId } }),
+    ]);
+    return { ...user, brandProfile };
   }
 
   // Joins an EXISTING HostProfile as a full-access team member instead of creating a new one —

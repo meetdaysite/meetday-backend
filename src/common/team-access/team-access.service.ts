@@ -233,4 +233,21 @@ export class TeamAccessService {
       select: { id: true, brandProfileId: true },
     });
   }
+
+  // Links an ALREADY-registered User (e.g. someone who already has a plain USER or admin
+  // account under this email) to a pending invite — used when register() finds an `existing`
+  // user row instead of creating a brand-new one.
+  async attachUserToHostInvite(inviteId: string, userId: string): Promise<void> {
+    await this.prisma.hostTeamMember.update({
+      where: { id: inviteId },
+      data: { userId, status: 'ACTIVE', joinedAt: new Date() },
+    });
+  }
+
+  async attachUserToBrandInvite(inviteId: string, userId: string): Promise<void> {
+    await this.prisma.brandTeamMember.update({
+      where: { id: inviteId },
+      data: { userId, status: 'ACTIVE', joinedAt: new Date() },
+    });
+  }
 }
