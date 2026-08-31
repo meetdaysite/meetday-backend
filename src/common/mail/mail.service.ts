@@ -25,6 +25,7 @@ import { userActionTemplate } from './templates/user-action.template';
 import { brandInterestTemplate } from './templates/brand-interest.template';
 import { announcementTemplate } from './templates/announcement.template';
 import { unreadChatMessageTemplate } from './templates/unread-chat-message.template';
+import { teamInviteTemplate } from './templates/team-invite.template';
 
 // Admin-facing operational alerts (new signups, pending reviews) are sent from a distinct
 // address from the regular user-facing transactional emails (host-approved, tickets, etc).
@@ -174,6 +175,14 @@ export class MailService {
 
   async sendAdminInvite(to: string, roleName: string, resetLink: string): Promise<void> {
     await this.sendMail(to, `You've been invited to Meetday as ${roleName}`, adminInviteTemplate(to, roleName, resetLink));
+  }
+
+  async sendTeamInvite(to: string, inviterName: string, accountName: string, accountTypeLabel: string, signupUrl: string): Promise<void> {
+    await this.sendMail(
+      to,
+      `You've been invited to join ${accountName} on Meetday`,
+      teamInviteTemplate(inviterName, accountName, accountTypeLabel, signupUrl),
+    );
   }
 
   async sendEventApproved(to: string, hostName: string, eventTitle: string): Promise<void> {

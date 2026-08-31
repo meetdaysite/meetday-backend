@@ -51,6 +51,13 @@ model User {
   adminProfile    AdminProfile?
   brandProfile    BrandProfile?
 
+  // Team membership — a User can additionally act as a full-access team member of a
+  // Brand/Host(Community) profile they do not own (see BrandTeamMember/HostTeamMember).
+  brandTeamMemberships BrandTeamMember[] @relation("BrandTeamMemberUser")
+  brandTeamInvitesSent BrandTeamMember[] @relation("BrandTeamMemberInvitedBy")
+  hostTeamMemberships  HostTeamMember[]  @relation("HostTeamMemberUser")
+  hostTeamInvitesSent  HostTeamMember[]  @relation("HostTeamMemberInvitedBy")
+
   // Back-relations for admin audit trails
   approvedHostProfiles    HostProfile[]              @relation("HostApprovedBy")
   subscriptionPlanChanges SubscriptionPlanHistory[]  @relation("PlanChangedBy")
@@ -403,6 +410,7 @@ model HostProfile {
   sponsorshipProposals SponsorshipProposal[]
   communityProfile     HostCommunityProfile?
   campaignInterests    SponsorshipInterest[]
+  teamMembers          HostTeamMember[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -435,6 +443,7 @@ model BrandProfile {
   categories BrandExperienceCategory[]
   interests  SponsorshipInterest[]
   campaigns  Campaign[]
+  teamMembers BrandTeamMember[]
 
   approvalStatus HostApprovalStatus @default(PENDING)
 
@@ -1373,6 +1382,63 @@ model HostCommunityProfileCategory {
   @@id([hostCommunityProfileId, categoryId])
   @@index([categoryId])
   @@map("host_community_profile_categories")
+}
+
+enum TeamMemberStatus {
+  PENDING // invited by email, hasn't signed up yet
+  ACTIVE // signed up and matched to this invite — full access to the Brand/Community dashboard
+}
+
+// Team invite/membership for a BRAND account — any existing member (owner or ACTIVE member) can
+// invite a new member by email. Row is created PENDING at invite time; once someone signs up
+// with a matching email, register() auto-links them (sets userId, status=ACTIVE) instead of
+// creating a brand-new BrandProfile. Members get full access, same as the owner.
+model BrandTeamMember {
+  id             String       @id @default(uuid())
+  brandProfileId String
+  brandProfile   BrandProfile @relation(fields: [brandProfileId], references: [id], onDelete: Cascade)
+
+  email  String // normalized lowercase — matched against the signup email
+  userId String?
+  user   User?   @relation("BrandTeamMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  status    TeamMemberStatus @default(PENDING)
+  invitedBy String
+  inviter   User             @relation("BrandTeamMemberInvitedBy", fields: [invitedBy], references: [id])
+  joinedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([brandProfileId, email])
+  @@index([brandProfileId])
+  @@index([email])
+  @@map("brand_team_members")
+}
+
+// Team invite/membership for a HOST (branded "Community" in the UI) account — mirrors
+// BrandTeamMember exactly, see comment there.
+model HostTeamMember {
+  id            String      @id @default(uuid())
+  hostProfileId String
+  hostProfile   HostProfile @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
+
+  email  String
+  userId String?
+  user   User?   @relation("HostTeamMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  status    TeamMemberStatus @default(PENDING)
+  invitedBy String
+  inviter   User             @relation("HostTeamMemberInvitedBy", fields: [invitedBy], references: [id])
+  joinedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([hostProfileId, email])
+  @@index([hostProfileId])
+  @@index([email])
+  @@map("host_team_members")
 }
 
 // ─── Orders ───────────────────────────────────────────────────────────────────

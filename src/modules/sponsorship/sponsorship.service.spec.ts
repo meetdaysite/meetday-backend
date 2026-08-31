@@ -7,6 +7,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { TeamAccessService } from '../../common/team-access/team-access.service';
 
 function makePrisma() {
   const prisma: any = {
@@ -24,9 +25,32 @@ function makePrisma() {
 const mockNotifications = { create: jest.fn().mockResolvedValue(undefined) };
 const mockMailQueue = { add: jest.fn().mockResolvedValue(undefined) };
 
+// Delegates to the same prisma.hostProfile/brandProfile mocks each test already sets up via
+// `mockResolvedValue`, so existing `where: { userId }`-style test setups keep working unchanged.
+let prisma: ReturnType<typeof makePrisma>;
+const mockTeamAccessService = {
+  getHostProfileIds: jest.fn(async (userId: string) => {
+    const p = await prisma.hostProfile.findUnique({ where: { userId } });
+    return p ? [p.id] : [];
+  }),
+  getBrandProfileIds: jest.fn(async (userId: string) => {
+    const p = await prisma.brandProfile.findUnique({ where: { userId } });
+    return p ? [p.id] : [];
+  }),
+  resolveHostProfileId: jest.fn(async (userId: string) => {
+    const p = await prisma.hostProfile.findUnique({ where: { userId } });
+    if (!p) throw new NotFoundException('Host profile not found');
+    return p.id;
+  }),
+  resolveBrandProfileId: jest.fn(async (userId: string) => {
+    const p = await prisma.brandProfile.findUnique({ where: { userId } });
+    if (!p) throw new NotFoundException('Brand profile not found');
+    return p.id;
+  }),
+};
+
 describe('SponsorshipService — TriChat', () => {
   let service: SponsorshipService;
-  let prisma: ReturnType<typeof makePrisma>;
 
   beforeEach(async () => {
     prisma = makePrisma();
@@ -41,6 +65,7 @@ describe('SponsorshipService — TriChat', () => {
         { provide: AuditLogService, useValue: { log: jest.fn() } },
         { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue(10) } },
         { provide: getQueueToken('mail'), useValue: mockMailQueue },
+        { provide: TeamAccessService, useValue: mockTeamAccessService },
       ],
     }).compile();
 

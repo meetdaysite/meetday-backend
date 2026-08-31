@@ -70,6 +70,23 @@ export class MailProcessor {
     }
   }
 
+  @Process('team-invite')
+  async handleTeamInvite(
+    job: Job<{ to: string; inviterName: string; accountName: string; accountTypeLabel: string; signupUrl: string }>,
+  ) {
+    try {
+      await this.mailService.sendTeamInvite(
+        job.data.to,
+        job.data.inviterName,
+        job.data.accountName,
+        job.data.accountTypeLabel,
+        job.data.signupUrl,
+      );
+    } catch (error) {
+      this.logger.error(`Failed to process team-invite mail job: ${(error as Error).message}`);
+    }
+  }
+
   @Process('event-approved')
   async handleEventApproved(job: Job<{ to: string; hostName: string; eventTitle: string }>) {
     try {

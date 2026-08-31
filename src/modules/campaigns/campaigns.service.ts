@@ -4,6 +4,7 @@ import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
 import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { TeamAccessService } from '../../common/team-access/team-access.service';
 
 @Injectable()
 export class CampaignsService {
@@ -13,11 +14,13 @@ export class CampaignsService {
     private readonly prisma: PrismaService,
     private readonly storageService: StorageService,
     private readonly notificationsService: NotificationsService,
+    private readonly teamAccessService: TeamAccessService,
   ) {}
 
   private async getBrandProfile(userId: string) {
+    const brandProfileId = await this.teamAccessService.resolveBrandProfileId(userId);
     const brandProfile = await this.prisma.brandProfile.findUnique({
-      where: { userId },
+      where: { id: brandProfileId },
     });
     if (!brandProfile) {
       throw new NotFoundException('Brand profile not found');
@@ -181,8 +184,9 @@ export class CampaignsService {
   }
 
   async markInterest(userId: string, campaignId: string) {
+    const hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
     const hostProfile = await this.prisma.hostProfile.findUnique({
-      where: { userId },
+      where: { id: hostProfileId },
       include: { communityProfile: true },
     });
     if (!hostProfile) {

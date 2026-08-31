@@ -11,6 +11,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
 import { ConsentService } from '../consent/consent.service';
 import { StorageService } from '../../common/storage/storage.service';
+import { TeamAccessService } from '../../common/team-access/team-access.service';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -36,6 +37,10 @@ function makePrisma() {
 
 const mockCrypto = { encrypt: jest.fn().mockReturnValue('enc::pan'), decrypt: jest.fn() };
 const mockMailQueue = { add: jest.fn().mockResolvedValue(undefined) };
+const mockTeamAccessService = {
+  matchPendingHostInvite: jest.fn().mockResolvedValue(null),
+  matchPendingBrandInvite: jest.fn().mockResolvedValue(null),
+};
 
 const tokenUser: TokenUser = {
   uid: 'firebase-uid-1',
@@ -74,6 +79,7 @@ describe('AuthService', () => {
         { provide: ConsentService, useValue: { hasActiveConsent: jest.fn().mockResolvedValue(false), grantConsent: jest.fn().mockResolvedValue(undefined) } },
         { provide: StorageService, useValue: { getPresignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/avatar') } },
         { provide: getQueueToken('mail'), useValue: mockMailQueue },
+        { provide: TeamAccessService, useValue: mockTeamAccessService },
       ],
     }).compile();
 

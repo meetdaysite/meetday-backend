@@ -10,9 +10,10 @@ import { SponsorshipChatGateway } from './sponsorship-chat.gateway';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { StorageModule } from '../../common/storage/storage.module';
 import { DocumentExtractionModule } from '../../common/document-extraction/document-extraction.module';
+import { TeamAccessModule } from '../../common/team-access/team-access.module';
 
 @Module({
-  imports: [NotificationsModule, StorageModule, DocumentExtractionModule, BullModule.registerQueue({ name: 'mail' })],
+  imports: [NotificationsModule, StorageModule, DocumentExtractionModule, BullModule.registerQueue({ name: 'mail' }), TeamAccessModule],
   controllers: [SponsorshipController],
   providers: [SponsorshipService, SponsorshipInvoicePdfService, SponsorshipReportPdfService, ProposalCopilotService, UnreadChatMailProcessor, SponsorshipChatGateway],
   exports: [SponsorshipService],

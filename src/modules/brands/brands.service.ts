@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { UpdateBrandProfileDto } from './dto/update-brand-profile.dto';
+import { TeamAccessService } from '../../common/team-access/team-access.service';
 
 const BRAND_PROFILE_SELECT = {
   id: true,
@@ -34,27 +35,24 @@ export class BrandsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storageService: StorageService,
+    private readonly teamAccessService: TeamAccessService,
   ) {}
 
   async getMe(userId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        email: true,
-        phone: true,
-        firstName: true,
-        lastName: true,
-        createdAt: true,
-        brandProfile: { select: BRAND_PROFILE_SELECT },
-      },
-    });
-    if (!user?.brandProfile) throw new NotFoundException('Brand profile not found');
+    const brandProfileId = await this.teamAccessService.resolveBrandProfileId(userId);
+    const [user, brandProfile] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, email: true, phone: true, firstName: true, lastName: true, createdAt: true },
+      }),
+      this.prisma.brandProfile.findUnique({ where: { id: brandProfileId }, select: BRAND_PROFILE_SELECT }),
+    ]);
+    if (!user) throw new NotFoundException('User not found');
+    if (!brandProfile) throw new NotFoundException('Brand profile not found');
 
-    const { brandProfile, ...rest } = user;
     const { categories, logoKey, ...brandRest } = brandProfile;
     return {
-      ...rest,
+      ...user,
       ...brandRest,
       logoUrl: logoKey ? await this.storageService.getPresignedDownloadUrl(logoKey) : null,
       categories: categories.map((c) => c.category),
@@ -63,7 +61,8 @@ export class BrandsService {
   }
 
   async updateProfile(userId: string, dto: UpdateBrandProfileDto) {
-    const profile = await this.prisma.brandProfile.findUnique({ where: { userId }, select: { id: true } });
+    const profileId = await this.teamAccessService.resolveBrandProfileId(userId);
+    const profile = await this.prisma.brandProfile.findUnique({ where: { id: profileId }, select: { id: true } });
     if (!profile) throw new NotFoundException('Brand profile not found');
 
     if (dto.categoryIds !== undefined) {
@@ -101,5 +100,15 @@ export class BrandsService {
     });
 
     return this.getMe(userId);
+  }
+
+  async listTeamMembers(userId: string) {
+    const brandProfileId = await this.teamAccessService.resolveBrandProfileId(userId);
+    return this.teamAccessService.listBrandTeamMembers(brandProfileId);
+  }
+
+  async inviteTeamMember(userId: string, email: string) {
+    const brandProfileId = await this.teamAccessService.resolveBrandProfileId(userId);
+    return this.teamAccessService.inviteBrandTeamMember(brandProfileId, email, userId);
   }
 }

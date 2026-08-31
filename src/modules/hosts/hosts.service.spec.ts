@@ -21,6 +21,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { ConsentService } from '../consent/consent.service';
+import { TeamAccessService } from '../../common/team-access/team-access.service';
 
 const TEST_WEBHOOK_SECRET = 'test-webhook-secret';
 const sign = (rawBody: Buffer) => createHmac('sha256', TEST_WEBHOOK_SECRET).update(rawBody).digest('hex');
@@ -81,6 +82,13 @@ const hostProfileId = 'hp-uuid';
 const payoutAccountId = 'pa-uuid';
 const categoryId = '11111111-1111-1111-1111-111111111111';
 
+const mockTeamAccessService = {
+  resolveHostProfileId: jest.fn().mockImplementation(async () => hostProfileId),
+  getHostProfileIds: jest.fn().mockImplementation(async () => [hostProfileId]),
+  resolveBrandProfileId: jest.fn(),
+  getBrandProfileIds: jest.fn(),
+};
+
 const baseProfile = {
   id: hostProfileId,
   userId,
@@ -127,6 +135,7 @@ describe('HostsService', () => {
         { provide: StorageService, useValue: { getPresignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/img') } },
         { provide: AuditLogService, useValue: { log: jest.fn() } },
         { provide: ConsentService, useValue: { hasActiveConsent: jest.fn().mockResolvedValue(true), recordConsent: jest.fn().mockResolvedValue(undefined) } },
+        { provide: TeamAccessService, useValue: mockTeamAccessService },
       ],
     }).compile();
 
@@ -490,6 +499,7 @@ describe('HostsService', () => {
           { provide: StorageService, useValue: { getPresignedDownloadUrl: jest.fn() } },
           { provide: AuditLogService, useValue: { log: jest.fn() } },
           { provide: ConsentService, useValue: { hasActiveConsent: jest.fn(), recordConsent: jest.fn() } },
+          { provide: TeamAccessService, useValue: mockTeamAccessService },
         ],
       }).compile();
       const svc = module.get(HostsService);

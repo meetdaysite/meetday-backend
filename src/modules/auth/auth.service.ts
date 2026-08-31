@@ -16,6 +16,7 @@ import { ConsentService } from '../consent/consent.service';
 import { RegisterDto } from './dto/register.dto';
 import { CompleteProfileDto } from './dto/complete-profile.dto';
 import { ADMIN_ALERT_EMAILS } from '../../common/mail/admin-recipients.constant';
+import { TeamAccessService } from '../../common/team-access/team-access.service';
 
 export interface TokenUser {
   uid: string;
@@ -36,6 +37,7 @@ export class AuthService {
     private readonly cryptoService: CryptoService,
     private readonly consentService: ConsentService,
     @InjectQueue('mail') private readonly mailQueue: Queue,
+    private readonly teamAccessService: TeamAccessService,
   ) {}
 
   async register(tokenUser: TokenUser, dto: RegisterDto) {
@@ -67,9 +69,21 @@ export class AuthService {
     // Resolve identity fields — token is authoritative for email/phone/avatar
     const resolved = this.resolveIdentity(tokenUser, dto);
 
+    // Email-match team invite: if this email has a PENDING invite to an existing Brand/Host
+    // (Community) account, join that account as a full-access team member instead of creating
+    // a brand-new profile — regardless of what hostType/brandName etc. was submitted.
+    const pendingHostInvite =
+      dto.accountType === 'HOST' && resolved.email ? await this.teamAccessService.matchPendingHostInvite(resolved.email) : null;
+    const pendingBrandInvite =
+      dto.accountType === 'BRAND' && resolved.email ? await this.teamAccessService.matchPendingBrandInvite(resolved.email) : null;
+
     let result: { id: string };
     try {
-      if (dto.accountType === 'HOST') {
+      if (pendingHostInvite) {
+        result = await this.joinAsHostTeamMember(tokenUser.uid, resolved, pendingHostInvite);
+      } else if (pendingBrandInvite) {
+        result = await this.joinAsBrandTeamMember(tokenUser.uid, resolved, pendingBrandInvite);
+      } else if (dto.accountType === 'HOST') {
         result = await this.registerHost(tokenUser.uid, resolved, dto);
       } else if (dto.accountType === 'BRAND') {
         result = await this.registerBrand(tokenUser.uid, resolved, dto);
@@ -327,6 +341,101 @@ export class AuthService {
     });
 
     void this.notifyAdminsOfNewSignup('brand-welcome', { brandName: result.brandProfile.brandName, brandEmail: result.email });
+
+    return result;
+  }
+
+  // Joins an EXISTING HostProfile as a full-access team member instead of creating a new one —
+  // used when the signing-up email matches a PENDING HostTeamMember invite. hostType/
+  // communityName/etc. from the request are ignored: the profile already exists.
+  private async joinAsHostTeamMember(
+    firebaseUid: string,
+    resolved: ResolvedIdentity,
+    invite: { id: string; hostProfileId: string },
+  ) {
+    const hostRole = await this.prisma.role.findUniqueOrThrow({ where: { name: 'HOST' } });
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          firebaseUid,
+          email: resolved.email,
+          phone: resolved.phone,
+          firstName: resolved.firstName,
+          lastName: resolved.lastName,
+          avatarUrl: resolved.avatarUrl,
+          roleId: hostRole.id,
+        },
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          firstName: true,
+          lastName: true,
+          avatarUrl: true,
+          isActive: true,
+          role: { select: { name: true } },
+          createdAt: true,
+        },
+      });
+
+      await tx.hostTeamMember.update({
+        where: { id: invite.id },
+        data: { userId: user.id, status: 'ACTIVE', joinedAt: new Date() },
+      });
+
+      const hostProfile = await tx.hostProfile.findUniqueOrThrow({
+        where: { id: invite.hostProfileId },
+        include: { categories: { include: { category: true } }, address: true },
+      });
+
+      return { ...user, hostProfile };
+    });
+
+    return result;
+  }
+
+  // Joins an EXISTING BrandProfile as a full-access team member — mirrors joinAsHostTeamMember.
+  private async joinAsBrandTeamMember(
+    firebaseUid: string,
+    resolved: ResolvedIdentity,
+    invite: { id: string; brandProfileId: string },
+  ) {
+    const brandRole = await this.prisma.role.findUniqueOrThrow({ where: { name: 'BRAND' } });
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          firebaseUid,
+          email: resolved.email,
+          phone: resolved.phone,
+          firstName: resolved.firstName,
+          lastName: resolved.lastName,
+          avatarUrl: resolved.avatarUrl,
+          roleId: brandRole.id,
+        },
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          firstName: true,
+          lastName: true,
+          avatarUrl: true,
+          isActive: true,
+          role: { select: { name: true } },
+          createdAt: true,
+        },
+      });
+
+      await tx.brandTeamMember.update({
+        where: { id: invite.id },
+        data: { userId: user.id, status: 'ACTIVE', joinedAt: new Date() },
+      });
+
+      const brandProfile = await tx.brandProfile.findUniqueOrThrow({ where: { id: invite.brandProfileId } });
+
+      return { ...user, brandProfile };
+    });
 
     return result;
   }

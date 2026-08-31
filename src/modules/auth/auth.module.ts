@@ -5,9 +5,10 @@ import * as firebaseAdmin from 'firebase-admin';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { ConsentModule } from '../consent/consent.module';
+import { TeamAccessModule } from '../../common/team-access/team-access.module';
 
 @Module({
-  imports: [ConsentModule, BullModule.registerQueue({ name: 'mail' })],
+  imports: [ConsentModule, BullModule.registerQueue({ name: 'mail' }), TeamAccessModule],
   controllers: [AuthController],
   providers: [AuthService],
 })

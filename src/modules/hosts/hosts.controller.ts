@@ -39,6 +39,7 @@ import { VerifyBankDto } from './dto/submit-kyc.dto';
 import { BankWebhookDto } from './dto/bank-webhook.dto';
 import { UpgradeSubscriptionDto } from './dto/upgrade-subscription.dto';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
+import { InviteTeamMemberDto } from '../../common/team-access/dto/invite-team-member.dto';
 
 @ApiTags('Hosts')
 @ApiBearerAuth('firebase-token')
@@ -370,6 +371,28 @@ export class HostsController {
   @ApiOperation({ summary: 'Deactivate (delete) the community profile' })
   deactivateCommunityProfile(@GetUser('id') userId: string) {
     return this.hostsService.deactivateCommunityProfile(userId);
+  }
+
+  @Get('community/members')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({ summary: "List the community's team members (owner + invited members), name + email visible to everyone" })
+  @ApiOkResponse({ description: 'Array of members, owner first.' })
+  listTeamMembers(@GetUser('id') userId: string) {
+    return this.hostsService.listTeamMembers(userId);
+  }
+
+  @Post('community/members')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'Invite a new team member by email',
+    description: 'Any existing member (owner or active member) can invite someone by email. The invite is auto-matched on signup and grants full dashboard access.',
+  })
+  @ApiOkResponse({ description: 'The created/updated (pending) team member invite.' })
+  @ApiConflictResponse({ description: 'This email is already a member, or is the owner\'s own email.' })
+  inviteTeamMember(@GetUser('id') userId: string, @Body() dto: InviteTeamMemberDto) {
+    return this.hostsService.inviteTeamMember(userId, dto.email);
   }
 
   @Post('kyc/pan/verify')

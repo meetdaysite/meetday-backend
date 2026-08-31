@@ -10,6 +10,7 @@ import { Storage, Bucket } from '@google-cloud/storage';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { RequestUploadUrlDto, UploadContext } from './dto/request-upload-url.dto';
+import { TeamAccessService } from '../team-access/team-access.service';
 
 const PRESIGN_TTL = 900; // 15 minutes
 const PRESIGN_CACHE_TTL = 840; // cache for 14 min — always valid when served
@@ -76,6 +77,7 @@ export class StorageService {
     private readonly configService: ConfigService,
     private readonly redis: RedisService,
     private readonly prisma: PrismaService,
+    private readonly teamAccessService: TeamAccessService,
   ) {
     const keyFile = configService.get<string | undefined>('gcs.keyFile');
     const storage = new Storage({
@@ -249,10 +251,10 @@ export class StorageService {
 
       case UploadContext.SPONSORSHIP_MEDIA:
       case UploadContext.SPONSORSHIP_DOCUMENT: {
-        const hostProfile = await this.prisma.hostProfile.findUnique({ where: { userId } });
+        const [hostProfileId] = await this.teamAccessService.getHostProfileIds(userId);
         let sponsorshipHostProfileId: string;
-        if (hostProfile) {
-          sponsorshipHostProfileId = hostProfile.id;
+        if (hostProfileId) {
+          sponsorshipHostProfileId = hostProfileId;
         } else if (SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '')) {
           // Admin creating a sponsorship proposal directly — files are scoped to the system host.
           sponsorshipHostProfileId = await this.getOrCreateOfficialHostProfileId();
@@ -367,14 +369,18 @@ export class StorageService {
           where: { id: dto.resourceId },
           select: {
             chatStatus: true,
-            sponsorshipProposal: { select: { hostProfile: { select: { userId: true } } } },
-            brandProfile: { select: { userId: true } },
+            sponsorshipProposal: { select: { hostProfile: { select: { id: true } } } },
+            brandProfile: { select: { id: true } },
           },
         });
         if (!interest) throw new NotFoundException('Chat thread not found');
+        const [chatHostProfileIds, chatBrandProfileIds] = await Promise.all([
+          this.teamAccessService.getHostProfileIds(userId),
+          this.teamAccessService.getBrandProfileIds(userId),
+        ]);
         const isParticipant =
-          interest.sponsorshipProposal.hostProfile.userId === userId ||
-          interest.brandProfile.userId === userId ||
+          (!!interest.sponsorshipProposal?.hostProfile.id && chatHostProfileIds.includes(interest.sponsorshipProposal.hostProfile.id)) ||
+          chatBrandProfileIds.includes(interest.brandProfile.id) ||
           SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '');
         if (!isParticipant) throw new ForbiddenException('You do not have access to this chat');
         if (interest.chatStatus !== 'ACCEPTED') {
@@ -400,14 +406,14 @@ export class StorageService {
       case UploadContext.COMMUNITY_PAST_EVENT_MEDIA: {
         // Admins can upload on behalf of a host (create/edit community profile flow) by passing
         // the target hostProfile's UUID as resourceId — hosts themselves never need to (it's
-        // always their own profile), so resourceId is ignored for non-admins.
+        // always their own profile, or a team member's), so resourceId is ignored for non-admins.
         const isAdmin = SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '');
-        const hostProfile =
+        const hostProfileId =
           dto.resourceId && isAdmin
-            ? await this.prisma.hostProfile.findUnique({ where: { id: dto.resourceId }, select: { id: true } })
-            : await this.prisma.hostProfile.findUnique({ where: { userId }, select: { id: true } });
-        if (!hostProfile) throw new NotFoundException('Host profile not found');
-        key = `hosts/${hostProfile.id}/community-profile/past-events/${randomUUID()}.${ext}`;
+            ? (await this.prisma.hostProfile.findUnique({ where: { id: dto.resourceId }, select: { id: true } }))?.id
+            : (await this.teamAccessService.getHostProfileIds(userId))[0];
+        if (!hostProfileId) throw new NotFoundException('Host profile not found');
+        key = `hosts/${hostProfileId}/community-profile/past-events/${randomUUID()}.${ext}`;
         break;
       }
 
@@ -419,11 +425,13 @@ export class StorageService {
         }
         const interest = await this.prisma.sponsorshipInterest.findUnique({
           where: { id: dto.resourceId },
-          select: { sponsorshipProposal: { select: { hostProfile: { select: { userId: true } } } } },
+          select: { sponsorshipProposal: { select: { hostProfile: { select: { id: true } } } } },
         });
         if (!interest) throw new NotFoundException('Chat thread not found');
+        const dealReportHostProfileIds = await this.teamAccessService.getHostProfileIds(userId);
         const isOwner =
-          interest.sponsorshipProposal.hostProfile.userId === userId || SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '');
+          (!!interest.sponsorshipProposal?.hostProfile.id && dealReportHostProfileIds.includes(interest.sponsorshipProposal.hostProfile.id)) ||
+          SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '');
         if (!isOwner) throw new ForbiddenException('You do not own this sponsorship deal');
         key = `sponsorship-deal-reports/${dto.resourceId}/${randomUUID()}.${ext}`;
         break;
@@ -434,12 +442,12 @@ export class StorageService {
         // on behalf of a host (create/edit community profile flow) by passing the target
         // hostProfile's UUID as resourceId — hosts themselves never need to.
         const isAdmin = SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '');
-        const hostProfile =
+        const hostProfileId =
           dto.resourceId && isAdmin
-            ? await this.prisma.hostProfile.findUnique({ where: { id: dto.resourceId }, select: { id: true } })
-            : await this.prisma.hostProfile.findUnique({ where: { userId }, select: { id: true } });
-        if (!hostProfile) throw new NotFoundException('Host profile not found');
-        key = `hosts/${hostProfile.id}/community-profile/brand-logos/${randomUUID()}.${ext}`;
+            ? (await this.prisma.hostProfile.findUnique({ where: { id: dto.resourceId }, select: { id: true } }))?.id
+            : (await this.teamAccessService.getHostProfileIds(userId))[0];
+        if (!hostProfileId) throw new NotFoundException('Host profile not found');
+        key = `hosts/${hostProfileId}/community-profile/brand-logos/${randomUUID()}.${ext}`;
         break;
       }
 

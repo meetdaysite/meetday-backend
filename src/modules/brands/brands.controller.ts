@@ -1,10 +1,11 @@
-import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiConflictResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { BrandsService } from './brands.service';
 import { UpdateBrandProfileDto } from './dto/update-brand-profile.dto';
+import { InviteTeamMemberDto } from '../../common/team-access/dto/invite-team-member.dto';
 
 @ApiTags('Brands')
 @ApiBearerAuth('firebase-token')
@@ -31,5 +32,23 @@ export class BrandsController {
   @ApiOkResponse({ description: 'Updated brand profile.' })
   updateMe(@GetUser('id') userId: string, @Body() dto: UpdateBrandProfileDto) {
     return this.brandsService.updateProfile(userId, dto);
+  }
+
+  @Get('members')
+  @ApiOperation({ summary: "List the brand's team members (owner + invited members), name + email visible to everyone" })
+  @ApiOkResponse({ description: 'Array of members, owner first.' })
+  listTeamMembers(@GetUser('id') userId: string) {
+    return this.brandsService.listTeamMembers(userId);
+  }
+
+  @Post('members')
+  @ApiOperation({
+    summary: 'Invite a new team member by email',
+    description: 'Any existing member (owner or active member) can invite someone by email. The invite is auto-matched on signup and grants full dashboard access.',
+  })
+  @ApiOkResponse({ description: 'The created/updated (pending) team member invite.' })
+  @ApiConflictResponse({ description: "This email is already a member, or is the owner's own email." })
+  inviteTeamMember(@GetUser('id') userId: string, @Body() dto: InviteTeamMemberDto) {
+    return this.brandsService.inviteTeamMember(userId, dto.email);
   }
 }

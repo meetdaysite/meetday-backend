@@ -35,6 +35,7 @@ import {
   COMMUNITY_READY_MIN_CORE,
 } from '../graph/graph.constants';
 import { ADMIN_ALERT_EMAILS } from '../../common/mail/admin-recipients.constant';
+import { TeamAccessService } from '../../common/team-access/team-access.service';
 
 // Shape of one raw stored past-event entry (HostCommunityProfile.pastEvents JSON column).
 type PastEventLike = { name?: string; description?: string; imageKeys?: string[] };
@@ -57,6 +58,7 @@ export class HostsService {
     private readonly storageService: StorageService,
     private readonly auditLogService: AuditLogService,
     private readonly consentService: ConsentService,
+    private readonly teamAccessService: TeamAccessService,
   ) {}
 
   async applyAsHost(userId: string, dto: ApplyHostDto) {
@@ -135,8 +137,9 @@ export class HostsService {
   }
 
   async getOwnHostProfile(userId: string) {
+    const hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
     const profile = await this.prisma.hostProfile.findUnique({
-      where: { userId },
+      where: { id: hostProfileId },
       include: {
         categories: { include: { category: true } },
         address: true,
@@ -161,7 +164,8 @@ export class HostsService {
   }
 
   async updateHostProfile(userId: string, dto: UpdateHostProfileDto) {
-    const profile = await this.prisma.hostProfile.findUnique({ where: { userId } });
+    const hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
+    const profile = await this.prisma.hostProfile.findUnique({ where: { id: hostProfileId } });
     if (!profile) throw new NotFoundException('Host profile not found');
 
     if (dto.categoryIds !== undefined) {
@@ -307,7 +311,8 @@ export class HostsService {
   }
 
   async getCommunityProfile(userId: string) {
-    const hostProfile = await this.prisma.hostProfile.findUnique({ where: { userId }, select: { id: true } });
+    const id = await this.teamAccessService.resolveHostProfileId(userId);
+    const hostProfile = await this.prisma.hostProfile.findUnique({ where: { id }, select: { id: true } });
     if (!hostProfile) throw new NotFoundException('Host profile not found');
 
     const communityProfile = await this.prisma.hostCommunityProfile.findUnique({
@@ -324,8 +329,9 @@ export class HostsService {
   // instead — the live fields (and what brands see) stay untouched until an admin approves it,
   // mirroring the sponsorship-proposal revision flow.
   async activateCommunityProfile(userId: string, dto: ActivateCommunityDto) {
+    const hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
     const hostProfile = await this.prisma.hostProfile.findUnique({
-      where: { userId },
+      where: { id: hostProfileId },
       select: { id: true, communityName: true, user: { select: { firstName: true } } },
     });
     if (!hostProfile) throw new NotFoundException('Host profile not found');
@@ -415,10 +421,21 @@ export class HostsService {
   }
 
   async deactivateCommunityProfile(userId: string) {
-    const hostProfile = await this.prisma.hostProfile.findUnique({ where: { userId }, select: { id: true } });
+    const id = await this.teamAccessService.resolveHostProfileId(userId);
+    const hostProfile = await this.prisma.hostProfile.findUnique({ where: { id }, select: { id: true } });
     if (!hostProfile) throw new NotFoundException('Host profile not found');
 
     await this.prisma.hostCommunityProfile.deleteMany({ where: { hostProfileId: hostProfile.id } });
+  }
+
+  async listTeamMembers(userId: string) {
+    const hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
+    return this.teamAccessService.listHostTeamMembers(hostProfileId);
+  }
+
+  async inviteTeamMember(userId: string, email: string) {
+    const hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
+    return this.teamAccessService.inviteHostTeamMember(hostProfileId, email, userId);
   }
 
   async verifyPanOnly(userId: string) {

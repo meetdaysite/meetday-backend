@@ -30,6 +30,7 @@ import { VerifySponsorshipDealPaymentDto } from './dto/verify-sponsorship-deal-p
 import { ADMIN_ALERT_EMAILS } from '../../common/mail/admin-recipients.constant';
 import { redactPersonalInfo } from '../../common/utils/redact-personal-info.util';
 import { computeDealPaymentBreakdown as computeDealPaymentBreakdownUtil, DEFAULT_SPONSORSHIP_GST_RATE } from '../../common/utils/sponsorship-deal-payment.util';
+import { TeamAccessService } from '../../common/team-access/team-access.service';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const Razorpay = require('razorpay');
@@ -55,6 +56,7 @@ export class SponsorshipService {
     private readonly auditLogService: AuditLogService,
     private readonly configService: ConfigService,
     @InjectQueue('mail') private readonly mailQueue: Queue,
+    private readonly teamAccessService: TeamAccessService,
   ) {
     this.razorpayKeyId = this.configService.get<string>('razorpay.keyId');
     this.razorpayKeySecret = this.configService.get<string>('razorpay.keySecret');
@@ -127,14 +129,18 @@ export class SponsorshipService {
       include: { hostProfile: { select: { userId: true } } },
     });
     if (!proposal) throw new NotFoundException('Sponsorship proposal not found');
-    if (proposal.hostProfile.userId !== userId)
-      throw new ForbiddenException('You do not own this proposal');
+    if (proposal.hostProfile.userId !== userId) {
+      const hostProfileIds = await this.teamAccessService.getHostProfileIds(userId);
+      if (!hostProfileIds.includes(proposal.hostProfileId))
+        throw new ForbiddenException('You do not own this proposal');
+    }
     return proposal;
   }
 
   async createProposal(userId: string, dto: CreateProposalDto) {
+    const hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
     const hostProfile = await this.prisma.hostProfile.findUnique({
-      where: { userId },
+      where: { id: hostProfileId },
       select: { id: true, approvalStatus: true },
     });
     if (!hostProfile) throw new NotFoundException('Host profile not found');
@@ -264,7 +270,8 @@ export class SponsorshipService {
   }
 
   async getMyProposals(userId: string, query: ListProposalsQueryDto) {
-    const hostProfile = await this.prisma.hostProfile.findUnique({ where: { userId }, select: { id: true } });
+    const id = await this.teamAccessService.resolveHostProfileId(userId);
+    const hostProfile = await this.prisma.hostProfile.findUnique({ where: { id }, select: { id: true } });
     if (!hostProfile) throw new NotFoundException('Host profile not found');
 
     const proposals = await this.prisma.sponsorshipProposal.findMany({
@@ -393,9 +400,8 @@ export class SponsorshipService {
 
     let alreadyInterested = false;
     if (userId) {
-      const brand = await this.prisma.brandProfile.findUnique({
-        where: { userId },
-      });
+      const brandProfileIds = await this.teamAccessService.getBrandProfileIds(userId);
+      const brand = brandProfileIds[0] ? { id: brandProfileIds[0] } : null;
       if (brand) {
         const interest = await this.prisma.sponsorshipInterest.findUnique({
           where: {
@@ -419,8 +425,9 @@ export class SponsorshipService {
   // Requires a complete brand profile (name + categories + at least one social link).
   // Idempotent: calling again for the same brand+proposal is a no-op (no duplicate notifications).
   async markInterest(userId: string, proposalId: string) {
+    const brandProfileId = await this.teamAccessService.resolveBrandProfileId(userId);
     const brandProfile = await this.prisma.brandProfile.findUnique({
-      where: { userId },
+      where: { id: brandProfileId },
       select: {
         id: true,
         brandName: true,
@@ -576,8 +583,9 @@ export class SponsorshipService {
     if (proposal.status !== SponsorshipStatus.DRAFT && proposal.status !== SponsorshipStatus.REJECTED)
       throw new ForbiddenException('Only DRAFT or REJECTED proposals can be submitted for review');
 
+    const hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
     const hostProfile = await this.prisma.hostProfile.findUnique({
-      where: { userId },
+      where: { id: hostProfileId },
       select: { communityProfile: { select: { approvalStatus: true } } },
     });
     if (hostProfile?.communityProfile?.approvalStatus !== 'APPROVED') {
@@ -680,11 +688,14 @@ export class SponsorshipService {
   // this status field — the frontend segments the same list by it, no separate query needed.
 
   private async getOwnProfiles(userId: string) {
-    const [hostProfile, brandProfile] = await Promise.all([
-      this.prisma.hostProfile.findUnique({ where: { userId }, select: { id: true } }),
-      this.prisma.brandProfile.findUnique({ where: { userId }, select: { id: true } }),
+    const [hostProfileIds, brandProfileIds] = await Promise.all([
+      this.teamAccessService.getHostProfileIds(userId),
+      this.teamAccessService.getBrandProfileIds(userId),
     ]);
-    return { hostProfile, brandProfile };
+    return {
+      hostProfile: hostProfileIds[0] ? { id: hostProfileIds[0] } : null,
+      brandProfile: brandProfileIds[0] ? { id: brandProfileIds[0] } : null,
+    };
   }
 
   async listMyChats(userId: string, query: ListSponsorshipChatsQueryDto) {
@@ -885,10 +896,20 @@ export class SponsorshipService {
     if (!interest) throw new NotFoundException('Chat thread not found');
 
     const isCampaign = !!interest.campaignId;
-    const isHost = isCampaign
-      ? interest.hostProfile?.userId === userId
-      : interest.sponsorshipProposal?.hostProfile.userId === userId;
-    const isBrand = interest.brandProfile.userId === userId;
+    const participantHostProfileId = isCampaign ? interest.hostProfile?.id : interest.sponsorshipProposal?.hostProfile.id;
+    const participantHostUserId = isCampaign ? interest.hostProfile?.userId : interest.sponsorshipProposal?.hostProfile.userId;
+
+    // Owner check first (cheap, no extra query) — team membership is an additional fallback.
+    let isHost = participantHostUserId === userId;
+    let isBrand = interest.brandProfile.userId === userId;
+    if (!isHost && !isBrand) {
+      const [hostProfileIds, brandProfileIds] = await Promise.all([
+        this.teamAccessService.getHostProfileIds(userId),
+        this.teamAccessService.getBrandProfileIds(userId),
+      ]);
+      isHost = !!participantHostProfileId && hostProfileIds.includes(participantHostProfileId);
+      isBrand = brandProfileIds.includes(interest.brandProfile.id);
+    }
     if (!isHost && !isBrand) throw new ForbiddenException('You do not have access to this chat');
 
     return { interest, senderType: isHost ? ChatSenderType.HOST : ChatSenderType.BRAND };
@@ -1055,22 +1076,29 @@ export class SponsorshipService {
     const interest = await this.prisma.sponsorshipInterest.findUnique({
       where: { id: interestId },
       include: {
-        sponsorshipProposal: { select: { hostProfile: { select: { userId: true } } } },
-        hostProfile: { select: { userId: true } },
-        brandProfile: { select: { userId: true, brandName: true } },
+        sponsorshipProposal: { select: { hostProfile: { select: { id: true, userId: true } } } },
+        hostProfile: { select: { id: true, userId: true } },
+        brandProfile: { select: { id: true, userId: true, brandName: true } },
       },
     });
     if (!interest) throw new NotFoundException('Chat thread not found');
     const isCampaign = !!interest.campaignId;
     const hostUserId = isCampaign ? interest.hostProfile?.userId : interest.sponsorshipProposal?.hostProfile?.userId;
+    const participantHostProfileId = isCampaign ? interest.hostProfile?.id : interest.sponsorshipProposal?.hostProfile?.id;
 
     if (isCampaign) {
       if (interest.brandProfile.userId !== userId) {
-        throw new ForbiddenException('Only the brand can accept this request');
+        const brandProfileIds = await this.teamAccessService.getBrandProfileIds(userId);
+        if (!brandProfileIds.includes(interest.brandProfile.id)) {
+          throw new ForbiddenException('Only the brand can accept this request');
+        }
       }
     } else {
       if (hostUserId !== userId) {
-        throw new ForbiddenException('Only the host can accept this request');
+        const hostProfileIds = await this.teamAccessService.getHostProfileIds(userId);
+        if (!participantHostProfileId || !hostProfileIds.includes(participantHostProfileId)) {
+          throw new ForbiddenException('Only the host can accept this request');
+        }
       }
     }
 
@@ -1503,7 +1531,8 @@ export class SponsorshipService {
   // ── Billing: brand-facing list of all locked deals across chats, with payment breakdown ──
 
   async listBrandDealsBilling(userId: string) {
-    const brandProfile = await this.prisma.brandProfile.findUnique({ where: { userId }, select: { id: true } });
+    const id = await this.teamAccessService.resolveBrandProfileId(userId);
+    const brandProfile = await this.prisma.brandProfile.findUnique({ where: { id }, select: { id: true } });
     if (!brandProfile) throw new NotFoundException('Brand profile not found');
 
     const deals = await this.prisma.sponsorshipDeal.findMany({
