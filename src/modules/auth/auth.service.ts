@@ -40,6 +40,15 @@ export class AuthService {
     private readonly teamAccessService: TeamAccessService,
   ) {}
 
+  // Pre-registration check — lets the onboarding UI skip the full "set up your profile" form
+  // and show a simple "join <accountName>" screen instead, when this email already has a
+  // pending team invite waiting.
+  async checkPendingInvite(email: string | undefined, accountType: 'HOST' | 'BRAND') {
+    if (!email) return { matched: false as const };
+    if (accountType === 'HOST') return this.teamAccessService.checkPendingHostInvite(email);
+    return this.teamAccessService.checkPendingBrandInvite(email);
+  }
+
   async register(tokenUser: TokenUser, dto: RegisterDto) {
     // Pass `deletedAt: undefined` as an explicit own property to bypass the soft-delete
     // middleware (which uses hasOwnProperty to detect the bypass signal). Prisma ignores

@@ -250,4 +250,27 @@ export class TeamAccessService {
       data: { userId, status: 'ACTIVE', joinedAt: new Date() },
     });
   }
+
+  // Lightweight pre-registration check (email + accountName only) — used by the frontend
+  // onboarding pages to skip the full "set up your profile" form when this signup will
+  // actually just join an existing team instead of creating a new profile.
+  async checkPendingHostInvite(email: string): Promise<{ matched: boolean; accountName?: string }> {
+    const invite = await this.matchPendingHostInvite(email);
+    if (!invite) return { matched: false };
+    const hostProfile = await this.prisma.hostProfile.findUnique({
+      where: { id: invite.hostProfileId },
+      select: { communityName: true, displayName: true },
+    });
+    return { matched: true, accountName: hostProfile?.communityName || hostProfile?.displayName || undefined };
+  }
+
+  async checkPendingBrandInvite(email: string): Promise<{ matched: boolean; accountName?: string }> {
+    const invite = await this.matchPendingBrandInvite(email);
+    if (!invite) return { matched: false };
+    const brandProfile = await this.prisma.brandProfile.findUnique({
+      where: { id: invite.brandProfileId },
+      select: { brandName: true },
+    });
+    return { matched: true, accountName: brandProfile?.brandName };
+  }
 }

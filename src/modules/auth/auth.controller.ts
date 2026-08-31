@@ -176,6 +176,23 @@ export class AuthController {
     return this.authService.register(tokenUser, dto);
   }
 
+  @Get('pending-invite')
+  @ApiOperation({
+    summary: 'Check for a pending team invite before registering',
+    description:
+      'Called by the onboarding UI right after Firebase signup, before showing the "set up your profile" form — ' +
+      'if this email has a pending Brand/Community team invite, the UI can skip straight to a "join <accountName>" ' +
+      'step instead (hostType/communityName/brandName etc. are ignored on the actual join anyway).',
+  })
+  @ApiQuery({ name: 'accountType', enum: ['HOST', 'BRAND'] })
+  @ApiOkResponse({ description: '{ matched: boolean, accountName?: string }' })
+  checkPendingInvite(
+    @GetUser() tokenUser: { email?: string },
+    @Query('accountType') accountType: 'HOST' | 'BRAND',
+  ) {
+    return this.authService.checkPendingInvite(tokenUser.email, accountType);
+  }
+
   @Post('activate')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
