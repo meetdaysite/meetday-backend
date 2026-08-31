@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { SocialLinksDto } from '../../hosts/dto/apply-host.dto';
 import { PastEventDto } from '../../hosts/dto/past-event.dto';
+import { BrandWorkedWithDto } from '../../hosts/dto/brand-worked-with.dto';
 
 // Admin creates the community profile already-approved for a host who doesn't have one yet,
 // bypassing the normal PENDING → admin-review flow (see ActivateCommunityDto for the host-side
@@ -61,4 +62,14 @@ export class CreateAdminCommunityProfileDto {
   @ValidateNested({ each: true })
   @Type(() => PastEventDto)
   pastEvents?: PastEventDto[];
+
+  @ApiPropertyOptional({
+    type: [BrandWorkedWithDto],
+    description: 'Optional showcase of brands worked with',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => BrandWorkedWithDto)
+  brandsWorkedWith?: BrandWorkedWithDto[];
 }
