@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -71,6 +72,7 @@ import { SendAnnouncementDto } from './dto/send-announcement.dto';
 import { ListAnnouncementsQueryDto } from './dto/list-announcements-query.dto';
 import { ListSponsorshipChatsQueryDto } from '../sponsorship/dto/list-sponsorship-chats-query.dto';
 import { SendChatMessageDto } from '../sponsorship/dto/send-chat-message.dto';
+import { UpdateChatMessageDto } from '../sponsorship/dto/update-chat-message.dto';
 import { ListSponsorshipDealsQueryDto } from '../sponsorship/dto/list-sponsorship-deals-query.dto';
 import { MarkSponsorshipDealPaidOfflineDto } from './dto/mark-sponsorship-deal-paid-offline.dto';
 
@@ -1707,6 +1709,65 @@ export class AdminController {
     @GetUser('id') adminId: string,
   ) {
     return this.adminService.sendSponsorshipChatMessage(interestId, adminId, dto);
+  }
+
+  @Patch('sponsorship-chats/:interestId/messages/:messageId')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({ summary: 'Edit a message in a sponsorship chat thread' })
+  @ApiOkResponse({ description: 'Message updated.' })
+  @ApiNotFoundResponse({ description: 'Message not found.' })
+  editSponsorshipChatMessage(
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Param('messageId', ParseUUIDPipe) messageId: string,
+    @Body() dto: UpdateChatMessageDto,
+    @GetUser('id') adminId: string,
+  ) {
+    return this.adminService.editSponsorshipChatMessage(interestId, adminId, messageId, dto);
+  }
+
+  @Delete('sponsorship-chats/:interestId/messages/:messageId')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({ summary: 'Delete a message in a sponsorship chat thread' })
+  @ApiOkResponse({ description: 'Message deleted.' })
+  @ApiNotFoundResponse({ description: 'Message not found.' })
+  deleteSponsorshipChatMessage(
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Param('messageId', ParseUUIDPipe) messageId: string,
+    @GetUser('id') adminId: string,
+  ) {
+    return this.adminService.deleteSponsorshipChatMessage(interestId, adminId, messageId);
+  }
+
+  @Get('sponsorship-chats/:interestId/deal')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({ summary: 'Get deal details for a sponsorship chat thread' })
+  @ApiOkResponse({ description: 'Deal details or null.' })
+  getSponsorshipDeal(@Param('interestId', ParseUUIDPipe) interestId: string) {
+    return this.adminService.getSponsorshipDeal(interestId);
+  }
+
+  @Get('sponsorship-chats/:interestId/deal/report')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({ summary: 'Get deliverables report for a sponsorship chat thread' })
+  @ApiOkResponse({ description: 'Deliverables report or null.' })
+  getSponsorshipDealReport(@Param('interestId', ParseUUIDPipe) interestId: string) {
+    return this.adminService.getSponsorshipDealReport(interestId);
+  }
+
+  @Get('sponsorship-chats/:interestId/deal/report/pdf')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({ summary: 'Get deliverables report PDF download URL' })
+  @ApiOkResponse({ description: 'Presigned download URL for the report PDF.' })
+  getSponsorshipDealReportPdfUrl(@Param('interestId', ParseUUIDPipe) interestId: string) {
+    return this.adminService.getSponsorshipDealReportPdfUrl(interestId);
+  }
+
+  @Get('sponsorship-chats/:interestId/deal/invoice')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({ summary: 'Get sponsorship deal invoice PDF download URL' })
+  @ApiOkResponse({ description: 'Presigned download URL for the invoice PDF.' })
+  getSponsorshipDealInvoiceUrl(@Param('interestId', ParseUUIDPipe) interestId: string) {
+    return this.adminService.getSponsorshipDealInvoiceUrl(interestId);
   }
 
   @Get('sponsorship-deals')
