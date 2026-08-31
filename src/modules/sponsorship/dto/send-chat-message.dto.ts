@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsEnum, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class SendChatMessageDto {
@@ -20,4 +20,14 @@ export class SendChatMessageDto {
   @IsOptional()
   @IsUUID()
   replyToId?: string;
+
+  @ApiPropertyOptional({
+    enum: ['HOST', 'BRAND'],
+    description:
+      'Which "hat" you are sending as — only needed to disambiguate the rare case where the same ' +
+      'account owns both the host and brand profile on this interest (self-interest). Ignored otherwise.',
+  })
+  @IsOptional()
+  @IsEnum(['HOST', 'BRAND'])
+  asRole?: 'HOST' | 'BRAND';
 }

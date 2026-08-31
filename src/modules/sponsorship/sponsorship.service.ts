@@ -863,8 +863,11 @@ export class SponsorshipService {
   }
 
   // Verifies the caller is either the host or the brand on this interest and returns which "hat"
-  // they're wearing, for use as senderType when they post a message.
-  private async getInterestForParticipant(userId: string, interestId: string) {
+  // they're wearing, for use as senderType when they post a message. When the SAME account owns
+  // both sides (a single email holding both a Brand and a Community/Host profile, self-interest),
+  // isHost/isBrand are both true — preferredRole (from the caller, who knows which dashboard
+  // they're acting from) disambiguates instead of always defaulting to HOST.
+  private async getInterestForParticipant(userId: string, interestId: string, preferredRole?: 'HOST' | 'BRAND') {
     const interest = await this.prisma.sponsorshipInterest.findUnique({
       where: { id: interestId },
       include: {
@@ -912,7 +915,12 @@ export class SponsorshipService {
     }
     if (!isHost && !isBrand) throw new ForbiddenException('You do not have access to this chat');
 
-    return { interest, senderType: isHost ? ChatSenderType.HOST : ChatSenderType.BRAND };
+    // Ambiguous only when both are true (self-interest edge case) — let the caller's hint break
+    // the tie; otherwise fall back to the pre-existing HOST-first default for compatibility.
+    const senderType =
+      isHost && isBrand && preferredRole ? ChatSenderType[preferredRole] : isHost ? ChatSenderType.HOST : ChatSenderType.BRAND;
+
+    return { interest, senderType };
   }
 
   async listChatMessages(userId: string, interestId: string) {
@@ -1010,7 +1018,7 @@ export class SponsorshipService {
   }
 
   async sendChatMessage(userId: string, interestId: string, dto: SendChatMessageDto) {
-    const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
+    const { interest, senderType } = await this.getInterestForParticipant(userId, interestId, dto.asRole);
     if (interest.chatStatus !== SponsorshipChatStatus.ACCEPTED) {
       throw new BadRequestException('The community must accept this request before you can chat.');
     }
