@@ -16,6 +16,6 @@ import { TeamAccessModule } from '../../common/team-access/team-access.module';
   imports: [NotificationsModule, StorageModule, DocumentExtractionModule, BullModule.registerQueue({ name: 'mail' }), TeamAccessModule],
   controllers: [SponsorshipController],
   providers: [SponsorshipService, SponsorshipInvoicePdfService, SponsorshipReportPdfService, ProposalCopilotService, UnreadChatMailProcessor, SponsorshipChatGateway],
-  exports: [SponsorshipService],
+  exports: [SponsorshipService, SponsorshipInvoicePdfService, SponsorshipReportPdfService],
 })
 export class SponsorshipModule {}

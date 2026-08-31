@@ -50,6 +50,9 @@ import { SendAnnouncementDto } from './dto/send-announcement.dto';
 import { ListAnnouncementsQueryDto } from './dto/list-announcements-query.dto';
 import { ListSponsorshipChatsQueryDto } from '../sponsorship/dto/list-sponsorship-chats-query.dto';
 import { SendChatMessageDto } from '../sponsorship/dto/send-chat-message.dto';
+import { UpdateChatMessageDto } from '../sponsorship/dto/update-chat-message.dto';
+import { SponsorshipInvoicePdfService } from '../sponsorship/sponsorship-invoice-pdf.service';
+import { SponsorshipReportPdfService } from '../sponsorship/sponsorship-report-pdf.service';
 import { RESOLVED_SYSTEM_MESSAGE } from '../meetday-chat/meetday-chat.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -79,6 +82,8 @@ export class AdminService {
     private readonly auditLogService: AuditLogService,
     private readonly interestsService: InterestsService,
     private readonly refundsService: RefundsService,
+    private readonly sponsorshipInvoicePdfService: SponsorshipInvoicePdfService,
+    private readonly sponsorshipReportPdfService: SponsorshipReportPdfService,
   ) {}
 
   async listAdmins(query: ListAdminsQueryDto) {
@@ -2431,6 +2436,42 @@ export class AdminService {
     };
   }
 
+  async editSponsorshipChatMessage(interestId: string, adminId: string, messageId: string, dto: UpdateChatMessageDto) {
+    const message = await this.prisma.sponsorshipChatMessage.findUnique({ where: { id: messageId } });
+    if (!message || message.sponsorshipInterestId !== interestId) throw new NotFoundException('Message not found');
+    if (message.deletedAt) throw new BadRequestException('Cannot edit a deleted message');
+
+    const updated = await this.prisma.sponsorshipChatMessage.update({
+      where: { id: messageId },
+      data: { content: dto.content, editedAt: new Date() },
+      include: { replyTo: { select: { id: true, senderType: true, content: true, mediaKey: true, deletedAt: true } } },
+    });
+
+    const { replyTo, mediaKey, ...rest } = updated;
+    const mediaUrl = mediaKey ? await this.storageService.getPresignedDownloadUrl(mediaKey) : null;
+    return {
+      ...rest,
+      mediaUrl,
+      replyTo: replyTo
+        ? {
+            id: replyTo.id,
+            senderType: replyTo.senderType,
+            content: replyTo.deletedAt ? 'This message was deleted' : replyTo.content,
+            hasMedia: !replyTo.deletedAt && !!replyTo.mediaKey,
+          }
+        : null,
+    };
+  }
+
+  async deleteSponsorshipChatMessage(interestId: string, adminId: string, messageId: string) {
+    const message = await this.prisma.sponsorshipChatMessage.findUnique({ where: { id: messageId } });
+    if (!message || message.sponsorshipInterestId !== interestId) throw new NotFoundException('Message not found');
+    if (message.deletedAt) return { message: 'Already deleted', deleted: true };
+
+    await this.prisma.sponsorshipChatMessage.update({ where: { id: messageId }, data: { deletedAt: new Date() } });
+    return { message: 'Message deleted', deleted: true };
+  }
+
   // ── Deal Lock: admin oversight of negotiated & locked sponsorship deals ────────
 
   async listSponsorshipDeals(status?: 'PENDING_APPROVAL' | 'CHANGES_REQUESTED' | 'APPROVED') {
@@ -2534,6 +2575,126 @@ export class AdminService {
         paidAt: dto.paidAt ? new Date(dto.paidAt) : new Date(),
       },
     });
+  }
+
+  async getSponsorshipDeal(interestId: string) {
+    const interest = await this.prisma.sponsorshipInterest.findUnique({
+      where: { id: interestId },
+      include: {
+        sponsorshipProposal: {
+          select: {
+            id: true,
+            name: true,
+            hostProfile: {
+              select: {
+                id: true,
+                userId: true,
+                displayName: true,
+                communityProfile: { select: { name: true } },
+              },
+            },
+          },
+        },
+        campaign: {
+          select: {
+            id: true,
+            name: true,
+            brandProfile: { select: { id: true, userId: true, brandName: true } },
+          },
+        },
+        hostProfile: {
+          select: {
+            id: true,
+            userId: true,
+            displayName: true,
+            communityProfile: { select: { name: true } },
+          },
+        },
+        brandProfile: { select: { id: true, userId: true, brandName: true } },
+        deal: {
+          include: {
+            report: { select: { id: true, status: true, summary: true } },
+          },
+        },
+      },
+    });
+    if (!interest || !interest.deal) return null;
+    const deal = interest.deal;
+
+    let breakdown: { platformFeeAmount: Prisma.Decimal | number | null; transactionFeeAmount: Prisma.Decimal | number | null; taxAmount: Prisma.Decimal | number | null; totalAmount: Prisma.Decimal | number | null } = {
+      platformFeeAmount: deal.platformFeeAmount,
+      transactionFeeAmount: deal.transactionFeeAmount,
+      taxAmount: deal.taxAmount,
+      totalAmount: deal.totalAmount,
+    };
+    if (breakdown.totalAmount === null || breakdown.totalAmount === undefined) {
+      try {
+        const gstConfig = await this.prisma.platformConfig.findUnique({ where: { key: 'gst_rate' } });
+        const gstRate = gstConfig ? parseFloat(gstConfig.value) : DEFAULT_SPONSORSHIP_GST_RATE;
+        breakdown = computeDealPaymentBreakdown(Number(deal.sponsorshipAmount), gstRate);
+      } catch {
+        // fallback
+      }
+    }
+
+    const hostName =
+      interest.hostProfile?.communityProfile?.name ??
+      interest.sponsorshipProposal?.hostProfile?.communityProfile?.name ??
+      interest.hostProfile?.displayName ??
+      interest.sponsorshipProposal?.hostProfile?.displayName ??
+      'Community';
+    const brandName =
+      interest.brandProfile?.brandName ??
+      interest.campaign?.brandProfile?.brandName ??
+      'Brand';
+    const proposalName =
+      interest.sponsorshipProposal?.name ??
+      interest.campaign?.name ??
+      deal.projectName;
+
+    let invoicePdfUrl: string | null = null;
+    if (deal.paymentStatus === 'PAID') {
+      try {
+        invoicePdfUrl = await this.sponsorshipInvoicePdfService.getDownloadUrl(deal.id);
+      } catch {
+        // fallback
+      }
+    }
+
+    return {
+      ...deal,
+      ...breakdown,
+      hostName,
+      communityName: hostName,
+      brandName,
+      proposalName,
+      invoicePdfUrl,
+    };
+  }
+
+  async getSponsorshipDealReport(interestId: string) {
+    const deal = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interestId } });
+    if (!deal) return null;
+
+    const report = await this.prisma.sponsorshipDealReport.findUnique({ where: { sponsorshipDealId: deal.id } });
+    if (!report) return null;
+
+    const proofUrls = await Promise.all(
+      (report.proofKeys ?? []).map((key) => this.storageService.getPresignedDownloadUrl(key)),
+    );
+    return { ...report, proofUrls };
+  }
+
+  async getSponsorshipDealReportPdfUrl(interestId: string) {
+    const url = await this.sponsorshipReportPdfService.getDownloadUrl(interestId);
+    return { url };
+  }
+
+  async getSponsorshipDealInvoiceUrl(interestId: string) {
+    const deal = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interestId } });
+    if (!deal || deal.paymentStatus !== 'PAID') throw new NotFoundException('No paid deal found for this chat');
+    const url = await this.sponsorshipInvoicePdfService.getDownloadUrl(deal.id);
+    return { url };
   }
 
   // ── "Talk to Meetday" general support chat (separate from TriChat) ──────
