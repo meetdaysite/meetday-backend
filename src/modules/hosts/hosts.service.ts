@@ -40,7 +40,7 @@ import { TeamAccessService } from '../../common/team-access/team-access.service'
 // Shape of one raw stored past-event entry (HostCommunityProfile.pastEvents JSON column).
 type PastEventLike = { name?: string; description?: string; imageKeys?: string[] };
 // Shape of one raw stored brand-worked-with entry (HostCommunityProfile.brandsWorkedWith JSON column).
-type BrandWorkedWithLike = { brandName?: string; logoKey?: string };
+type BrandWorkedWithLike = { brandName?: string; logoKey?: string; url?: string };
 
 @Injectable()
 export class HostsService {
@@ -311,13 +311,14 @@ export class HostsService {
   }
 
   // Signs each brand-worked-with entry's logo key into a downloadable URL — stored as raw JSON
-  // (array of { brandName?, logoKey? }), entirely optional at every level, no maximum count.
+  // (array of { brandName?, logoKey?, url? }), entirely optional at every level, no maximum count.
   private async withBrandsWorkedWithLogoUrls(brandsWorkedWith: BrandWorkedWithLike[] | null | undefined) {
     if (!brandsWorkedWith || !Array.isArray(brandsWorkedWith)) return [];
     return Promise.all(
       brandsWorkedWith.map(async (brand) => ({
         brandName: brand?.brandName ?? null,
         logoKey: brand?.logoKey ?? null,
+        url: brand?.url ?? null,
         logoUrl: brand?.logoKey ? await this.storageService.getPresignedDownloadUrl(brand.logoKey) : null,
       })),
     );

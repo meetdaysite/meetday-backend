@@ -9,6 +9,12 @@ export class BrandWorkedWithDto {
   @MaxLength(200)
   brandName?: string;
 
+  @ApiPropertyOptional({ example: 'https://nike.com' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  url?: string;
+
   @ApiPropertyOptional({
     description: 'GCS object key from POST /storage/upload-url (COMMUNITY_BRAND_LOGO_MEDIA context)',
   })

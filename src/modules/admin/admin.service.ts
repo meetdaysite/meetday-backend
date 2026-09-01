@@ -2912,7 +2912,7 @@ export class AdminService {
           logoKey?: string;
           secondaryImageKey?: string;
           pastEvents?: { name?: string; description?: string; imageKeys?: string[] }[];
-          brandsWorkedWith?: { brandName?: string; logoKey?: string }[];
+          brandsWorkedWith?: { brandName?: string; logoKey?: string; url?: string }[];
         })
       | null;
     if (pendingRevision) {
@@ -2938,21 +2938,22 @@ export class AdminService {
       logoUrl: await this.storageService.getPresignedDownloadUrl(profile.logoKey),
       secondaryImageUrl: profile.secondaryImageKey ? await this.storageService.getPresignedDownloadUrl(profile.secondaryImageKey) : null,
       pastEvents: await this.withPastEventImageUrls(profile.pastEvents as { name?: string; description?: string; imageKeys?: string[] }[] | null),
-      brandsWorkedWith: await this.withBrandsWorkedWithLogoUrls(profile.brandsWorkedWith as { brandName?: string; logoKey?: string }[] | null),
+      brandsWorkedWith: await this.withBrandsWorkedWithLogoUrls(profile.brandsWorkedWith as { brandName?: string; logoKey?: string; url?: string }[] | null),
       pendingRevision,
     };
   }
 
   // Signs each brand-worked-with entry's logo key into a downloadable URL — stored as raw JSON
-  // (array of { brandName?, logoKey? }), entirely optional at every level, no maximum count.
+  // (array of { brandName?, logoKey?, url? }), entirely optional at every level, no maximum count.
   private async withBrandsWorkedWithLogoUrls(
-    brandsWorkedWith: { brandName?: string | null; logoKey?: string | null }[] | null | undefined,
+    brandsWorkedWith: { brandName?: string | null; logoKey?: string | null; url?: string | null }[] | null | undefined,
   ) {
     if (!brandsWorkedWith || !Array.isArray(brandsWorkedWith)) return [];
     return Promise.all(
       brandsWorkedWith.map(async (brand) => ({
         brandName: brand?.brandName ?? null,
         logoKey: brand?.logoKey ?? null,
+        url: brand?.url ?? null,
         logoUrl: brand?.logoKey ? await this.storageService.getPresignedDownloadUrl(brand.logoKey) : null,
       })),
     );
