@@ -111,4 +111,9 @@ export class BrandsService {
     const brandProfileId = await this.teamAccessService.resolveBrandProfileId(userId);
     return this.teamAccessService.inviteBrandTeamMember(brandProfileId, email, userId);
   }
+
+  async removeTeamMember(userId: string, memberId: string) {
+    const brandProfileId = await this.teamAccessService.resolveBrandProfileId(userId);
+    return this.teamAccessService.removeBrandTeamMember(brandProfileId, memberId);
+  }
 }

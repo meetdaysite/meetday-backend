@@ -33,6 +33,9 @@ model User {
   firstName           String
   lastName            String
   avatarUrl           String?
+  // Personal gender — used for team members (Brand/Host), who have no profile row of their
+  // own to store it on (unlike the owner's HostProfile.gender / AttendeeProfile.gender).
+  gender              Gender?
   isActive            Boolean   @default(true)
   mustCompleteProfile Boolean   @default(false)
   deletedAt           DateTime? // soft delete — set instead of hard-deleting

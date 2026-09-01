@@ -138,24 +138,37 @@ export class HostsService {
 
   async getOwnHostProfile(userId: string) {
     const hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
-    const profile = await this.prisma.hostProfile.findUnique({
-      where: { id: hostProfileId },
-      include: {
-        categories: { include: { category: true } },
-        address: true,
-        subscriptions: { orderBy: { createdAt: 'desc' }, take: 1 },
-        user: { select: { avatarUrl: true, phone: true, email: true } },
-      },
-    });
+    const [user, profile] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { avatarUrl: true, phone: true, email: true, firstName: true, lastName: true },
+      }),
+      this.prisma.hostProfile.findUnique({
+        where: { id: hostProfileId },
+        include: {
+          categories: { include: { category: true } },
+          address: true,
+          subscriptions: { orderBy: { createdAt: 'desc' }, take: 1 },
+        },
+      }),
+    ]);
     if (!profile) throw new NotFoundException('Host profile not found');
+    if (!user) throw new NotFoundException('User not found');
 
-    const { panEncrypted, user, ...rest } = profile;
+    const { panEncrypted, ...rest } = profile;
     const avatarUrl = user.avatarUrl
       ? await this.storageService.getPresignedDownloadUrl(user.avatarUrl)
       : null;
 
+    // A team member (not the owner) has no HostProfile.displayName of their own — the shared
+    // profile's displayName belongs to the owner. Show the actual logged-in viewer's own name
+    // instead, so "My Profile" reflects who is really viewing it.
+    const isOwner = profile.userId === userId;
+    const displayName = isOwner ? rest.displayName : `${user.firstName} ${user.lastName}`.trim() || rest.displayName;
+
     return {
       ...rest,
+      displayName,
       pan: panEncrypted ? this.cryptoService.decrypt(panEncrypted) : null,
       avatarUrl,
       phone: user.phone,
@@ -436,6 +449,11 @@ export class HostsService {
   async inviteTeamMember(userId: string, email: string) {
     const hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
     return this.teamAccessService.inviteHostTeamMember(hostProfileId, email, userId);
+  }
+
+  async removeTeamMember(userId: string, memberId: string) {
+    const hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
+    return this.teamAccessService.removeHostTeamMember(hostProfileId, memberId);
   }
 
   async verifyPanOnly(userId: string) {

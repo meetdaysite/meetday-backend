@@ -150,6 +150,26 @@ export class TeamAccessService {
     return member;
   }
 
+  // ── Remove (any owner/member can remove a PENDING or ACTIVE member) ───────
+  // Hard-deletes the row so the removed email can no longer auto-join via a stale invite
+  // link — we can't unsend the invite mail, but the signup link stops working afterward.
+
+  async removeHostTeamMember(hostProfileId: string, memberId: string): Promise<void> {
+    const member = await this.prisma.hostTeamMember.findUnique({ where: { id: memberId } });
+    if (!member || member.hostProfileId !== hostProfileId) {
+      throw new NotFoundException('Team member not found');
+    }
+    await this.prisma.hostTeamMember.delete({ where: { id: memberId } });
+  }
+
+  async removeBrandTeamMember(brandProfileId: string, memberId: string): Promise<void> {
+    const member = await this.prisma.brandTeamMember.findUnique({ where: { id: memberId } });
+    if (!member || member.brandProfileId !== brandProfileId) {
+      throw new NotFoundException('Team member not found');
+    }
+    await this.prisma.brandTeamMember.delete({ where: { id: memberId } });
+  }
+
   // ── Members list (name + email of everyone, visible to any member) ────────
 
   async listHostTeamMembers(hostProfileId: string): Promise<TeamMemberView[]> {
@@ -253,15 +273,23 @@ export class TeamAccessService {
 
   // Lightweight pre-registration check (email + accountName only) — used by the frontend
   // onboarding pages to skip the full "set up your profile" form when this signup will
-  // actually just join an existing team instead of creating a new profile.
-  async checkPendingHostInvite(email: string): Promise<{ matched: boolean; accountName?: string }> {
+  // actually just join an existing team instead of creating a new profile. `hostType` is
+  // also returned so the UI can skip the "Individual vs Business" step too (auto-inherited
+  // from the community being joined).
+  async checkPendingHostInvite(
+    email: string,
+  ): Promise<{ matched: boolean; accountName?: string; hostType?: 'INDIVIDUAL' | 'BUSINESS' }> {
     const invite = await this.matchPendingHostInvite(email);
     if (!invite) return { matched: false };
     const hostProfile = await this.prisma.hostProfile.findUnique({
       where: { id: invite.hostProfileId },
-      select: { communityName: true, displayName: true },
+      select: { communityName: true, displayName: true, hostType: true },
     });
-    return { matched: true, accountName: hostProfile?.communityName || hostProfile?.displayName || undefined };
+    return {
+      matched: true,
+      accountName: hostProfile?.communityName || hostProfile?.displayName || undefined,
+      hostType: hostProfile?.hostType ?? undefined,
+    };
   }
 
   async checkPendingBrandInvite(email: string): Promise<{ matched: boolean; accountName?: string }> {

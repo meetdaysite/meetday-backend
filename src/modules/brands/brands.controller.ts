@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiConflictResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -50,5 +50,17 @@ export class BrandsController {
   @ApiConflictResponse({ description: "This email is already a member, or is the owner's own email." })
   inviteTeamMember(@GetUser('id') userId: string, @Body() dto: InviteTeamMemberDto) {
     return this.brandsService.inviteTeamMember(userId, dto.email);
+  }
+
+  @Delete('members/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Remove a team member (or cancel a pending invite)',
+    description:
+      "Deletes the invite/membership row entirely \u2014 the invite email already sent can't be " +
+      'unsent, but the removed email can no longer be used to join this brand afterward.',
+  })
+  removeTeamMember(@GetUser('id') userId: string, @Param('id') memberId: string) {
+    return this.brandsService.removeTeamMember(userId, memberId);
   }
 }

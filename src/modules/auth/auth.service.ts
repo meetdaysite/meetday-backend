@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
-import { ConsentType, Prisma } from '@prisma/client';
+import { ConsentType, Gender, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
@@ -434,6 +434,7 @@ export class AuthService {
           firstName: resolved.firstName,
           lastName: resolved.lastName,
           avatarUrl: resolved.avatarUrl,
+          gender: resolved.gender,
           roleId: hostRole.id,
         },
         select: {
@@ -482,6 +483,7 @@ export class AuthService {
           firstName: resolved.firstName,
           lastName: resolved.lastName,
           avatarUrl: resolved.avatarUrl,
+          gender: resolved.gender,
           roleId: brandRole.id,
         },
         select: {
@@ -663,6 +665,7 @@ export class AuthService {
       firstName,
       lastName,
       avatarUrl: tokenUser.avatarUrl ?? undefined,
+      gender: dto.gender,
     };
   }
 
@@ -786,4 +789,5 @@ interface ResolvedIdentity {
   firstName: string;
   lastName: string;
   avatarUrl?: string;
+  gender?: Gender;
 }

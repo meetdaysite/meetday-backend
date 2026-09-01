@@ -6,6 +6,7 @@ import {
   Headers,
   HttpCode,
   HttpStatus,
+  Param,
   Patch,
   Post,
   Query,
@@ -393,6 +394,20 @@ export class HostsController {
   @ApiConflictResponse({ description: 'This email is already a member, or is the owner\'s own email.' })
   inviteTeamMember(@GetUser('id') userId: string, @Body() dto: InviteTeamMemberDto) {
     return this.hostsService.inviteTeamMember(userId, dto.email);
+  }
+
+  @Delete('community/members/:id')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Remove a team member (or cancel a pending invite)',
+    description:
+      'Deletes the invite/membership row entirely — the invite email already sent can\'t be ' +
+      'unsent, but the removed email can no longer be used to join this community afterward.',
+  })
+  removeTeamMember(@GetUser('id') userId: string, @Param('id') memberId: string) {
+    return this.hostsService.removeTeamMember(userId, memberId);
   }
 
   @Post('kyc/pan/verify')

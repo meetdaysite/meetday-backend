@@ -194,6 +194,16 @@ describe('HostsService', () => {
   // ── getOwnHostProfile() ──────────────────────────────────────────────────
 
   describe('getOwnHostProfile()', () => {
+    beforeEach(() => {
+      prisma.user.findUnique.mockResolvedValue({
+        avatarUrl: null,
+        phone: '+919876543210',
+        email: 'test@test.com',
+        firstName: 'Priya',
+        lastName: 'Nair',
+      });
+    });
+
     it('returns profile with decrypted PAN', async () => {
       prisma.hostProfile.findUnique.mockResolvedValue({ ...baseProfile, subscriptions: [] });
       const result = await service.getOwnHostProfile(userId);
