@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { UpdateBrandProfileDto } from './dto/update-brand-profile.dto';
@@ -104,16 +104,25 @@ export class BrandsService {
 
   async listTeamMembers(userId: string) {
     const brandProfileId = await this.teamAccessService.resolveBrandProfileId(userId);
-    return this.teamAccessService.listBrandTeamMembers(brandProfileId);
+    return this.teamAccessService.listBrandTeamMembers(brandProfileId, userId);
   }
 
   async inviteTeamMember(userId: string, email: string) {
     const brandProfileId = await this.teamAccessService.resolveBrandProfileId(userId);
+    const allowed = await this.teamAccessService.canManageBrandMembers(brandProfileId, userId);
+    if (!allowed) throw new ForbiddenException('You do not have permission to add members');
     return this.teamAccessService.inviteBrandTeamMember(brandProfileId, email, userId);
   }
 
   async removeTeamMember(userId: string, memberId: string) {
     const brandProfileId = await this.teamAccessService.resolveBrandProfileId(userId);
+    const allowed = await this.teamAccessService.canManageBrandMembers(brandProfileId, userId);
+    if (!allowed) throw new ForbiddenException('You do not have permission to remove members');
     return this.teamAccessService.removeBrandTeamMember(brandProfileId, memberId);
+  }
+
+  async setMemberPermission(userId: string, memberId: string, canManageMembers: boolean) {
+    const brandProfileId = await this.teamAccessService.resolveBrandProfileId(userId);
+    return this.teamAccessService.setBrandMemberPermission(brandProfileId, userId, memberId, canManageMembers);
   }
 }

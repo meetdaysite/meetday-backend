@@ -1,11 +1,12 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiConflictResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiConflictResponse, ApiForbiddenResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { BrandsService } from './brands.service';
 import { UpdateBrandProfileDto } from './dto/update-brand-profile.dto';
 import { InviteTeamMemberDto } from '../../common/team-access/dto/invite-team-member.dto';
+import { SetMemberPermissionDto } from '../../common/team-access/dto/set-member-permission.dto';
 
 @ApiTags('Brands')
 @ApiBearerAuth('firebase-token')
@@ -62,5 +63,15 @@ export class BrandsController {
   })
   removeTeamMember(@GetUser('id') userId: string, @Param('id') memberId: string) {
     return this.brandsService.removeTeamMember(userId, memberId);
+  }
+
+  @Patch('members/:id/permission')
+  @ApiOperation({
+    summary: "Owner-only: grant/revoke a member's permission to add/remove other members",
+    description: 'WhatsApp-group-admin style — everyone can add members by default, the owner can restrict specific members.',
+  })
+  @ApiForbiddenResponse({ description: 'Only the owner can change member permissions.' })
+  setMemberPermission(@GetUser('id') userId: string, @Param('id') memberId: string, @Body() dto: SetMemberPermissionDto) {
+    return this.brandsService.setMemberPermission(userId, memberId, dto.canManageMembers);
   }
 }

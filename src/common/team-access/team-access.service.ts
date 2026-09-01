@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
@@ -10,6 +10,16 @@ export type TeamMemberView = {
   email: string;
   role: 'OWNER' | 'MEMBER';
   status: 'PENDING' | 'ACTIVE';
+  canManageMembers: boolean;
+};
+
+export type TeamMembersList = {
+  members: TeamMemberView[];
+  // Whether the CALLER (the user who requested this list) can invite/remove other members.
+  viewerCanManage: boolean;
+  // Whether the CALLER is the account owner — only owners can grant/revoke other members'
+  // canManageMembers permission (mirrors WhatsApp: only admins can promote/demote).
+  viewerIsOwner: boolean;
 };
 
 // Resolves "which Brand/Host(Community) profile does this user act on behalf of" — either as
@@ -61,7 +71,60 @@ export class TeamAccessService {
     return id;
   }
 
-  // ── Invite (any owner/member can invite a new member by email) ────────────
+  // ── Permission (owner always can; a member can only if canManageMembers=true) ─────
+
+  async canManageHostMembers(hostProfileId: string, userId: string): Promise<boolean> {
+    const hostProfile = await this.prisma.hostProfile.findUnique({ where: { id: hostProfileId }, select: { userId: true } });
+    if (hostProfile?.userId === userId) return true;
+    const member = await this.prisma.hostTeamMember.findFirst({
+      where: { hostProfileId, userId, status: 'ACTIVE' },
+      select: { canManageMembers: true },
+    });
+    return !!member?.canManageMembers;
+  }
+
+  async canManageBrandMembers(brandProfileId: string, userId: string): Promise<boolean> {
+    const brandProfile = await this.prisma.brandProfile.findUnique({ where: { id: brandProfileId }, select: { userId: true } });
+    if (brandProfile?.userId === userId) return true;
+    const member = await this.prisma.brandTeamMember.findFirst({
+      where: { brandProfileId, userId, status: 'ACTIVE' },
+      select: { canManageMembers: true },
+    });
+    return !!member?.canManageMembers;
+  }
+
+  // Owner-only: grant/revoke another member's ability to add/remove members.
+  async setHostMemberPermission(
+    hostProfileId: string,
+    callerUserId: string,
+    memberId: string,
+    canManageMembers: boolean,
+  ): Promise<void> {
+    const hostProfile = await this.prisma.hostProfile.findUnique({ where: { id: hostProfileId }, select: { userId: true } });
+    if (hostProfile?.userId !== callerUserId) {
+      throw new ForbiddenException('Only the owner can change member permissions');
+    }
+    const member = await this.prisma.hostTeamMember.findUnique({ where: { id: memberId } });
+    if (!member || member.hostProfileId !== hostProfileId) throw new NotFoundException('Team member not found');
+    await this.prisma.hostTeamMember.update({ where: { id: memberId }, data: { canManageMembers } });
+  }
+
+  async setBrandMemberPermission(
+    brandProfileId: string,
+    callerUserId: string,
+    memberId: string,
+    canManageMembers: boolean,
+  ): Promise<void> {
+    const brandProfile = await this.prisma.brandProfile.findUnique({ where: { id: brandProfileId }, select: { userId: true } });
+    if (brandProfile?.userId !== callerUserId) {
+      throw new ForbiddenException('Only the owner can change member permissions');
+    }
+    const member = await this.prisma.brandTeamMember.findUnique({ where: { id: memberId } });
+    if (!member || member.brandProfileId !== brandProfileId) throw new NotFoundException('Team member not found');
+    await this.prisma.brandTeamMember.update({ where: { id: memberId }, data: { canManageMembers } });
+  }
+
+  // ── Invite (any owner/member with canManageMembers can invite a new member) ────────
 
   async inviteHostTeamMember(hostProfileId: string, email: string, invitedByUserId: string) {
     const normalizedEmail = email.toLowerCase().trim();
@@ -172,11 +235,11 @@ export class TeamAccessService {
 
   // ── Members list (name + email of everyone, visible to any member) ────────
 
-  async listHostTeamMembers(hostProfileId: string): Promise<TeamMemberView[]> {
+  async listHostTeamMembers(hostProfileId: string, viewerUserId: string): Promise<TeamMembersList> {
     const [hostProfile, members] = await Promise.all([
       this.prisma.hostProfile.findUnique({
         where: { id: hostProfileId },
-        select: { user: { select: { id: true, firstName: true, lastName: true, email: true } } },
+        select: { userId: true, user: { select: { id: true, firstName: true, lastName: true, email: true } } },
       }),
       this.prisma.hostTeamMember.findMany({
         where: { hostProfileId },
@@ -192,24 +255,32 @@ export class TeamAccessService {
       email: hostProfile.user.email ?? '',
       role: 'OWNER',
       status: 'ACTIVE',
+      canManageMembers: true,
     };
-    return [
-      owner,
-      ...members.map((m) => ({
-        id: m.id,
-        name: m.user ? `${m.user.firstName} ${m.user.lastName}`.trim() || null : null,
-        email: m.email,
-        role: 'MEMBER' as const,
-        status: m.status,
-      })),
-    ];
+    const viewerIsOwner = hostProfile.userId === viewerUserId;
+    const viewerMembership = members.find((m) => m.userId === viewerUserId);
+    return {
+      members: [
+        owner,
+        ...members.map((m) => ({
+          id: m.id,
+          name: m.user ? `${m.user.firstName} ${m.user.lastName}`.trim() || null : null,
+          email: m.email,
+          role: 'MEMBER' as const,
+          status: m.status,
+          canManageMembers: m.canManageMembers,
+        })),
+      ],
+      viewerIsOwner,
+      viewerCanManage: viewerIsOwner || !!viewerMembership?.canManageMembers,
+    };
   }
 
-  async listBrandTeamMembers(brandProfileId: string): Promise<TeamMemberView[]> {
+  async listBrandTeamMembers(brandProfileId: string, viewerUserId: string): Promise<TeamMembersList> {
     const [brandProfile, members] = await Promise.all([
       this.prisma.brandProfile.findUnique({
         where: { id: brandProfileId },
-        select: { user: { select: { id: true, firstName: true, lastName: true, email: true } } },
+        select: { userId: true, user: { select: { id: true, firstName: true, lastName: true, email: true } } },
       }),
       this.prisma.brandTeamMember.findMany({
         where: { brandProfileId },
@@ -225,17 +296,25 @@ export class TeamAccessService {
       email: brandProfile.user.email ?? '',
       role: 'OWNER',
       status: 'ACTIVE',
+      canManageMembers: true,
     };
-    return [
-      owner,
-      ...members.map((m) => ({
-        id: m.id,
-        name: m.user ? `${m.user.firstName} ${m.user.lastName}`.trim() || null : null,
-        email: m.email,
-        role: 'MEMBER' as const,
-        status: m.status,
-      })),
-    ];
+    const viewerIsOwner = brandProfile.userId === viewerUserId;
+    const viewerMembership = members.find((m) => m.userId === viewerUserId);
+    return {
+      members: [
+        owner,
+        ...members.map((m) => ({
+          id: m.id,
+          name: m.user ? `${m.user.firstName} ${m.user.lastName}`.trim() || null : null,
+          email: m.email,
+          role: 'MEMBER' as const,
+          status: m.status,
+          canManageMembers: m.canManageMembers,
+        })),
+      ],
+      viewerIsOwner,
+      viewerCanManage: viewerIsOwner || !!viewerMembership?.canManageMembers,
+    };
   }
 
   // ── Email match on signup (called from AuthService.register()) ────────────

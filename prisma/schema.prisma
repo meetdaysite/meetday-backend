@@ -1409,6 +1409,10 @@ model BrandTeamMember {
   invitedBy String
   inviter   User             @relation("BrandTeamMemberInvitedBy", fields: [invitedBy], references: [id])
   joinedAt  DateTime?
+  // Whether this member can invite/remove other members (owner always can, regardless of this
+  // flag) — defaults to true so "everybody can add members" is the out-of-the-box behavior;
+  // the owner can revoke it per member, WhatsApp-group-admin style.
+  canManageMembers Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1434,6 +1438,8 @@ model HostTeamMember {
   invitedBy String
   inviter   User             @relation("HostTeamMemberInvitedBy", fields: [invitedBy], references: [id])
   joinedAt  DateTime?
+  // See BrandTeamMember.canManageMembers.
+  canManageMembers Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

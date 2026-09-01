@@ -443,17 +443,26 @@ export class HostsService {
 
   async listTeamMembers(userId: string) {
     const hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
-    return this.teamAccessService.listHostTeamMembers(hostProfileId);
+    return this.teamAccessService.listHostTeamMembers(hostProfileId, userId);
   }
 
   async inviteTeamMember(userId: string, email: string) {
     const hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
+    const allowed = await this.teamAccessService.canManageHostMembers(hostProfileId, userId);
+    if (!allowed) throw new ForbiddenException('You do not have permission to add members');
     return this.teamAccessService.inviteHostTeamMember(hostProfileId, email, userId);
   }
 
   async removeTeamMember(userId: string, memberId: string) {
     const hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
+    const allowed = await this.teamAccessService.canManageHostMembers(hostProfileId, userId);
+    if (!allowed) throw new ForbiddenException('You do not have permission to remove members');
     return this.teamAccessService.removeHostTeamMember(hostProfileId, memberId);
+  }
+
+  async setMemberPermission(userId: string, memberId: string, canManageMembers: boolean) {
+    const hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
+    return this.teamAccessService.setHostMemberPermission(hostProfileId, userId, memberId, canManageMembers);
   }
 
   async verifyPanOnly(userId: string) {

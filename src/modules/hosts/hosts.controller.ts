@@ -41,6 +41,7 @@ import { BankWebhookDto } from './dto/bank-webhook.dto';
 import { UpgradeSubscriptionDto } from './dto/upgrade-subscription.dto';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
 import { InviteTeamMemberDto } from '../../common/team-access/dto/invite-team-member.dto';
+import { SetMemberPermissionDto } from '../../common/team-access/dto/set-member-permission.dto';
 
 @ApiTags('Hosts')
 @ApiBearerAuth('firebase-token')
@@ -408,6 +409,18 @@ export class HostsController {
   })
   removeTeamMember(@GetUser('id') userId: string, @Param('id') memberId: string) {
     return this.hostsService.removeTeamMember(userId, memberId);
+  }
+
+  @Patch('community/members/:id/permission')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: "Owner-only: grant/revoke a member's permission to add/remove other members",
+    description: 'WhatsApp-group-admin style — everyone can add members by default, the owner can restrict specific members.',
+  })
+  @ApiForbiddenResponse({ description: 'Only the owner can change member permissions.' })
+  setMemberPermission(@GetUser('id') userId: string, @Param('id') memberId: string, @Body() dto: SetMemberPermissionDto) {
+    return this.hostsService.setMemberPermission(userId, memberId, dto.canManageMembers);
   }
 
   @Post('kyc/pan/verify')
