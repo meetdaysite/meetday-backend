@@ -59,9 +59,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
     });
   }
 
-  // Every error a user hits is emailed to admins with the user's name/email, so admins
-  // have visibility into anything going wrong on the platform (not just server crashes).
+  // Genuine server errors (5xx — unhandled bugs, crashes) are emailed to admins with the
+  // user's name/email. Routine 4xx responses (404/400/401/403/409 etc.) are expected app
+  // control-flow, not bugs — alerting on those just spams admins' inboxes.
   private alertAdmins(request: Request, status: number, exception: unknown): void {
+    if (status < 500) return;
+
     const user = (request as unknown as { user?: RequestUser }).user;
     const errorMessage =
       exception instanceof Error ? (exception.stack ?? exception.message) : JSON.stringify(exception);

@@ -2,7 +2,7 @@ import { Logger, MiddlewareConsumer, Module, NestModule, RequestMethod } from '@
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bull';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
-import { APP_GUARD, APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_GUARD, APP_FILTER } from '@nestjs/core';
 import configuration from './config/configuration';
 import { validate } from './config/env.schema';
 import { PrismaModule } from './prisma/prisma.module';
@@ -47,7 +47,6 @@ import { CryptoModule } from './common/crypto/crypto.module';
 import { RedisModule } from './common/redis/redis.module';
 import { StorageModule } from './common/storage/storage.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
-import { AdminActionAlertInterceptor } from './common/interceptors/admin-action-alert.interceptor';
 
 @Module({
   imports: [
@@ -119,10 +118,6 @@ import { AdminActionAlertInterceptor } from './common/interceptors/admin-action-
     {
       provide: APP_FILTER,
       useClass: AllExceptionsFilter,
-    },
-    {
-      provide: APP_INTERCEPTOR,
-      useClass: AdminActionAlertInterceptor,
     },
   ],
 })
