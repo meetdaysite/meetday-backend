@@ -244,7 +244,7 @@ export class CampaignsService {
         'host_interest_confirmed',
         'Interest sent!',
         'The brand has been notified of your interest.',
-        { campaignId },
+        { campaignId, sponsorshipInterestId: interest.id },
       )
       .catch((err) => this.logger.error('Failed to notify host of confirmed interest', err));
 

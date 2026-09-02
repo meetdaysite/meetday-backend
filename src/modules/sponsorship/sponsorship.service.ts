@@ -1096,12 +1096,18 @@ export class SponsorshipService {
       senderName = interest.brandProfile.brandName;
     }
     const preview = content.trim() ? content.slice(0, 80) : '📷 Sent a photo';
-    void this.notificationsService
-      .create(recipientUserId, 'sponsorship_chat_message', senderName, preview, {
-        sponsorshipInterestId: interest.id,
-      })
-      .catch((err) => this.logger.error('Failed to notify of new chat message', err));
-    this.scheduleUnreadChatEmail(interest.id, recipientUserId);
+    // A single Firebase identity can hold both a host AND a brand profile (see register()) —
+    // if the same account is on both sides of this chat, recipientUserId resolves to the
+    // sender's own id, and without this guard they'd hear a notification chime for their own
+    // just-sent message.
+    if (recipientUserId && recipientUserId !== userId) {
+      void this.notificationsService
+        .create(recipientUserId, 'sponsorship_chat_message', senderName, preview, {
+          sponsorshipInterestId: interest.id,
+        })
+        .catch((err) => this.logger.error('Failed to notify of new chat message', err));
+      this.scheduleUnreadChatEmail(interest.id, recipientUserId);
+    }
 
     const mediaUrl = dto.mediaKey ? await this.storageService.getPresignedDownloadUrl(dto.mediaKey) : null;
     return { ...message, mediaUrl, wasRedacted, replyTo: this.replyToPreview(replyToRow) };
@@ -1281,7 +1287,7 @@ export class SponsorshipService {
 
     await this.postDealSystemMessage(interest.id, senderType, userId, `${creatorName} updated the deal proposal.`);
 
-    if (targetUserId) {
+    if (targetUserId && targetUserId !== userId) {
       void this.notificationsService
         .create(targetUserId, 'sponsorship_deal_updated', creatorName, `Updated the deal proposal: ${dto.projectName}`, {
           sponsorshipInterestId: interest.id,
