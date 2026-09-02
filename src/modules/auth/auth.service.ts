@@ -44,9 +44,14 @@ export class AuthService {
 
   // Notifies all admins (bell icon) when someone joins a Brand/Community as a team member —
   // so admins have visibility into team growth without having to open each profile individually.
-  private async notifyAdminsOfTeamJoin(kind: 'HOST' | 'BRAND', profileId: string, memberUserId: string): Promise<void> {
+  private async notifyAdminsOfTeamJoin(
+    kind: 'HOST' | 'BRAND',
+    profileId: string,
+    memberUserId: string,
+    isCrossContextJoin = false,
+  ): Promise<void> {
     const [member, accountName, admins] = await Promise.all([
-      this.prisma.user.findUnique({ where: { id: memberUserId }, select: { firstName: true, lastName: true } }),
+      this.prisma.user.findUnique({ where: { id: memberUserId }, select: { firstName: true, lastName: true, email: true } }),
       kind === 'HOST'
         ? this.prisma.hostProfile
             .findUnique({ where: { id: profileId }, select: { communityName: true, displayName: true } })
@@ -59,7 +64,12 @@ export class AuthService {
         select: { id: true },
       }),
     ]);
-    const memberName = member ? `${member.firstName} ${member.lastName}`.trim() || 'A new member' : 'A new member';
+    // A cross-context join (e.g. an existing HOST-registered identity accepting a BRAND team
+    // invite) shares ONE `firstName`/`lastName` across both contexts — asserting it here would
+    // surface a name tied to an unrelated account type, so fall back to a neutral label instead.
+    const memberName = isCrossContextJoin
+      ? (member?.email?.split('@')[0] ?? 'A new member')
+      : (member ? `${member.firstName} ${member.lastName}`.trim() || 'A new member' : 'A new member');
 
     await Promise.allSettled(
       admins.map((admin) =>
@@ -106,7 +116,7 @@ export class AuthService {
         const pendingHostInvite = existingEmail ? await this.teamAccessService.matchPendingHostInvite(existingEmail) : null;
         if (pendingHostInvite) {
           await this.teamAccessService.attachUserToHostInvite(pendingHostInvite.id, existing.id);
-          void this.notifyAdminsOfTeamJoin('HOST', pendingHostInvite.hostProfileId, existing.id).catch(() => {});
+          void this.notifyAdminsOfTeamJoin('HOST', pendingHostInvite.hostProfileId, existing.id, true).catch(() => {});
           return this.loadUserWithHostProfile(existing.id, pendingHostInvite.hostProfileId);
         }
         return this.attachHostProfile(existing.id, dto);
@@ -115,7 +125,7 @@ export class AuthService {
         const pendingBrandInvite = existingEmail ? await this.teamAccessService.matchPendingBrandInvite(existingEmail) : null;
         if (pendingBrandInvite) {
           await this.teamAccessService.attachUserToBrandInvite(pendingBrandInvite.id, existing.id);
-          void this.notifyAdminsOfTeamJoin('BRAND', pendingBrandInvite.brandProfileId, existing.id).catch(() => {});
+          void this.notifyAdminsOfTeamJoin('BRAND', pendingBrandInvite.brandProfileId, existing.id, true).catch(() => {});
           return this.loadUserWithBrandProfile(existing.id, pendingBrandInvite.brandProfileId);
         }
         return this.attachBrandProfile(existing.id, dto);
