@@ -95,11 +95,15 @@ export class AdminService {
     // lets any other non-admin role (BRAND, etc.) leak into this list as new roles are added.
     const ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT'];
 
-    const where: any = {
-      role: { name: { in: ADMIN_ROLES } },
-    };
+    // A user can hold admin access two ways: their PRIMARY role is an admin role (fresh
+    // invite), or they're primarily a HOST/BRAND/USER with a SECONDARY `adminRoleId` granted
+    // (invite sent to an already-registered email — see inviteAdmin()). Missing the second
+    // case here made those grants invisible in this list, which is also why re-inviting the
+    // same email later surfaced as a confusing 409 with no way to see/undo the existing grant.
+    const where: any = query.role
+      ? { OR: [{ role: { name: query.role } }, { adminRole: { name: query.role } }] }
+      : { OR: [{ role: { name: { in: ADMIN_ROLES } } }, { adminRoleId: { not: null } }] };
 
-    if (query.role) where.role = { name: query.role };
     if (query.isActive !== undefined) where.isActive = query.isActive;
 
     const [admins, total] = await Promise.all([
@@ -111,8 +115,10 @@ export class AdminService {
           lastName: true,
           email: true,
           isActive: true,
+          mustCompleteProfile: true,
           createdAt: true,
           role: { select: { name: true } },
+          adminRole: { select: { name: true } },
           adminProfile: { select: { managedCities: true } },
         },
         orderBy: { createdAt: 'desc' },
@@ -121,6 +127,7 @@ export class AdminService {
       }),
       this.prisma.user.count({ where }),
     ]);
+
 
     return { admins, total, page, limit };
   }
@@ -417,21 +424,31 @@ export class AdminService {
       throw new BadRequestException('You cannot deactivate your own account');
     }
 
-    const END_USER_ROLES = ['USER', 'HOST'];
+    const ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT'];
 
     const target = await this.prisma.user.findUnique({
       where: { id: targetAdminId },
-      select: { id: true, firebaseUid: true, isActive: true, role: { select: { name: true } } },
+      select: { id: true, firebaseUid: true, isActive: true, adminRoleId: true, role: { select: { name: true } } },
     });
 
     if (!target) throw new NotFoundException('Admin user not found');
 
-    if (END_USER_ROLES.includes(target.role.name)) {
+    const primaryIsAdmin = ADMIN_ROLES.includes(target.role.name);
+    if (!primaryIsAdmin && !target.adminRoleId) {
       throw new BadRequestException('Target user is not an admin account');
     }
 
     if (target.role.name === 'SUPER_ADMIN') {
       throw new ForbiddenException('A SUPER_ADMIN account cannot be deactivated via this endpoint');
+    }
+
+    // A SECONDARY admin grant (HOST/BRAND/USER primarily, admin access layered on via
+    // adminRoleId — see inviteAdmin()) has no separate active/inactive flag to flip; "deactivate"
+    // here means fully revoking the grant so the email becomes invitable again, while leaving
+    // their primary account (and Firebase login) completely untouched.
+    if (!primaryIsAdmin) {
+      await this.prisma.user.update({ where: { id: targetAdminId }, data: { adminRoleId: null } });
+      return { message: 'Admin access revoked — their primary account is unaffected' };
     }
 
     if (!target.isActive) {
