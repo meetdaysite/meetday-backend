@@ -73,7 +73,7 @@ describe('SponsorshipService — TriChat', () => {
   });
 
   describe('listMyChats()', () => {
-    it('filters by the caller\u2019s hostProfile when they are a host', async () => {
+    it('filters by the caller’s hostProfile when they are a host', async () => {
       prisma.hostProfile.findUnique.mockResolvedValue({ id: 'host-1' });
       prisma.brandProfile.findUnique.mockResolvedValue(null);
       prisma.sponsorshipInterest.findMany.mockResolvedValue([]);
@@ -81,11 +81,18 @@ describe('SponsorshipService — TriChat', () => {
       await service.listMyChats('user-1', {});
 
       expect(prisma.sponsorshipInterest.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: expect.objectContaining({ sponsorshipProposal: { hostProfileId: 'host-1' } }) }),
+        expect.objectContaining({
+          where: expect.objectContaining({
+            OR: expect.arrayContaining([
+              { sponsorshipProposal: { hostProfileId: 'host-1' } },
+              { hostProfileId: 'host-1' },
+            ]),
+          }),
+        }),
       );
     });
 
-    it('filters by the caller\u2019s brandProfileId when they are a brand', async () => {
+    it('filters by the caller’s brandProfileId when they are a brand', async () => {
       prisma.hostProfile.findUnique.mockResolvedValue(null);
       prisma.brandProfile.findUnique.mockResolvedValue({ id: 'brand-1' });
       prisma.sponsorshipInterest.findMany.mockResolvedValue([]);
@@ -121,14 +128,21 @@ describe('SponsorshipService — TriChat', () => {
           chatMessages: [{ content: 'hi', mediaKey: null, senderType: 'BRAND', createdAt: new Date() }],
         },
       ]);
-      prisma.sponsorshipChatMessage.count.mockResolvedValue(3);
+      prisma.sponsorshipChatMessage.findMany.mockResolvedValue([
+        { id: 'msg-1', content: 'hi', replyTo: null },
+      ]);
 
       const result = await service.listMyChats('user-1', {});
 
-      expect(prisma.sponsorshipChatMessage.count).toHaveBeenCalledWith(
-        expect.objectContaining({ where: expect.objectContaining({ senderType: 'BRAND' }) }),
+      expect(prisma.sponsorshipChatMessage.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            sponsorshipInterestId: 'interest-1',
+            senderType: { not: 'HOST' },
+          }),
+        }),
       );
-      expect(result[0].unreadCount).toBe(3);
+      expect(result[0].unreadCount).toBe(1);
     });
   });
 
@@ -529,6 +543,106 @@ describe('SponsorshipService — TriChat', () => {
 
       expect(prisma.sponsorshipChatMessage.update).not.toHaveBeenCalled();
       expect(result.deleted).toBe(true);
+    });
+  });
+
+  describe('Campaign and Proposal Deal Flow', () => {
+    const proposalInterest = {
+      id: 'interest-prop',
+      chatStatus: 'ACCEPTED',
+      sponsorshipProposalId: 'prop-1',
+      sponsorshipProposal: { id: 'prop-1', name: 'Fest Proposal', hostProfile: { id: 'host-1', userId: 'host-user', displayName: 'Host' } },
+      brandProfile: { id: 'brand-1', userId: 'brand-user', brandName: 'Acme Brand' },
+    };
+
+    const campaignInterest = {
+      id: 'interest-camp',
+      chatStatus: 'ACCEPTED',
+      campaignId: 'camp-1',
+      campaign: { id: 'camp-1', name: 'Summer Campaign', brandProfile: { id: 'brand-1', userId: 'brand-user', brandName: 'Acme Brand' } },
+      hostProfile: { id: 'host-1', userId: 'host-user', displayName: 'Host' },
+      brandProfile: { id: 'brand-1', userId: 'brand-user', brandName: 'Acme Brand' },
+    };
+
+    const dealDto = {
+      projectName: 'Summer Campaign Deal',
+      startDate: '2026-06-01',
+      endDate: '2026-06-30',
+      time: '10:00 AM',
+      venue: 'Bengaluru',
+      sponsorshipAmount: 50000,
+      deliverables: '2 posts, 1 workshop',
+    };
+
+    describe('createDeal()', () => {
+      it('allows Host to lock deal for Proposal sponsorships and rejects Brand', async () => {
+        prisma.sponsorshipInterest.findUnique.mockResolvedValue(proposalInterest);
+        prisma.sponsorshipDeal.findUnique.mockResolvedValue(null);
+        prisma.sponsorshipDeal.create.mockResolvedValue({ id: 'deal-1', ...dealDto });
+        prisma.sponsorshipChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
+        prisma.sponsorshipInterest.update.mockResolvedValue({});
+
+        await expect(service.createDeal('brand-user', 'interest-prop', dealDto)).rejects.toThrow(ForbiddenException);
+
+        const result = await service.createDeal('host-user', 'interest-prop', dealDto);
+        expect(result.id).toBe('deal-1');
+      });
+
+      it('allows Brand to lock deal for Campaigns and rejects Host', async () => {
+        prisma.sponsorshipInterest.findUnique.mockResolvedValue(campaignInterest);
+        prisma.sponsorshipDeal.findUnique.mockResolvedValue(null);
+        prisma.sponsorshipDeal.create.mockResolvedValue({ id: 'deal-2', ...dealDto });
+        prisma.sponsorshipChatMessage.create.mockResolvedValue({ id: 'msg-2', createdAt: new Date() });
+        prisma.sponsorshipInterest.update.mockResolvedValue({});
+
+        await expect(service.createDeal('host-user', 'interest-camp', dealDto)).rejects.toThrow(ForbiddenException);
+
+        const result = await service.createDeal('brand-user', 'interest-camp', dealDto);
+        expect(result.id).toBe('deal-2');
+      });
+    });
+
+    describe('approveDeal()', () => {
+      it('allows Brand to approve deal for Proposal sponsorships and rejects Host', async () => {
+        prisma.sponsorshipInterest.findUnique.mockResolvedValue(proposalInterest);
+        prisma.sponsorshipDeal.findUnique.mockResolvedValue({ id: 'deal-1', status: 'PENDING_APPROVAL', projectName: 'Fest' });
+        prisma.sponsorshipDeal.update.mockResolvedValue({ id: 'deal-1', status: 'APPROVED' });
+        prisma.sponsorshipChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
+        prisma.sponsorshipInterest.update.mockResolvedValue({});
+        prisma.user.findMany.mockResolvedValue([]);
+
+        await expect(service.approveDeal('host-user', 'interest-prop')).rejects.toThrow(ForbiddenException);
+
+        const result = await service.approveDeal('brand-user', 'interest-prop');
+        expect(result.status).toBe('APPROVED');
+      });
+
+      it('allows Host (Community) to approve deal for Campaigns and rejects Brand', async () => {
+        prisma.sponsorshipInterest.findUnique.mockResolvedValue(campaignInterest);
+        prisma.sponsorshipDeal.findUnique.mockResolvedValue({ id: 'deal-2', status: 'PENDING_APPROVAL', projectName: 'Campaign Deal' });
+        prisma.sponsorshipDeal.update.mockResolvedValue({ id: 'deal-2', status: 'APPROVED' });
+        prisma.sponsorshipChatMessage.create.mockResolvedValue({ id: 'msg-2', createdAt: new Date() });
+        prisma.sponsorshipInterest.update.mockResolvedValue({});
+        prisma.user.findMany.mockResolvedValue([]);
+
+        await expect(service.approveDeal('brand-user', 'interest-camp')).rejects.toThrow(ForbiddenException);
+
+        const result = await service.approveDeal('host-user', 'interest-camp');
+        expect(result.status).toBe('APPROVED');
+      });
+    });
+
+    describe('requestDealChanges()', () => {
+      it('allows Community to request changes for Campaign deals', async () => {
+        prisma.sponsorshipInterest.findUnique.mockResolvedValue(campaignInterest);
+        prisma.sponsorshipDeal.findUnique.mockResolvedValue({ id: 'deal-2', status: 'PENDING_APPROVAL', projectName: 'Campaign Deal' });
+        prisma.sponsorshipDeal.update.mockResolvedValue({ id: 'deal-2', status: 'CHANGES_REQUESTED' });
+        prisma.sponsorshipChatMessage.create.mockResolvedValue({ id: 'msg-3', createdAt: new Date() });
+        prisma.sponsorshipInterest.update.mockResolvedValue({});
+
+        const result = await service.requestDealChanges('host-user', 'interest-camp', { note: 'Please increase barter amount' });
+        expect(result.status).toBe('CHANGES_REQUESTED');
+      });
     });
   });
 });

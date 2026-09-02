@@ -2311,7 +2311,8 @@ export class AdminService {
           },
         });
 
-        const hasUnreadMention = unreadMessages.some((msg) => {
+        const msgs = unreadMessages || [];
+        const hasUnreadMention = msgs.some((msg) => {
           if (msg.replyTo && msg.replyTo.senderType === 'ADMIN') return true;
           if (msg.content) {
             const lower = msg.content.toLowerCase();
@@ -2321,7 +2322,7 @@ export class AdminService {
         });
 
         return {
-          unreadCount: unreadMessages.length,
+          unreadCount: msgs.length,
           hasUnreadMention,
         };
       }),
@@ -2826,7 +2827,8 @@ export class AdminService {
           },
         });
 
-        const hasUnreadMention = unreadMessages.some((msg) => {
+        const msgs = unreadMessages || [];
+        const hasUnreadMention = msgs.some((msg) => {
           if (msg.replyTo && (msg.replyTo.senderType === 'ADMIN' || msg.replyTo.senderType === 'BOT')) return true;
           if (msg.content) {
             const lower = msg.content.toLowerCase();
@@ -2836,7 +2838,7 @@ export class AdminService {
         });
 
         return {
-          unreadCount: unreadMessages.length,
+          unreadCount: msgs.length,
           hasUnreadMention,
         };
       }),

@@ -1185,7 +1185,11 @@ export class SponsorshipService {
 
   async createDeal(userId: string, interestId: string, dto: UpsertSponsorshipDealDto) {
     const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
-    if (senderType !== ChatSenderType.HOST) throw new ForbiddenException('Only the community can lock a deal');
+    const isCampaign = !!interest.campaignId;
+    const requiredCreator = isCampaign ? ChatSenderType.BRAND : ChatSenderType.HOST;
+    if (senderType !== requiredCreator) {
+      throw new ForbiddenException(isCampaign ? 'Only the brand can lock a deal for a campaign' : 'Only the community can lock a deal');
+    }
     if (interest.chatStatus !== SponsorshipChatStatus.ACCEPTED) {
       throw new BadRequestException('The chat must be accepted before locking a deal');
     }
@@ -1212,20 +1216,32 @@ export class SponsorshipService {
     });
 
     const hostName = this.hostNameOf(interest);
-    await this.postDealSystemMessage(interest.id, ChatSenderType.HOST, userId, `${hostName} shared a deal proposal for your approval.`);
+    const brandName = interest.campaign?.brandProfile?.brandName ?? interest.brandProfile?.brandName ?? 'The brand';
+    const creatorName = isCampaign ? brandName : hostName;
+    const targetUserId = isCampaign
+      ? (interest.hostProfile?.userId ?? interest.sponsorshipProposal?.hostProfile?.userId)
+      : interest.brandProfile?.userId;
 
-    void this.notificationsService
-      .create(interest.brandProfile.userId, 'sponsorship_deal_submitted', hostName, `Shared a deal proposal: ${dto.projectName}`, {
-        sponsorshipInterestId: interest.id,
-      })
-      .catch((err) => this.logger.error('Failed to notify brand of new deal proposal', err));
+    await this.postDealSystemMessage(interest.id, senderType, userId, `${creatorName} shared a deal proposal for your approval.`);
+
+    if (targetUserId) {
+      void this.notificationsService
+        .create(targetUserId, 'sponsorship_deal_submitted', creatorName, `Shared a deal proposal: ${dto.projectName}`, {
+          sponsorshipInterestId: interest.id,
+        })
+        .catch((err) => this.logger.error('Failed to notify counterparty of new deal proposal', err));
+    }
 
     return deal;
   }
 
   async updateDeal(userId: string, interestId: string, dto: UpsertSponsorshipDealDto) {
     const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
-    if (senderType !== ChatSenderType.HOST) throw new ForbiddenException('Only the community can edit the deal');
+    const isCampaign = !!interest.campaignId;
+    const requiredCreator = isCampaign ? ChatSenderType.BRAND : ChatSenderType.HOST;
+    if (senderType !== requiredCreator) {
+      throw new ForbiddenException(isCampaign ? 'Only the brand can edit the deal for a campaign' : 'Only the community can edit the deal');
+    }
 
     const existing = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
     if (!existing) throw new NotFoundException('No deal found for this chat — lock a deal first');
@@ -1252,20 +1268,32 @@ export class SponsorshipService {
     });
 
     const hostName = this.hostNameOf(interest);
-    await this.postDealSystemMessage(interest.id, ChatSenderType.HOST, userId, `${hostName} updated the deal proposal.`);
+    const brandName = interest.campaign?.brandProfile?.brandName ?? interest.brandProfile?.brandName ?? 'The brand';
+    const creatorName = isCampaign ? brandName : hostName;
+    const targetUserId = isCampaign
+      ? (interest.hostProfile?.userId ?? interest.sponsorshipProposal?.hostProfile?.userId)
+      : interest.brandProfile?.userId;
 
-    void this.notificationsService
-      .create(interest.brandProfile.userId, 'sponsorship_deal_updated', hostName, `Updated the deal proposal: ${dto.projectName}`, {
-        sponsorshipInterestId: interest.id,
-      })
-      .catch((err) => this.logger.error('Failed to notify brand of updated deal proposal', err));
+    await this.postDealSystemMessage(interest.id, senderType, userId, `${creatorName} updated the deal proposal.`);
+
+    if (targetUserId) {
+      void this.notificationsService
+        .create(targetUserId, 'sponsorship_deal_updated', creatorName, `Updated the deal proposal: ${dto.projectName}`, {
+          sponsorshipInterestId: interest.id,
+        })
+        .catch((err) => this.logger.error('Failed to notify counterparty of updated deal proposal', err));
+    }
 
     return deal;
   }
 
   async approveDeal(userId: string, interestId: string) {
     const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
-    if (senderType !== ChatSenderType.BRAND) throw new ForbiddenException('Only the brand can approve the deal');
+    const isCampaign = !!interest.campaignId;
+    const requiredApprover = isCampaign ? ChatSenderType.HOST : ChatSenderType.BRAND;
+    if (senderType !== requiredApprover) {
+      throw new ForbiddenException(isCampaign ? 'Only the community can accept the deal for a campaign' : 'Only the brand can approve the deal');
+    }
 
     const existing = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
     if (!existing) throw new NotFoundException('No deal found for this chat');
@@ -1279,17 +1307,26 @@ export class SponsorshipService {
       data: { status: 'APPROVED', approvedAt: new Date(), paymentExpiresAt },
     });
 
-    await this.postDealSystemMessage(interest.id, ChatSenderType.BRAND, userId, 'Congratulations! The deal is locked.');
+    await this.postDealSystemMessage(interest.id, senderType, userId, 'Congratulations! The deal is locked.');
 
-    void this.notificationsService
-      .create(
-        interest.campaignId ? interest.hostProfile?.userId : interest.sponsorshipProposal?.hostProfile?.userId,
-        'sponsorship_deal_locked',
-        interest.brandProfile.brandName,
-        `Approved and locked the deal: ${existing.projectName}`,
-        { sponsorshipInterestId: interest.id },
-      )
-      .catch((err) => this.logger.error('Failed to notify host of locked deal', err));
+    const hostName = this.hostNameOf(interest);
+    const brandName = interest.campaign?.brandProfile?.brandName ?? interest.brandProfile?.brandName ?? 'The brand';
+    const approverName = isCampaign ? hostName : brandName;
+    const targetUserId = isCampaign
+      ? interest.brandProfile?.userId
+      : (interest.hostProfile?.userId ?? interest.sponsorshipProposal?.hostProfile?.userId);
+
+    if (targetUserId) {
+      void this.notificationsService
+        .create(
+          targetUserId,
+          'sponsorship_deal_locked',
+          approverName,
+          `Approved and locked the deal: ${existing.projectName}`,
+          { sponsorshipInterestId: interest.id },
+        )
+        .catch((err) => this.logger.error('Failed to notify counterparty of locked deal', err));
+    }
 
     const admins = await this.prisma.user.findMany({
       where: { isActive: true, role: { name: { in: ADMIN_ROLES } } },
@@ -1301,7 +1338,7 @@ export class SponsorshipService {
           admin.id,
           'sponsorship_deal_locked',
           'Deal locked',
-          `${this.hostNameOf(interest)} \u00d7 ${interest.brandProfile.brandName}: "${existing.projectName}" is now locked.`,
+          `${hostName} \u00d7 ${brandName}: "${existing.projectName}" is now locked.`,
           { sponsorshipInterestId: interest.id },
         ),
       ),
@@ -1312,7 +1349,11 @@ export class SponsorshipService {
 
   async requestDealChanges(userId: string, interestId: string, dto: RequestDealChangesDto) {
     const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
-    if (senderType !== ChatSenderType.BRAND) throw new ForbiddenException('Only the brand can request changes');
+    const isCampaign = !!interest.campaignId;
+    const requiredApprover = isCampaign ? ChatSenderType.HOST : ChatSenderType.BRAND;
+    if (senderType !== requiredApprover) {
+      throw new ForbiddenException(isCampaign ? 'Only the community can request changes for a campaign' : 'Only the brand can request changes');
+    }
 
     const existing = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
     if (!existing) throw new NotFoundException('No deal found for this chat');
@@ -1323,23 +1364,32 @@ export class SponsorshipService {
       data: { status: 'CHANGES_REQUESTED', changeRequestNote: dto.note ?? null },
     });
 
+    const hostName = this.hostNameOf(interest);
+    const brandName = interest.campaign?.brandProfile?.brandName ?? interest.brandProfile?.brandName ?? 'The brand';
+    const requesterName = isCampaign ? hostName : brandName;
+    const targetUserId = isCampaign
+      ? interest.brandProfile?.userId
+      : (interest.hostProfile?.userId ?? interest.sponsorshipProposal?.hostProfile?.userId);
+
     const noteSuffix = dto.note?.trim() ? `: "${dto.note.trim()}"` : '.';
     await this.postDealSystemMessage(
       interest.id,
-      ChatSenderType.BRAND,
+      senderType,
       userId,
-      `${interest.brandProfile.brandName} requested changes to the deal${noteSuffix}`,
+      `${requesterName} requested changes to the deal${noteSuffix}`,
     );
 
-    void this.notificationsService
-      .create(
-        interest.campaignId ? interest.hostProfile?.userId : interest.sponsorshipProposal?.hostProfile?.userId,
-        'sponsorship_deal_changes_requested',
-        interest.brandProfile.brandName,
-        dto.note?.trim() ? `Requested changes: ${dto.note.trim()}` : 'Requested changes to the deal',
-        { sponsorshipInterestId: interest.id },
-      )
-      .catch((err) => this.logger.error('Failed to notify host of requested deal changes', err));
+    if (targetUserId) {
+      void this.notificationsService
+        .create(
+          targetUserId,
+          'sponsorship_deal_changes_requested',
+          requesterName,
+          dto.note?.trim() ? `Requested changes: ${dto.note.trim()}` : 'Requested changes to the deal',
+          { sponsorshipInterestId: interest.id },
+        )
+        .catch((err) => this.logger.error('Failed to notify counterparty of requested deal changes', err));
+    }
 
     return deal;
   }

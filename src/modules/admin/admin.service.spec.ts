@@ -30,6 +30,9 @@ import { RedisService } from '../../common/redis/redis.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { InterestsService } from '../interests/interests.service';
 import { RefundsService } from '../refunds/refunds.service';
+import { SponsorshipInvoicePdfService } from '../sponsorship/sponsorship-invoice-pdf.service';
+import { SponsorshipReportPdfService } from '../sponsorship/sponsorship-report-pdf.service';
+import { TeamAccessService } from '../../common/team-access/team-access.service';
 
 // ── Mock factories ───────────────────────────────────────────────────────────
 
@@ -124,6 +127,9 @@ describe('AdminService', () => {
         { provide: AuditLogService, useValue: { log: jest.fn() } },
         { provide: InterestsService, useValue: { invalidateCache: jest.fn().mockResolvedValue(undefined) } },
         { provide: RefundsService, useValue: { cancelEventOrders: jest.fn().mockResolvedValue(undefined) } },
+        { provide: SponsorshipInvoicePdfService, useValue: { getDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/invoice.pdf') } },
+        { provide: SponsorshipReportPdfService, useValue: { getDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/report.pdf') } },
+        { provide: TeamAccessService, useValue: { getHostProfileIds: jest.fn().mockResolvedValue([]), getBrandProfileIds: jest.fn().mockResolvedValue([]) } },
       ],
     }).compile();
 
@@ -173,11 +179,11 @@ describe('AdminService', () => {
       expect(prisma.user.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'existing-user-id' },
-          data: expect.objectContaining({ adminRole: { connect: { id: cityAdminRole.id } } }),
+          data: expect.objectContaining({ pendingAdminRoleId: cityAdminRole.id }),
         }),
       );
       expect(mockAuth.createUser).not.toHaveBeenCalled();
-      expect(result).toEqual({ message: 'Admin access granted to existing account' });
+      expect(result).toEqual({ message: 'Invitation sent' });
     });
 
     it('throws ConflictException when the existing user already has admin access', async () => {
@@ -197,10 +203,11 @@ describe('AdminService', () => {
       ).resolves.toEqual({ message: 'Invitation sent' });
     });
 
-    it('throws BadRequestException for CITY_ADMIN without managedCities', async () => {
+    it('allows CITY_ADMIN with empty managedCities (scoped to all cities)', async () => {
+      prisma.role.findUnique.mockResolvedValue(cityAdminRole);
       await expect(
         service.inviteAdmin({ ...dto, managedCities: [] }),
-      ).rejects.toThrow(BadRequestException);
+      ).resolves.toEqual({ message: 'Invitation sent' });
     });
 
     it('does not require managedCities for MODERATOR role', async () => {
@@ -505,7 +512,15 @@ describe('AdminService', () => {
 
       await service.listAdmins({ role: 'MODERATOR' } as any);
       expect(prisma.user.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: expect.objectContaining({ role: { name: 'MODERATOR' } }) }),
+        expect.objectContaining({
+          where: expect.objectContaining({
+            OR: expect.arrayContaining([
+              { role: { name: 'MODERATOR' } },
+              { adminRole: { name: 'MODERATOR' } },
+              { pendingAdminRole: { name: 'MODERATOR' } },
+            ]),
+          }),
+        }),
       );
     });
   });
@@ -1311,10 +1326,55 @@ describe('AdminService', () => {
       const result = await service.listSponsorshipDeals('APPROVED');
 
       expect(prisma.sponsorshipDeal.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { status: 'APPROVED' } }),
+        expect.objectContaining({
+          where: expect.objectContaining({
+            status: 'APPROVED',
+            sponsorshipInterest: { sponsorshipProposalId: { not: null } },
+          }),
+        }),
       );
       expect(result).toEqual([
         expect.objectContaining({ id: 'deal-1', proposalName: 'Summer Fest Proposal', communityName: 'Host', brandName: 'Acme', status: 'APPROVED' }),
+      ]);
+    });
+
+    it('listCampaignDeals() maps campaign deals with community/brand names, optionally filtered by status', async () => {
+      prisma.sponsorshipDeal.findMany.mockResolvedValue([
+        {
+          id: 'deal-camp-1',
+          projectName: 'Campus Campaign',
+          startDate: new Date(),
+          endDate: null,
+          time: null,
+          sponsorshipCategory: null,
+          sponsorshipAmount: 50000,
+          venue: 'Bengaluru',
+          barterElements: null,
+          deliverables: '2 reels',
+          otherTerms: null,
+          additionalNotes: null,
+          status: 'APPROVED',
+          version: 1,
+          changeRequestNote: null,
+          approvedAt: new Date(),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          sponsorshipInterest: {
+            id: 'interest-camp-1',
+            campaign: { id: 'camp-1', name: 'Campus Campaign' },
+            hostProfile: { displayName: 'Host', communityProfile: { name: 'Coding Community' } },
+            brandProfile: { id: 'brand-1', brandName: 'TechBrand' },
+          },
+        },
+      ]);
+
+      const result = await service.listCampaignDeals('APPROVED');
+
+      expect(prisma.sponsorshipDeal.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { status: 'APPROVED', sponsorshipInterest: { campaignId: { not: null } } } }),
+      );
+      expect(result).toEqual([
+        expect.objectContaining({ id: 'deal-camp-1', proposalName: 'Campus Campaign', communityName: 'Coding Community', brandName: 'TechBrand', status: 'APPROVED' }),
       ]);
     });
   });
@@ -1332,7 +1392,10 @@ describe('AdminService', () => {
           messages: [{ content: 'Need help', mediaKey: null, createdAt: new Date() }],
         },
       ]);
-      prisma.meetdayChatMessage.count.mockResolvedValue(2);
+      prisma.meetdayChatMessage.findMany.mockResolvedValue([
+        { id: 'm1', content: 'Need help', replyTo: null },
+        { id: 'm2', content: 'Need help 2', replyTo: null },
+      ]);
 
       const result = await service.listMeetdayChats();
 
