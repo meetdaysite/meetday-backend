@@ -12,11 +12,13 @@ import {
   Post,
   Put,
   Query,
+  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -51,6 +53,8 @@ import { UpsertSponsorshipDealReportDto } from './dto/upsert-sponsorship-deal-re
 import { VerifySponsorshipDealPaymentDto } from './dto/verify-sponsorship-deal-payment.dto';
 import { SponsorshipInvoicePdfService } from './sponsorship-invoice-pdf.service';
 import { SponsorshipReportPdfService } from './sponsorship-report-pdf.service';
+import { ProposalPdfGeneratorService } from './proposal-pdf-generator.service';
+import { GenerateProposalPdfDto } from './dto/generate-proposal-pdf.dto';
 import { DocumentExtractionService } from '../../common/document-extraction/document-extraction.service';
 
 @ApiTags('Sponsorship Proposals')
@@ -62,8 +66,29 @@ export class SponsorshipController {
     private readonly proposalCopilotService: ProposalCopilotService,
     private readonly sponsorshipInvoicePdfService: SponsorshipInvoicePdfService,
     private readonly sponsorshipReportPdfService: SponsorshipReportPdfService,
+    private readonly proposalPdfGeneratorService: ProposalPdfGeneratorService,
     private readonly documentExtractionService: DocumentExtractionService,
   ) {}
+
+  @Post('proposals/generate-pdf')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'Generate a quick sponsorship proposal PDF from form data',
+    description:
+      'Stateless — accepts proposal details directly in the request body and streams back a styled PDF ' +
+      'for immediate download. Not tied to any saved proposal record.',
+  })
+  @ApiOkResponse({ description: 'PDF file stream.' })
+  async generateProposalPdf(@Body() dto: GenerateProposalPdfDto, @Res() res: Response) {
+    const buffer = await this.proposalPdfGeneratorService.generate(dto);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'attachment; filename="sponsorship-proposal.pdf"',
+      'Content-Length': buffer.length,
+    });
+    res.send(buffer);
+  }
 
   @Post('copilot/generate-draft')
   @UseGuards(RolesGuard)
