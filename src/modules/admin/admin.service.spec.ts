@@ -33,6 +33,7 @@ import { RefundsService } from '../refunds/refunds.service';
 import { SponsorshipInvoicePdfService } from '../sponsorship/sponsorship-invoice-pdf.service';
 import { SponsorshipReportPdfService } from '../sponsorship/sponsorship-report-pdf.service';
 import { TeamAccessService } from '../../common/team-access/team-access.service';
+import { NotificationsGateway } from '../notifications/notifications.gateway';
 
 // ── Mock factories ───────────────────────────────────────────────────────────
 
@@ -122,6 +123,7 @@ describe('AdminService', () => {
         { provide: ConfigService, useValue: mockConfig },
         { provide: getQueueToken('mail'), useValue: mockMailQueue },
         { provide: NotificationsService, useValue: { create: jest.fn().mockResolvedValue(undefined) } },
+        { provide: NotificationsGateway, useValue: { getOnlineUserIds: jest.fn().mockResolvedValue(new Set()), emitUnreadCount: jest.fn(), server: { to: jest.fn().mockReturnThis(), emit: jest.fn() } } },
         { provide: StorageService, useValue: { getPresignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/img') } },
         { provide: RedisService, useValue: { get: jest.fn().mockResolvedValue(null), set: jest.fn(), del: jest.fn() } },
         { provide: AuditLogService, useValue: { log: jest.fn() } },

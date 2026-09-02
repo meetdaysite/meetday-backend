@@ -920,26 +920,36 @@ export class SponsorshipService {
     const isCampaign = !!interest.campaignId;
     const participantHostProfileId = isCampaign ? interest.hostProfile?.id : interest.sponsorshipProposal?.hostProfile.id;
     const participantHostUserId = isCampaign ? interest.hostProfile?.userId : interest.sponsorshipProposal?.hostProfile.userId;
+    const participantBrandProfileId = isCampaign ? (interest.campaign?.brandProfile?.id ?? interest.brandProfile?.id) : interest.brandProfile?.id;
+    const participantBrandUserId = isCampaign ? (interest.campaign?.brandProfile?.userId ?? interest.brandProfile?.userId) : interest.brandProfile?.userId;
 
     // Owner check first (cheap, no extra query) — team membership is an additional fallback.
     let isHost = participantHostUserId === userId;
-    let isBrand = interest.brandProfile.userId === userId;
+    let isBrand = participantBrandUserId === userId;
     if (!isHost && !isBrand) {
       const [hostProfileIds, brandProfileIds] = await Promise.all([
         this.teamAccessService.getHostProfileIds(userId),
         this.teamAccessService.getBrandProfileIds(userId),
       ]);
       isHost = !!participantHostProfileId && hostProfileIds.includes(participantHostProfileId);
-      isBrand = brandProfileIds.includes(interest.brandProfile.id);
+      isBrand = !!participantBrandProfileId && brandProfileIds.includes(participantBrandProfileId);
     }
     if (!isHost && !isBrand) throw new ForbiddenException('You do not have access to this chat');
 
     // Ambiguous only when both are true (self-interest edge case) — let the caller's hint break
     // the tie; otherwise fall back to the pre-existing HOST-first default for compatibility.
     const senderType =
-      isHost && isBrand && preferredRole ? ChatSenderType[preferredRole] : isHost ? ChatSenderType.HOST : ChatSenderType.BRAND;
+      isHost && isBrand && preferredRole
+        ? ChatSenderType[preferredRole]
+        : isCampaign
+        ? isBrand
+          ? ChatSenderType.BRAND
+          : ChatSenderType.HOST
+        : isHost
+        ? ChatSenderType.HOST
+        : ChatSenderType.BRAND;
 
-    return { interest, senderType };
+    return { interest, senderType, isHost, isBrand };
   }
 
   async listChatMessages(userId: string, interestId: string) {
@@ -1100,33 +1110,13 @@ export class SponsorshipService {
 
   // Host accepts a brand's interest OR brand accepts a host's interest (for campaigns) — opens the chat window both sides ("Requests" → "General").
   async acceptChatRequest(userId: string, interestId: string) {
-    const interest = await this.prisma.sponsorshipInterest.findUnique({
-      where: { id: interestId },
-      include: {
-        sponsorshipProposal: { select: { hostProfile: { select: { id: true, userId: true } } } },
-        hostProfile: { select: { id: true, userId: true } },
-        brandProfile: { select: { id: true, userId: true, brandName: true } },
-      },
-    });
-    if (!interest) throw new NotFoundException('Chat thread not found');
+    const { interest, isHost, isBrand } = await this.getInterestForParticipant(userId, interestId);
     const isCampaign = !!interest.campaignId;
-    const hostUserId = isCampaign ? interest.hostProfile?.userId : interest.sponsorshipProposal?.hostProfile?.userId;
-    const participantHostProfileId = isCampaign ? interest.hostProfile?.id : interest.sponsorshipProposal?.hostProfile?.id;
 
     if (isCampaign) {
-      if (interest.brandProfile.userId !== userId) {
-        const brandProfileIds = await this.teamAccessService.getBrandProfileIds(userId);
-        if (!brandProfileIds.includes(interest.brandProfile.id)) {
-          throw new ForbiddenException('Only the brand can accept this request');
-        }
-      }
+      if (!isBrand) throw new ForbiddenException('Only the brand can accept this request');
     } else {
-      if (hostUserId !== userId) {
-        const hostProfileIds = await this.teamAccessService.getHostProfileIds(userId);
-        if (!participantHostProfileId || !hostProfileIds.includes(participantHostProfileId)) {
-          throw new ForbiddenException('Only the host can accept this request');
-        }
-      }
+      if (!isHost) throw new ForbiddenException('Only the host can accept this request');
     }
 
     if (interest.chatStatus === SponsorshipChatStatus.ACCEPTED) {
@@ -1138,10 +1128,13 @@ export class SponsorshipService {
       data: { chatStatus: SponsorshipChatStatus.ACCEPTED, chatAcceptedAt: new Date() },
     });
 
-    const recipientUserId = isCampaign ? hostUserId : interest.brandProfile.userId;
+    const hostUserId = isCampaign ? (interest.hostProfile?.userId ?? interest.sponsorshipProposal?.hostProfile?.userId) : (interest.sponsorshipProposal?.hostProfile?.userId ?? interest.hostProfile?.userId);
+    const brandUserId = isCampaign ? (interest.campaign?.brandProfile?.userId ?? interest.brandProfile?.userId) : interest.brandProfile?.userId;
+    const recipientUserId = isCampaign ? hostUserId : brandUserId;
+    const brandName = interest.campaign?.brandProfile?.brandName ?? interest.brandProfile?.brandName ?? 'Brand';
     const title = 'Request accepted!';
     const body = isCampaign
-      ? `${interest.brandProfile.brandName} accepted your interest — you can now chat with them.`
+      ? `${brandName} accepted your interest — you can now chat with them.`
       : 'The community accepted your interest — you can now chat with them.';
 
     if (recipientUserId) {
@@ -1184,12 +1177,18 @@ export class SponsorshipService {
   }
 
   async createDeal(userId: string, interestId: string, dto: UpsertSponsorshipDealDto) {
-    const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
+    const { interest, isHost, isBrand } = await this.getInterestForParticipant(userId, interestId);
     const isCampaign = !!interest.campaignId;
-    const requiredCreator = isCampaign ? ChatSenderType.BRAND : ChatSenderType.HOST;
-    if (senderType !== requiredCreator) {
-      throw new ForbiddenException(isCampaign ? 'Only the brand can lock a deal for a campaign' : 'Only the community can lock a deal');
+    if (isCampaign) {
+      if (!isBrand) {
+        throw new ForbiddenException('Only the brand can lock a deal for a campaign');
+      }
+    } else {
+      if (!isHost) {
+        throw new ForbiddenException('Only the community can lock a deal');
+      }
     }
+    const senderType = isCampaign ? ChatSenderType.BRAND : ChatSenderType.HOST;
     if (interest.chatStatus !== SponsorshipChatStatus.ACCEPTED) {
       throw new BadRequestException('The chat must be accepted before locking a deal');
     }
@@ -1236,12 +1235,18 @@ export class SponsorshipService {
   }
 
   async updateDeal(userId: string, interestId: string, dto: UpsertSponsorshipDealDto) {
-    const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
+    const { interest, isHost, isBrand } = await this.getInterestForParticipant(userId, interestId);
     const isCampaign = !!interest.campaignId;
-    const requiredCreator = isCampaign ? ChatSenderType.BRAND : ChatSenderType.HOST;
-    if (senderType !== requiredCreator) {
-      throw new ForbiddenException(isCampaign ? 'Only the brand can edit the deal for a campaign' : 'Only the community can edit the deal');
+    if (isCampaign) {
+      if (!isBrand) {
+        throw new ForbiddenException('Only the brand can edit the deal for a campaign');
+      }
+    } else {
+      if (!isHost) {
+        throw new ForbiddenException('Only the community can edit the deal');
+      }
     }
+    const senderType = isCampaign ? ChatSenderType.BRAND : ChatSenderType.HOST;
 
     const existing = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
     if (!existing) throw new NotFoundException('No deal found for this chat — lock a deal first');
@@ -1288,12 +1293,18 @@ export class SponsorshipService {
   }
 
   async approveDeal(userId: string, interestId: string) {
-    const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
+    const { interest, isHost, isBrand } = await this.getInterestForParticipant(userId, interestId);
     const isCampaign = !!interest.campaignId;
-    const requiredApprover = isCampaign ? ChatSenderType.HOST : ChatSenderType.BRAND;
-    if (senderType !== requiredApprover) {
-      throw new ForbiddenException(isCampaign ? 'Only the community can accept the deal for a campaign' : 'Only the brand can approve the deal');
+    if (isCampaign) {
+      if (!isHost) {
+        throw new ForbiddenException('Only the community can accept the deal for a campaign');
+      }
+    } else {
+      if (!isBrand) {
+        throw new ForbiddenException('Only the brand can approve the deal');
+      }
     }
+    const senderType = isCampaign ? ChatSenderType.HOST : ChatSenderType.BRAND;
 
     const existing = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
     if (!existing) throw new NotFoundException('No deal found for this chat');
@@ -1338,7 +1349,7 @@ export class SponsorshipService {
           admin.id,
           'sponsorship_deal_locked',
           'Deal locked',
-          `${hostName} \u00d7 ${brandName}: "${existing.projectName}" is now locked.`,
+          `${hostName} × ${brandName}: "${existing.projectName}" is now locked.`,
           { sponsorshipInterestId: interest.id },
         ),
       ),
@@ -1348,12 +1359,18 @@ export class SponsorshipService {
   }
 
   async requestDealChanges(userId: string, interestId: string, dto: RequestDealChangesDto) {
-    const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
+    const { interest, isHost, isBrand } = await this.getInterestForParticipant(userId, interestId);
     const isCampaign = !!interest.campaignId;
-    const requiredApprover = isCampaign ? ChatSenderType.HOST : ChatSenderType.BRAND;
-    if (senderType !== requiredApprover) {
-      throw new ForbiddenException(isCampaign ? 'Only the community can request changes for a campaign' : 'Only the brand can request changes');
+    if (isCampaign) {
+      if (!isHost) {
+        throw new ForbiddenException('Only the community can request changes for a campaign');
+      }
+    } else {
+      if (!isBrand) {
+        throw new ForbiddenException('Only the brand can request changes');
+      }
     }
+    const senderType = isCampaign ? ChatSenderType.HOST : ChatSenderType.BRAND;
 
     const existing = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
     if (!existing) throw new NotFoundException('No deal found for this chat');

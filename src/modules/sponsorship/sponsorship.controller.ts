@@ -273,14 +273,14 @@ export class SponsorshipController {
 
   @Post('chats/:interestId/accept')
   @UseGuards(RolesGuard)
-  @Roles('HOST')
+  @Roles('HOST', 'BRAND')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: "Accept a brand's interest and open the chat",
+    summary: "Accept an interest request and open the chat",
     description: 'Moves the thread from "Requests" to "General"/"Accepted" on both sides.',
   })
   @ApiOkResponse({ description: 'Request accepted.' })
-  @ApiForbiddenResponse({ description: 'Not the host who owns this proposal.' })
+  @ApiForbiddenResponse({ description: 'Not authorized to accept this request.' })
   @ApiNotFoundResponse({ description: 'Chat thread not found.' })
   acceptChatRequest(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string) {
     return this.sponsorshipService.acceptChatRequest(userId, interestId);
@@ -300,14 +300,14 @@ export class SponsorshipController {
 
   @Post('chats/:interestId/deal')
   @UseGuards(RolesGuard)
-  @Roles('HOST')
+  @Roles('HOST', 'BRAND')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
-    summary: 'Lock the deal — community submits the final negotiated terms',
-    description: 'Only the community can do this, and only once per chat — use PATCH to edit afterwards.',
+    summary: 'Lock the deal — community or brand submits the negotiated terms',
+    description: 'Only the proposal owner (host for proposals, brand for campaigns) can do this. Use PATCH to edit afterwards.',
   })
   @ApiOkResponse({ description: 'Deal created.' })
-  @ApiForbiddenResponse({ description: 'Not the host, or chat not yet accepted.' })
+  @ApiForbiddenResponse({ description: 'Not authorized, or chat not yet accepted.' })
   @ApiBadRequestResponse({ description: 'A deal already exists for this chat.' })
   createDeal(
     @GetUser('id') userId: string,
@@ -319,7 +319,7 @@ export class SponsorshipController {
 
   @Patch('chats/:interestId/deal')
   @UseGuards(RolesGuard)
-  @Roles('HOST')
+  @Roles('HOST', 'BRAND')
   @ApiOperation({
     summary: 'Edit the deal',
     description: 'Resets status to PENDING_APPROVAL and bumps the version. Not allowed once APPROVED.',
@@ -337,9 +337,9 @@ export class SponsorshipController {
 
   @Post('chats/:interestId/deal/approve')
   @UseGuards(RolesGuard)
-  @Roles('BRAND')
+  @Roles('HOST', 'BRAND')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Approve and lock the deal — brand only' })
+  @ApiOperation({ summary: 'Approve and lock the deal' })
   @ApiOkResponse({ description: 'Deal locked.' })
   @ApiNotFoundResponse({ description: 'No deal exists yet for this chat.' })
   approveDeal(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string) {
@@ -348,9 +348,9 @@ export class SponsorshipController {
 
   @Post('chats/:interestId/deal/request-changes')
   @UseGuards(RolesGuard)
-  @Roles('BRAND')
+  @Roles('HOST', 'BRAND')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Request changes to the proposed deal — brand only' })
+  @ApiOperation({ summary: 'Request changes to the proposed deal' })
   @ApiOkResponse({ description: 'Deal marked as changes requested.' })
   @ApiNotFoundResponse({ description: 'No deal exists yet for this chat.' })
   @ApiBadRequestResponse({ description: 'Deal is already locked/approved.' })

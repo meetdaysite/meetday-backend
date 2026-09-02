@@ -1,4 +1,5 @@
 import { IsISO8601, IsNumber, IsOptional, IsString, Min, MaxLength } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpsertSponsorshipDealDto {
@@ -40,6 +41,7 @@ export class UpsertSponsorshipDealDto {
   barterElements?: string;
 
   @ApiProperty({ example: 45000 })
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   sponsorshipAmount: number;
