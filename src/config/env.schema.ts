@@ -35,8 +35,10 @@ export const envSchema = z.object({
 
   FRONTEND_URL: z.string().url('FRONTEND_URL must be a valid URL'),
   // Separate app from FRONTEND_URL (the consumer host/brand/attendee site) — used for links that
-  // must open the admin panel specifically, e.g. the admin-invite password-reset email.
-  ADMIN_URL: z.string().url('ADMIN_URL must be a valid URL').default('https://meetday-admin.vercel.app'),
+  // must open the admin panel specifically, e.g. the admin-invite password-reset email. Must be
+  // a Firebase Auth "authorized domain" (Console → Authentication → Settings) or
+  // generatePasswordResetLink() throws "Domain not allowlisted by project".
+  ADMIN_URL: z.string().url('ADMIN_URL must be a valid URL').default('https://admin.meetday.ai'),
   ALLOWED_ORIGINS: z.string().optional(), // required in production; comma-separated CORS origins, e.g. https://app.meetday.ai,https://admin.meetday.ai
 
   INTERNAL_API_KEY: z.string().min(32, 'INTERNAL_API_KEY must be at least 32 characters'),
