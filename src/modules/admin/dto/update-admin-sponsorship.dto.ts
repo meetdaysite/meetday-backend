@@ -101,4 +101,9 @@ export class UpdateAdminSponsorshipDto {
   @ValidateNested({ each: true })
   @Type(() => AdminSponsorTierDto)
   sponsorTiers?: AdminSponsorTierDto[];
+
+  @ApiPropertyOptional({ enum: ['CASH', 'BARTER', 'BOTH'], default: 'CASH' })
+  @IsOptional()
+  @IsString()
+  sponsorshipType?: string;
 }

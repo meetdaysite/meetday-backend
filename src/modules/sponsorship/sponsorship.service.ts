@@ -183,7 +183,8 @@ export class SponsorshipService {
         docName: dto.docName ?? '',
         docType: dto.docType ?? '',
         docSize: dto.docSize ?? 0,
-        sponsorTiers: (dto.sponsorTiers ?? []) as unknown as Prisma.InputJsonValue,
+        sponsorshipType: dto.sponsorshipType || 'CASH',
+        sponsorTiers: (dto.sponsorshipType === 'BARTER' ? [] : (dto.sponsorTiers ?? [])) as unknown as Prisma.InputJsonValue,
         status: SponsorshipStatus.DRAFT,
       },
     });
@@ -240,8 +241,9 @@ export class SponsorshipService {
             ...(dto.docName !== undefined && { docName: dto.docName }),
             ...(dto.docType !== undefined && { docType: dto.docType }),
             ...(dto.docSize !== undefined && { docSize: dto.docSize }),
+            ...(dto.sponsorshipType !== undefined && { sponsorshipType: dto.sponsorshipType }),
             ...(dto.sponsorTiers !== undefined && {
-              sponsorTiers: dto.sponsorTiers as unknown as Prisma.InputJsonValue,
+              sponsorTiers: (dto.sponsorshipType === 'BARTER' ? [] : dto.sponsorTiers) as unknown as Prisma.InputJsonValue,
             }),
           },
         }),
@@ -624,7 +626,10 @@ export class SponsorshipService {
     if (!proposal.ageGroup) missing.push('ageGroup');
     if (!proposal.guestCount) missing.push('guestCount');
     if (!proposal.docKey) missing.push('docKey');
-    if (!(proposal.sponsorTiers as unknown[])?.length) missing.push('sponsorTiers');
+    const sponsorshipType = proposal.sponsorshipType || 'CASH';
+    if (sponsorshipType !== 'BARTER' && !(proposal.sponsorTiers as unknown[])?.length) {
+      missing.push('sponsorTiers');
+    }
 
     if (missing.length) throw new BadRequestException(`Proposal is incomplete. Missing: ${missing.join(', ')}`);
 
@@ -1227,13 +1232,26 @@ export class SponsorshipService {
       ? (interest.hostProfile?.userId ?? interest.sponsorshipProposal?.hostProfile?.userId)
       : interest.brandProfile?.userId;
 
-    await this.postDealSystemMessage(interest.id, senderType, userId, `${creatorName} shared a deal proposal for your approval.`);
+    await this.postDealSystemMessage(
+      interest.id,
+      senderType,
+      userId,
+      isCampaign
+        ? `${creatorName} shared a campaign deal for your approval.`
+        : `${creatorName} shared a deal proposal for your approval.`,
+    );
 
     if (targetUserId) {
       void this.notificationsService
-        .create(targetUserId, 'sponsorship_deal_submitted', creatorName, `Shared a deal proposal: ${dto.projectName}`, {
-          sponsorshipInterestId: interest.id,
-        })
+        .create(
+          targetUserId,
+          'sponsorship_deal_submitted',
+          creatorName,
+          isCampaign ? `Shared a campaign deal: ${dto.projectName}` : `Shared a deal proposal: ${dto.projectName}`,
+          {
+            sponsorshipInterestId: interest.id,
+          },
+        )
         .catch((err) => this.logger.error('Failed to notify counterparty of new deal proposal', err));
     }
 
@@ -1285,13 +1303,26 @@ export class SponsorshipService {
       ? (interest.hostProfile?.userId ?? interest.sponsorshipProposal?.hostProfile?.userId)
       : interest.brandProfile?.userId;
 
-    await this.postDealSystemMessage(interest.id, senderType, userId, `${creatorName} updated the deal proposal.`);
+    await this.postDealSystemMessage(
+      interest.id,
+      senderType,
+      userId,
+      isCampaign
+        ? `${creatorName} updated the campaign deal.`
+        : `${creatorName} updated the deal proposal.`,
+    );
 
     if (targetUserId && targetUserId !== userId) {
       void this.notificationsService
-        .create(targetUserId, 'sponsorship_deal_updated', creatorName, `Updated the deal proposal: ${dto.projectName}`, {
-          sponsorshipInterestId: interest.id,
-        })
+        .create(
+          targetUserId,
+          'sponsorship_deal_updated',
+          creatorName,
+          isCampaign ? `Updated the campaign deal: ${dto.projectName}` : `Updated the deal proposal: ${dto.projectName}`,
+          {
+            sponsorshipInterestId: interest.id,
+          },
+        )
         .catch((err) => this.logger.error('Failed to notify counterparty of updated deal proposal', err));
     }
 
@@ -1636,7 +1667,15 @@ export class SponsorshipService {
     if (!brandProfile) throw new NotFoundException('Brand profile not found');
 
     const deals = await this.prisma.sponsorshipDeal.findMany({
-      where: { status: 'APPROVED', sponsorshipInterest: { brandProfileId: brandProfile.id } },
+      where: {
+        status: 'APPROVED',
+        sponsorshipInterest: {
+          OR: [
+            { brandProfileId: brandProfile.id },
+            { campaign: { brandProfileId: brandProfile.id } },
+          ],
+        },
+      },
       include: {
         sponsorshipInterest: {
           select: {
@@ -1696,6 +1735,9 @@ export class SponsorshipService {
           approvedAt: d.approvedAt,
           razorpayPaymentId: d.razorpayPaymentId,
           invoicePdfKey: d.invoicePdfKey,
+          isCampaign,
+          campaignId: d.sponsorshipInterest.campaignId,
+          sponsorshipProposalId: d.sponsorshipInterest.sponsorshipProposalId,
         };
       }),
     );

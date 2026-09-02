@@ -108,4 +108,9 @@ export class CreateProposalDto {
   @ValidateNested({ each: true })
   @Type(() => SponsorTierDto)
   sponsorTiers?: SponsorTierDto[];
+
+  @ApiPropertyOptional({ enum: ['CASH', 'BARTER', 'BOTH'], default: 'CASH' })
+  @IsOptional()
+  @IsString()
+  sponsorshipType?: string;
 }

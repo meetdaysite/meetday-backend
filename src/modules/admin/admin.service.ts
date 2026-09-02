@@ -1736,7 +1736,8 @@ export class AdminService {
         docName: dto.docName,
         docType: dto.docType,
         docSize: dto.docSize,
-        sponsorTiers: dto.sponsorTiers as unknown as Prisma.InputJsonValue,
+        sponsorshipType: dto.sponsorshipType || 'CASH',
+        sponsorTiers: (dto.sponsorshipType === 'BARTER' ? [] : dto.sponsorTiers) as unknown as Prisma.InputJsonValue,
         status: 'PUBLISHED',
         submittedAt: new Date(),
         reviewedBy: adminId,
@@ -1803,7 +1804,10 @@ export class AdminService {
         ...(dto.docName !== undefined && { docName: dto.docName }),
         ...(dto.docType !== undefined && { docType: dto.docType }),
         ...(dto.docSize !== undefined && { docSize: dto.docSize }),
-        ...(dto.sponsorTiers !== undefined && { sponsorTiers: dto.sponsorTiers as unknown as Prisma.InputJsonValue }),
+        ...(dto.sponsorshipType !== undefined && { sponsorshipType: dto.sponsorshipType }),
+        ...(dto.sponsorTiers !== undefined && {
+          sponsorTiers: (dto.sponsorshipType === 'BARTER' ? [] : dto.sponsorTiers) as unknown as Prisma.InputJsonValue,
+        }),
       },
       include: {
         hostProfile: {
@@ -1970,6 +1974,7 @@ export class AdminService {
         ...(changes.docName !== undefined && { docName: changes.docName }),
         ...(changes.docType !== undefined && { docType: changes.docType }),
         ...(changes.docSize !== undefined && { docSize: changes.docSize }),
+        ...(changes.sponsorshipType !== undefined && { sponsorshipType: changes.sponsorshipType }),
         ...(changes.sponsorTiers !== undefined && { sponsorTiers: changes.sponsorTiers }),
         pendingRevision: Prisma.JsonNull,
         reviewedBy: adminId,

@@ -1060,7 +1060,8 @@ model SponsorshipProposal {
   docType String
   docSize Int
 
-  sponsorTiers Json // [{ name, price }]
+  sponsorTiers    Json // [{ name, price }]
+  sponsorshipType String @default("CASH") // "CASH" | "BARTER" | "BOTH"
 
   status SponsorshipStatus @default(DRAFT)
 
