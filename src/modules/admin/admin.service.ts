@@ -56,6 +56,7 @@ import { SponsorshipReportPdfService } from '../sponsorship/sponsorship-report-p
 import { RESOLVED_SYSTEM_MESSAGE } from '../meetday-chat/meetday-chat.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationsGateway } from '../notifications/notifications.gateway';
 import { RedisService } from '../../common/redis/redis.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { InterestsService } from '../interests/interests.service';
@@ -79,6 +80,7 @@ export class AdminService {
     @InjectQueue('mail') private readonly mailQueue: Queue,
     private readonly storageService: StorageService,
     private readonly notificationsService: NotificationsService,
+    private readonly notificationsGateway: NotificationsGateway,
     private readonly redis: RedisService,
     private readonly auditLogService: AuditLogService,
     private readonly interestsService: InterestsService,
@@ -137,8 +139,12 @@ export class AdminService {
       this.prisma.user.count({ where }),
     ]);
 
+    // "Online" means they currently have the admin panel open (a live socket connected to
+    // the shared /notifications gateway) — not to be confused with `isActive` (account enabled).
+    const onlineIds = await this.notificationsGateway.getOnlineUserIds(admins.map((a) => a.id));
+    const adminsWithPresence = admins.map((a) => ({ ...a, isOnline: onlineIds.has(a.id) }));
 
-    return { admins, total, page, limit };
+    return { admins: adminsWithPresence, total, page, limit };
   }
 
   async getRoles(query: ListRolesQueryDto) {

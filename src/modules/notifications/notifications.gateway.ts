@@ -92,4 +92,21 @@ export class NotificationsGateway implements OnGatewayInit, OnGatewayConnection 
     this.server.to(userId).emit(event, data);
     this.logger.log(`WS emit: event=${event} userId=${userId}`);
   }
+
+  // Reuses the per-user room every connected client already joins (see handleConnection) —
+  // a room with at least one live socket means that user currently has the app open.
+  async getOnlineUserIds(userIds: string[]): Promise<Set<string>> {
+    const online = await Promise.all(
+      userIds.map(async (id) => {
+        try {
+          const sockets = await this.server.in(id).fetchSockets();
+          return sockets.length > 0 ? id : null;
+        } catch (err) {
+          this.logger.warn(`fetchSockets failed for userId=${id} — ${(err as Error).message}`);
+          return null;
+        }
+      }),
+    );
+    return new Set(online.filter((id): id is string => id !== null));
+  }
 }
