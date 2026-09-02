@@ -306,7 +306,7 @@ Returns **404** if the ticket does not exist **or** if it belongs to a different
 
   @Get('admin')
   @UseGuards(RolesGuard)
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'SUPPORT')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'SUPPORT', 'MODERATOR')
   @ApiForbiddenResponse({ description: 'Insufficient role' })
   @ApiOperation({
     summary: 'List support tickets with filters (admin)',
@@ -357,7 +357,7 @@ so URGENT and HIGH tickets surface first within each page.
 
   @Get('admin/:id')
   @UseGuards(RolesGuard)
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'SUPPORT')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'SUPPORT', 'MODERATOR')
   @ApiForbiddenResponse({ description: 'Insufficient role' })
   @ApiNotFoundResponse({ description: 'Ticket not found' })
   @ApiOperation({

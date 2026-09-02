@@ -26,7 +26,7 @@ export class ConsentController {
 
   @Get('admin/:userId')
   @UseGuards(RolesGuard)
-  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'SUPPORT')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'SUPPORT', 'MODERATOR')
   @ApiOperation({ summary: 'Admin: view full consent history for a user' })
   @ApiOkResponse({ description: 'Consent history' })
   @ApiParam({ name: 'userId', type: String })

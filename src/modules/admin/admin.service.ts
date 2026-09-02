@@ -519,6 +519,55 @@ export class AdminService {
     return { message: 'Admin account reactivated successfully' };
   }
 
+  async deleteAdmin(targetAdminId: string, requestingAdminId: string) {
+    if (targetAdminId === requestingAdminId) {
+      throw new BadRequestException('You cannot delete your own account');
+    }
+
+    const ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT'];
+
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetAdminId, deletedAt: null },
+      select: {
+        id: true,
+        firebaseUid: true,
+        adminRoleId: true,
+        pendingAdminRoleId: true,
+        role: { select: { name: true } },
+      },
+    });
+
+    if (!target) throw new NotFoundException('Admin user not found');
+
+    const primaryIsAdmin = ADMIN_ROLES.includes(target.role.name);
+    if (!primaryIsAdmin && !target.adminRoleId && !target.pendingAdminRoleId) {
+      throw new BadRequestException('Target user is not an admin account');
+    }
+
+    // Unlike deactivateAdmin, deleting a SUPER_ADMIN account is permitted here —
+    // this endpoint is intentionally restricted to SUPER_ADMIN callers only.
+    if (!primaryIsAdmin) {
+      // Secondary admin grant only — revoke the grant, leave the primary account untouched.
+      await this.prisma.user.update({
+        where: { id: targetAdminId },
+        data: { adminRoleId: null, pendingAdminRoleId: null },
+      });
+      return { message: 'Admin access revoked — their primary account is unaffected' };
+    }
+
+    await this.prisma.user.update({
+      where: { id: targetAdminId },
+      data: { deletedAt: new Date(), isActive: false },
+    });
+
+    await firebaseAdmin
+      .auth()
+      .updateUser(target.firebaseUid, { disabled: true })
+      .catch((err) => this.logger.error('Failed to disable Firebase account during admin delete', err));
+
+    return { message: 'Admin account deleted successfully' };
+  }
+
   async createCoupon(dto: CreateCouponDto, creatingAdminId: string) {
     const existing = await this.prisma.coupon.findUnique({ where: { code: dto.code } });
     if (existing) {

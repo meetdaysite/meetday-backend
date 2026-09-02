@@ -115,6 +115,7 @@ export class CommunityAnnouncementsAdminController {
   // ─── List ──────────────────────────────────────────────────────────────────
 
   @Get()
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({
     summary: 'List announcements (admin)',
     description:
@@ -154,6 +155,7 @@ export class CommunityAnnouncementsAdminController {
   // ─── Stats ─────────────────────────────────────────────────────────────────
 
   @Get('stats')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({
     summary: 'Announcement summary stats',
     description:
@@ -312,6 +314,7 @@ export class CommunityAnnouncementsAdminController {
   // ─── Delete ────────────────────────────────────────────────────────────────
 
   @Delete(':id')
+  @Roles('SUPER_ADMIN')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Soft-delete an announcement',

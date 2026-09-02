@@ -51,6 +51,7 @@ export class CommunityMembersAdminController {
   constructor(private readonly service: CommunityMembersAdminService) {}
 
   @Get('stats')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({ summary: 'Get member stat cards + tab counts (30-day window, 60s cache)' })
   @ApiOkResponse({ description: 'Member stats', content: { 'application/json': { example: MEMBER_STATS_EXAMPLE } } })
   getMemberStats(@Param('communityId') communityId: string) {
@@ -58,6 +59,7 @@ export class CommunityMembersAdminController {
   }
 
   @Get('insights')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({ summary: 'Get top cities and member segments sidebar (120s cache)' })
   @ApiOkResponse({ description: 'Member insights', content: { 'application/json': { example: INSIGHTS_EXAMPLE } } })
   getMemberInsightsSidebar(@Param('communityId') communityId: string) {
@@ -65,6 +67,7 @@ export class CommunityMembersAdminController {
   }
 
   @Get('export')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({ summary: 'Export all members as CSV (Content-Disposition: attachment)' })
   @ApiOkResponse({ description: 'CSV file', content: { 'text/csv': { example: EXPORT_MEMBERS_EXAMPLE } } })
   async exportMembers(@Param('communityId') communityId: string, @Res() res: Response) {
@@ -102,6 +105,7 @@ export class CommunityMembersAdminController {
   }
 
   @Get()
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({ summary: 'List members with filters, search, and sort' })
   @ApiOkResponse({ description: 'Paginated member list', content: { 'application/json': { example: LIST_MEMBERS_EXAMPLE } } })
   listMembersAdmin(
@@ -112,6 +116,7 @@ export class CommunityMembersAdminController {
   }
 
   @Get(':userId')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({ summary: 'Get detailed member profile including email and ban history' })
   @ApiOkResponse({ description: 'Member detail', content: { 'application/json': { example: MEMBER_DETAIL_EXAMPLE } } })
   getMemberDetail(

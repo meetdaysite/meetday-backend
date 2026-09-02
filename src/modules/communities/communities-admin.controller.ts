@@ -284,6 +284,7 @@ export class CommunitiesAdminController {
   // ─── List ──────────────────────────────────────────────────────────────────
 
   @Get()
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({
     summary: 'List communities (admin)',
     description:
@@ -315,6 +316,7 @@ export class CommunitiesAdminController {
   // ─── Overview ──────────────────────────────────────────────────────────────
 
   @Get(':id/overview')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({
     summary: 'Community overview dashboard',
     description:
@@ -366,6 +368,7 @@ export class CommunitiesAdminController {
   // ─── Managers ──────────────────────────────────────────────────────────────
 
   @Get(':id/managers')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({
     summary: 'Managers & moderators',
     description:
@@ -397,6 +400,7 @@ export class CommunitiesAdminController {
   // ─── Analytics ─────────────────────────────────────────────────────────────
 
   @Get(':id/analytics')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({
     summary: 'Community analytics (30-day window)',
     description:
@@ -457,6 +461,7 @@ export class CommunitiesAdminController {
   // ─── Experiences tab ───────────────────────────────────────────────────────
 
   @Get(':id/experiences')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({
     summary: 'List community experiences (admin)',
     description:
@@ -475,6 +480,7 @@ export class CommunitiesAdminController {
   // ─── Dashboard stats ───────────────────────────────────────────────────────
 
   @Get('stats')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({
     summary: 'All-communities dashboard stats',
     description:
@@ -510,6 +516,7 @@ export class CommunitiesAdminController {
   // ─── Get single ────────────────────────────────────────────────────────────
 
   @Get(':id')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({
     summary: 'Get community detail (admin)',
     description:
@@ -772,6 +779,7 @@ export class CommunitiesAdminController {
   // ─── Remove member ─────────────────────────────────────────────────────────
 
   @Delete(':id/members/:memberId')
+  @Roles('SUPER_ADMIN')
   @ApiOperation({
     summary: 'Remove a role assignment',
     description:
@@ -851,6 +859,7 @@ export class CommunitiesAdminController {
   // ─── Remove event ──────────────────────────────────────────────────────────
 
   @Delete(':id/events/:eventId')
+  @Roles('SUPER_ADMIN')
   @ApiOperation({
     summary: 'Detach an event from the community',
     description:
@@ -1020,6 +1029,7 @@ export class CommunitiesAdminController {
   // ─── Delete ────────────────────────────────────────────────────────────────
 
   @Delete(':id')
+  @Roles('SUPER_ADMIN')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Soft-delete the community',

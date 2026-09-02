@@ -67,6 +67,7 @@ export class CommunityFeedAdminController {
   // ─── Stats ──────────────────────────────────────────────────────────────────
 
   @Get('stats')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({
     summary: 'Feed stat cards',
     description:
@@ -86,6 +87,7 @@ export class CommunityFeedAdminController {
   // ─── Overview sparklines ────────────────────────────────────────────────────
 
   @Get('overview')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({
     summary: 'Feed overview sparklines (right sidebar)',
     description:
@@ -106,6 +108,7 @@ export class CommunityFeedAdminController {
   // ─── Post list ──────────────────────────────────────────────────────────────
 
   @Get('posts')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({
     summary: 'List posts (admin view, offset-paginated)',
     description:
@@ -203,6 +206,7 @@ export class CommunityFeedAdminController {
   // ─── Delete ─────────────────────────────────────────────────────────────────
 
   @Delete('posts/:postId')
+  @Roles('SUPER_ADMIN')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Delete any post (admin)',
@@ -263,6 +267,7 @@ export class CommunityFeedAdminController {
   // ─── Recent Reports ─────────────────────────────────────────────────────────
 
   @Get('reports/recent')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({
     summary: 'Recent pending reports (right sidebar)',
     description:
