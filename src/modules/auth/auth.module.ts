@@ -6,9 +6,10 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { ConsentModule } from '../consent/consent.module';
 import { TeamAccessModule } from '../../common/team-access/team-access.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [ConsentModule, BullModule.registerQueue({ name: 'mail' }), TeamAccessModule],
+  imports: [ConsentModule, BullModule.registerQueue({ name: 'mail' }), TeamAccessModule, NotificationsModule],
   controllers: [AuthController],
   providers: [AuthService],
 })

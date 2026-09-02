@@ -1581,6 +1581,16 @@ export class AdminController {
     return this.adminService.getCommunityProfileDetail(id);
   }
 
+  @Get('community-profiles/:id/members')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @ApiOperation({ summary: "List a community's team members (owner + invited members)" })
+  @ApiParam({ name: 'id', description: 'Community profile UUID' })
+  @ApiOkResponse({ description: 'Array of members, owner first.' })
+  @ApiNotFoundResponse({ description: 'Community profile not found.' })
+  getCommunityProfileMembers(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.getCommunityProfileMembers(id);
+  }
+
   @Patch('community-profiles/:id')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @ApiOperation({

@@ -67,6 +67,7 @@ import {
   VenueMateriality,
 } from '../events/event-changes.util';
 import { APPROVED_EVENT_STATUSES } from '../events/event-time.util';
+import { TeamAccessService } from '../../common/team-access/team-access.service';
 
 @Injectable()
 export class AdminService {
@@ -84,6 +85,7 @@ export class AdminService {
     private readonly refundsService: RefundsService,
     private readonly sponsorshipInvoicePdfService: SponsorshipInvoicePdfService,
     private readonly sponsorshipReportPdfService: SponsorshipReportPdfService,
+    private readonly teamAccessService: TeamAccessService,
   ) {}
 
   async listAdmins(query: ListAdminsQueryDto) {
@@ -2941,6 +2943,18 @@ export class AdminService {
       brandsWorkedWith: await this.withBrandsWorkedWithLogoUrls(profile.brandsWorkedWith as { brandName?: string; logoKey?: string; url?: string }[] | null),
       pendingRevision,
     };
+  }
+
+  // Admin-only read view of who has access to this community's dashboard (owner + any
+  // invited team members) — reuses the same resolution the host/community side uses.
+  async getCommunityProfileMembers(id: string) {
+    const profile = await this.prisma.hostCommunityProfile.findUnique({
+      where: { id },
+      select: { hostProfileId: true },
+    });
+    if (!profile) throw new NotFoundException('Community profile not found');
+    const { members } = await this.teamAccessService.listHostTeamMembers(profile.hostProfileId, '');
+    return members;
   }
 
   // Signs each brand-worked-with entry's logo key into a downloadable URL — stored as raw JSON

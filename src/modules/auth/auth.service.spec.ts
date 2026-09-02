@@ -12,6 +12,7 @@ import { CryptoService } from '../../common/crypto/crypto.service';
 import { ConsentService } from '../consent/consent.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { TeamAccessService } from '../../common/team-access/team-access.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -41,6 +42,7 @@ const mockTeamAccessService = {
   matchPendingHostInvite: jest.fn().mockResolvedValue(null),
   matchPendingBrandInvite: jest.fn().mockResolvedValue(null),
 };
+const mockNotificationsService = { create: jest.fn().mockResolvedValue(undefined) };
 
 const tokenUser: TokenUser = {
   uid: 'firebase-uid-1',
@@ -80,6 +82,7 @@ describe('AuthService', () => {
         { provide: StorageService, useValue: { getPresignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/avatar') } },
         { provide: getQueueToken('mail'), useValue: mockMailQueue },
         { provide: TeamAccessService, useValue: mockTeamAccessService },
+        { provide: NotificationsService, useValue: mockNotificationsService },
       ],
     }).compile();
 

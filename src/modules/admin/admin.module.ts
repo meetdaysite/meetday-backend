@@ -12,9 +12,10 @@ import { InterestsModule } from '../interests/interests.module';
 import { RedisModule } from '../../common/redis/redis.module';
 import { RefundsModule } from '../refunds/refunds.module';
 import { SponsorshipModule } from '../sponsorship/sponsorship.module';
+import { TeamAccessModule } from '../../common/team-access/team-access.module';
 
 @Module({
-  imports: [BullModule.registerQueue({ name: 'mail' }), ConfigModule, NotificationsModule, ReviewsModule, InterestsModule, RedisModule, RefundsModule, SponsorshipModule],
+  imports: [BullModule.registerQueue({ name: 'mail' }), ConfigModule, NotificationsModule, ReviewsModule, InterestsModule, RedisModule, RefundsModule, SponsorshipModule, TeamAccessModule],
   controllers: [AdminController, AdminDashboardController],
   providers: [AdminService, AdminDashboardService, RolesGuard],
   exports: [AdminService],

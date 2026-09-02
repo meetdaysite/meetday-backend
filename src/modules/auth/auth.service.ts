@@ -17,6 +17,7 @@ import { RegisterDto } from './dto/register.dto';
 import { CompleteProfileDto } from './dto/complete-profile.dto';
 import { ADMIN_ALERT_EMAILS } from '../../common/mail/admin-recipients.constant';
 import { TeamAccessService } from '../../common/team-access/team-access.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 export interface TokenUser {
   uid: string;
@@ -38,7 +39,40 @@ export class AuthService {
     private readonly consentService: ConsentService,
     @InjectQueue('mail') private readonly mailQueue: Queue,
     private readonly teamAccessService: TeamAccessService,
+    private readonly notificationsService: NotificationsService,
   ) {}
+
+  // Notifies all admins (bell icon) when someone joins a Brand/Community as a team member —
+  // so admins have visibility into team growth without having to open each profile individually.
+  private async notifyAdminsOfTeamJoin(kind: 'HOST' | 'BRAND', profileId: string, memberUserId: string): Promise<void> {
+    const [member, accountName, admins] = await Promise.all([
+      this.prisma.user.findUnique({ where: { id: memberUserId }, select: { firstName: true, lastName: true } }),
+      kind === 'HOST'
+        ? this.prisma.hostProfile
+            .findUnique({ where: { id: profileId }, select: { communityName: true, displayName: true } })
+            .then((p) => p?.communityName || p?.displayName || 'the community')
+        : this.prisma.brandProfile
+            .findUnique({ where: { id: profileId }, select: { brandName: true } })
+            .then((p) => p?.brandName || 'the brand'),
+      this.prisma.user.findMany({
+        where: { isActive: true, role: { name: { in: ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'] } } },
+        select: { id: true },
+      }),
+    ]);
+    const memberName = member ? `${member.firstName} ${member.lastName}`.trim() || 'A new member' : 'A new member';
+
+    await Promise.allSettled(
+      admins.map((admin) =>
+        this.notificationsService.create(
+          admin.id,
+          kind === 'HOST' ? 'community_member_joined' : 'brand_member_joined',
+          'New team member joined',
+          `${memberName} joined ${accountName} as a team member.`,
+          { profileId },
+        ),
+      ),
+    );
+  }
 
   // Pre-registration check — lets the onboarding UI skip the full "set up your profile" form
   // and show a simple "join <accountName>" screen instead, when this email already has a
@@ -72,6 +106,7 @@ export class AuthService {
         const pendingHostInvite = existingEmail ? await this.teamAccessService.matchPendingHostInvite(existingEmail) : null;
         if (pendingHostInvite) {
           await this.teamAccessService.attachUserToHostInvite(pendingHostInvite.id, existing.id);
+          void this.notifyAdminsOfTeamJoin('HOST', pendingHostInvite.hostProfileId, existing.id).catch(() => {});
           return this.loadUserWithHostProfile(existing.id, pendingHostInvite.hostProfileId);
         }
         return this.attachHostProfile(existing.id, dto);
@@ -80,6 +115,7 @@ export class AuthService {
         const pendingBrandInvite = existingEmail ? await this.teamAccessService.matchPendingBrandInvite(existingEmail) : null;
         if (pendingBrandInvite) {
           await this.teamAccessService.attachUserToBrandInvite(pendingBrandInvite.id, existing.id);
+          void this.notifyAdminsOfTeamJoin('BRAND', pendingBrandInvite.brandProfileId, existing.id).catch(() => {});
           return this.loadUserWithBrandProfile(existing.id, pendingBrandInvite.brandProfileId);
         }
         return this.attachBrandProfile(existing.id, dto);
@@ -102,8 +138,10 @@ export class AuthService {
     try {
       if (pendingHostInvite) {
         result = await this.joinAsHostTeamMember(tokenUser.uid, resolved, pendingHostInvite);
+        void this.notifyAdminsOfTeamJoin('HOST', pendingHostInvite.hostProfileId, result.id).catch(() => {});
       } else if (pendingBrandInvite) {
         result = await this.joinAsBrandTeamMember(tokenUser.uid, resolved, pendingBrandInvite);
+        void this.notifyAdminsOfTeamJoin('BRAND', pendingBrandInvite.brandProfileId, result.id).catch(() => {});
       } else if (dto.accountType === 'HOST') {
         result = await this.registerHost(tokenUser.uid, resolved, dto);
       } else if (dto.accountType === 'BRAND') {
