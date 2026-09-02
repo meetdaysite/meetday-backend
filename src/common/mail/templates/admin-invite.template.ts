@@ -1,13 +1,24 @@
+// CITY_ADMIN is surfaced to users simply as "Admin" everywhere else in the product (it's a
+// full-access role, not scoped to any city concept) — mirror that here instead of the raw enum.
+function toRoleLabel(name: string): string {
+  if (name === 'CITY_ADMIN') return 'Admin';
+  return name
+    .split('_')
+    .map((w) => w.charAt(0) + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
 export function adminInviteTemplate(
   recipientEmail: string,
   roleName: string,
   resetLink: string,
 ): string {
+  const roleLabel = toRoleLabel(roleName);
   return `
     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2>You've been invited to join Meetday as ${roleName}</h2>
+      <h2>You've been invited to join Meetday as ${roleLabel}</h2>
       <p>Hi,</p>
-      <p>You have been invited to the Meetday admin team as a <strong>${roleName}</strong>.</p>
+      <p>You have been invited to the Meetday admin team as a <strong>${roleLabel}</strong>.</p>
       <p>Your account has been created for <strong>${recipientEmail}</strong>. Before you can log in, you must set your password using the button below.</p>
       <br/>
       <div style="text-align: center; margin: 32px 0;">
