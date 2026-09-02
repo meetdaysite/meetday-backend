@@ -95,14 +95,21 @@ export class AdminService {
     // lets any other non-admin role (BRAND, etc.) leak into this list as new roles are added.
     const ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT'];
 
-    // A user can hold admin access two ways: their PRIMARY role is an admin role (fresh
-    // invite), or they're primarily a HOST/BRAND/USER with a SECONDARY `adminRoleId` granted
-    // (invite sent to an already-registered email — see inviteAdmin()). Missing the second
-    // case here made those grants invisible in this list, which is also why re-inviting the
-    // same email later surfaced as a confusing 409 with no way to see/undo the existing grant.
+    // A user can hold (or be pending for) admin access three ways: their PRIMARY role is an
+    // admin role (fresh invite), they're primarily a HOST/BRAND/USER with a SECONDARY
+    // `adminRoleId` granted, or that secondary grant is still `pendingAdminRoleId` (invited but
+    // hasn't clicked the link yet). Missing the secondary cases here made those grants invisible
+    // in this list, which is also why re-inviting the same email later surfaced as a confusing
+    // 409 with no way to see/undo the existing grant.
     const where: any = query.role
-      ? { OR: [{ role: { name: query.role } }, { adminRole: { name: query.role } }] }
-      : { OR: [{ role: { name: { in: ADMIN_ROLES } } }, { adminRoleId: { not: null } }] };
+      ? { OR: [{ role: { name: query.role } }, { adminRole: { name: query.role } }, { pendingAdminRole: { name: query.role } }] }
+      : {
+          OR: [
+            { role: { name: { in: ADMIN_ROLES } } },
+            { adminRoleId: { not: null } },
+            { pendingAdminRoleId: { not: null } },
+          ],
+        };
 
     if (query.isActive !== undefined) where.isActive = query.isActive;
 
@@ -117,8 +124,10 @@ export class AdminService {
           isActive: true,
           mustCompleteProfile: true,
           createdAt: true,
+          adminInviteRequestedAt: true,
           role: { select: { name: true } },
           adminRole: { select: { name: true } },
+          pendingAdminRole: { select: { name: true } },
           adminProfile: { select: { managedCities: true } },
         },
         orderBy: { createdAt: 'desc' },
@@ -151,39 +160,38 @@ export class AdminService {
     // managedCities is optional even for CITY_ADMIN — an empty/omitted list means "all cities"
     // (same convention already used by the Admins list "Scope" column), not an error.
 
-    // Check DB for existing user with this email — e.g. someone already registered as a HOST
-    // or BRAND. Rather than rejecting, grant them admin access under the SAME login by setting
-    // a secondary `adminRoleId` (their primary HOST/BRAND role is untouched).
+    const adminUrl = this.configService.get<string>('adminUrl');
+
+    // An email that already has a User row (e.g. registered as HOST/BRAND) still goes through
+    // the SAME invite → email → confirm flow as a brand-new invite — access is only granted
+    // (adminRoleId) once they click the emailed reset-password link, via a `pendingAdminRoleId`
+    // holding state, never an instant silent grant.
     const existingInDb = await this.prisma.user.findFirst({
       where: { email: dto.email },
-      select: { id: true, adminRoleId: true },
+      select: { id: true, adminRoleId: true, pendingAdminRoleId: true },
     });
     if (existingInDb) {
       if (existingInDb.adminRoleId) {
         throw new ConflictException(`A user with email ${dto.email} already has admin access`);
       }
+      if (existingInDb.pendingAdminRoleId) {
+        throw new ConflictException(`A user with email ${dto.email} already has a pending admin invite`);
+      }
+
+      const resetLink = await firebaseAdmin.auth().generatePasswordResetLink(dto.email, {
+        url: `${adminUrl}/set-password`,
+      });
 
       await this.prisma.user.update({
         where: { id: existingInDb.id },
-        data: {
-          adminRole: { connect: { id: role.id } },
-          ...(role.name === 'CITY_ADMIN' && {
-            adminProfile: { create: { managedCities: dto.managedCities } },
-          }),
-        },
+        data: { pendingAdminRoleId: role.id, adminInviteRequestedAt: new Date() },
       });
 
-      void this.notificationsService
-        .create(
-          existingInDb.id,
-          'admin_access_granted',
-          'Admin access granted',
-          `You've been granted ${role.name} access. Log in to the admin panel with your existing account to use it.`,
-          {},
-        )
-        .catch((err) => this.logger.error('Failed to create admin_access_granted notification', err));
+      void this.mailQueue
+        .add('admin-invite', { to: dto.email, roleName: role.name, resetLink })
+        .catch((err) => this.logger.error('Failed to queue admin-invite mail', err));
 
-      return { message: 'Admin access granted to existing account' };
+      return { message: 'Invitation sent' };
     }
 
     // Check Firebase for existing user
@@ -206,11 +214,12 @@ export class AdminService {
       password: tempPassword,
     });
 
-    // Generate password reset link pointing to the ADMIN app's reset page — NOT the consumer
-    // frontend (they're separate Vercel apps; the consumer app has no /reset-password route).
-    const adminUrl = this.configService.get<string>('adminUrl');
+    // Generate password reset link pointing to the ADMIN app's invite-acceptance page (calls
+    // POST /auth/activate on submit) — NOT the consumer frontend (separate Vercel app, no
+    // matching route) and NOT the admin app's own /reset-password (forgot-password flow, never
+    // calls the backend to confirm anything).
     const resetLink = await firebaseAdmin.auth().generatePasswordResetLink(dto.email, {
-      url: `${adminUrl}/reset-password`,
+      url: `${adminUrl}/set-password`,
     });
 
     // Create DB user — inactive until they complete profile
@@ -222,10 +231,8 @@ export class AdminService {
         lastName: dto.lastName,
         isActive: false,
         mustCompleteProfile: true,
+        adminInviteRequestedAt: new Date(),
         role: { connect: { id: role.id } },
-        ...(role.name === 'CITY_ADMIN' && {
-          adminProfile: { create: { managedCities: dto.managedCities } },
-        }),
       },
     });
 
@@ -428,13 +435,20 @@ export class AdminService {
 
     const target = await this.prisma.user.findUnique({
       where: { id: targetAdminId },
-      select: { id: true, firebaseUid: true, isActive: true, adminRoleId: true, role: { select: { name: true } } },
+      select: {
+        id: true,
+        firebaseUid: true,
+        isActive: true,
+        adminRoleId: true,
+        pendingAdminRoleId: true,
+        role: { select: { name: true } },
+      },
     });
 
     if (!target) throw new NotFoundException('Admin user not found');
 
     const primaryIsAdmin = ADMIN_ROLES.includes(target.role.name);
-    if (!primaryIsAdmin && !target.adminRoleId) {
+    if (!primaryIsAdmin && !target.adminRoleId && !target.pendingAdminRoleId) {
       throw new BadRequestException('Target user is not an admin account');
     }
 
@@ -443,11 +457,15 @@ export class AdminService {
     }
 
     // A SECONDARY admin grant (HOST/BRAND/USER primarily, admin access layered on via
-    // adminRoleId — see inviteAdmin()) has no separate active/inactive flag to flip; "deactivate"
-    // here means fully revoking the grant so the email becomes invitable again, while leaving
-    // their primary account (and Firebase login) completely untouched.
+    // adminRoleId/pendingAdminRoleId — see inviteAdmin()) has no separate active/inactive flag
+    // to flip; "deactivate" here means fully revoking the grant (or cancelling the not-yet-
+    // confirmed invite) so the email becomes invitable again, while leaving their primary
+    // account (and Firebase login) completely untouched.
     if (!primaryIsAdmin) {
-      await this.prisma.user.update({ where: { id: targetAdminId }, data: { adminRoleId: null } });
+      await this.prisma.user.update({
+        where: { id: targetAdminId },
+        data: { adminRoleId: null, pendingAdminRoleId: null },
+      });
       return { message: 'Admin access revoked — their primary account is unaffected' };
     }
 

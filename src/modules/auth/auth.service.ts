@@ -713,6 +713,28 @@ export class AuthService {
     if (!user) {
       throw new NotFoundException('User not found. Please register first.');
     }
+
+    // A pending SECONDARY admin grant (existing HOST/BRAND/USER account invited as an admin —
+    // see AdminService.inviteAdmin) is confirmed here too: clicking the same reset-password
+    // link and setting a password is the "accept" action, promoting pendingAdminRoleId to the
+    // real adminRoleId. Their existing account's isActive/mustCompleteProfile are untouched.
+    if (user.pendingAdminRoleId) {
+      return this.prisma.user.update({
+        where: { firebaseUid },
+        data: { adminRoleId: user.pendingAdminRoleId, pendingAdminRoleId: null },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          isActive: true,
+          mustCompleteProfile: true,
+          role: { select: { name: true } },
+          updatedAt: true,
+        },
+      });
+    }
+
     if (!user.mustCompleteProfile) {
       throw new BadRequestException('Account is already active.');
     }

@@ -18,6 +18,7 @@ model Role {
 
   users        User[]
   adminOfUsers User[] @relation("UserAdminRole")
+  pendingAdminOfUsers User[] @relation("UserPendingAdminRole")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -48,6 +49,15 @@ model User {
   // without disturbing their primary role.
   adminRoleId String?
   adminRole   Role?   @relation("UserAdminRole", fields: [adminRoleId], references: [id])
+
+  // Set by inviteAdmin() when targeting an email that already has a User row — access isn't
+  // granted (adminRoleId) until they click the emailed reset-password link and confirm, same
+  // as a brand-new invite, instead of an instant silent grant. adminInviteRequestedAt is the
+  // date shown in the Admins list (when the invite was sent), NOT the account's original
+  // createdAt — set for both fresh and existing-user invites so the column is consistent.
+  pendingAdminRoleId     String?
+  pendingAdminRole       Role?     @relation("UserPendingAdminRole", fields: [pendingAdminRoleId], references: [id])
+  adminInviteRequestedAt DateTime?
 
   attendeeProfile AttendeeProfile?
   hostProfile     HostProfile?     @relation("HostUser")
