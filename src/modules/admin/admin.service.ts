@@ -148,9 +148,8 @@ export class AdminService {
     if (!role) {
       throw new BadRequestException('Invalid roleId');
     }
-    if (role.name === 'CITY_ADMIN' && (!dto.managedCities || dto.managedCities.length === 0)) {
-      throw new BadRequestException('managedCities is required for CITY_ADMIN');
-    }
+    // managedCities is optional even for CITY_ADMIN — an empty/omitted list means "all cities"
+    // (same convention already used by the Admins list "Scope" column), not an error.
 
     // Check DB for existing user with this email — e.g. someone already registered as a HOST
     // or BRAND. Rather than rejecting, grant them admin access under the SAME login by setting
@@ -207,10 +206,11 @@ export class AdminService {
       password: tempPassword,
     });
 
-    // Generate password reset link pointing to the frontend reset page
-    const frontendUrl = this.configService.get<string>('frontendUrl');
+    // Generate password reset link pointing to the ADMIN app's reset page — NOT the consumer
+    // frontend (they're separate Vercel apps; the consumer app has no /reset-password route).
+    const adminUrl = this.configService.get<string>('adminUrl');
     const resetLink = await firebaseAdmin.auth().generatePasswordResetLink(dto.email, {
-      url: `${frontendUrl}/reset-password`,
+      url: `${adminUrl}/reset-password`,
     });
 
     // Create DB user — inactive until they complete profile

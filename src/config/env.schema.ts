@@ -34,6 +34,9 @@ export const envSchema = z.object({
     .regex(/^[0-9a-fA-F]{64}$/, 'ENCRYPTION_KEY must be a 64-char hex string (32 bytes) — generate with: openssl rand -hex 32'),
 
   FRONTEND_URL: z.string().url('FRONTEND_URL must be a valid URL'),
+  // Separate app from FRONTEND_URL (the consumer host/brand/attendee site) — used for links that
+  // must open the admin panel specifically, e.g. the admin-invite password-reset email.
+  ADMIN_URL: z.string().url('ADMIN_URL must be a valid URL').default('https://meetday-admin.vercel.app'),
   ALLOWED_ORIGINS: z.string().optional(), // required in production; comma-separated CORS origins, e.g. https://app.meetday.ai,https://admin.meetday.ai
 
   INTERNAL_API_KEY: z.string().min(32, 'INTERNAL_API_KEY must be at least 32 characters'),
