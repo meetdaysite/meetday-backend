@@ -1187,6 +1187,13 @@ export class SponsorshipService {
     return interest.sponsorshipProposal?.hostProfile?.communityProfile?.name ?? interest.sponsorshipProposal?.hostProfile?.displayName ?? 'The community';
   }
 
+  private brandNameOf(interest: any) {
+    if (interest.campaignId && interest.campaign?.brandProfile) {
+      return interest.campaign.brandProfile.brandName ?? 'The brand';
+    }
+    return interest.brandProfile?.brandName ?? 'The brand';
+  }
+
   async createDeal(userId: string, interestId: string, dto: UpsertSponsorshipDealDto) {
     const { interest, isHost, isBrand } = await this.getInterestForParticipant(userId, interestId);
     const isCampaign = !!interest.campaignId;
@@ -1463,7 +1470,7 @@ export class SponsorshipService {
   }
 
   async upsertDealReport(userId: string, interestId: string, dto: UpsertSponsorshipDealReportDto) {
-    const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
+    const { interest, isHost, isBrand } = await this.getInterestForParticipant(userId, interestId);
 
     const deal = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
     if (!deal) throw new NotFoundException('No deal found for this chat');
@@ -1473,7 +1480,7 @@ export class SponsorshipService {
 
     const existingReport = await this.prisma.sponsorshipDealReport.findUnique({ where: { sponsorshipDealId: deal.id } });
     // Brand can only approve/request-revision on an already-submitted report, not create one.
-    if (senderType !== ChatSenderType.HOST && !existingReport) {
+    if (!isHost && !existingReport) {
       throw new ForbiddenException('Only the community can submit the deliverables report');
     }
 
@@ -1516,7 +1523,9 @@ export class SponsorshipService {
       },
     });
 
-    if (senderType === ChatSenderType.HOST) {
+    const isHostSubmission = isHost && (!existingReport || !isBrand || dto.status === 'PENDING');
+
+    if (isHostSubmission) {
       await this.postDealSystemMessage(
         interest.id,
         ChatSenderType.HOST,
@@ -1524,40 +1533,53 @@ export class SponsorshipService {
         `${this.hostNameOf(interest)} submitted the deliverables report.`,
       );
 
-      void this.notificationsService
-        .create(
-          interest.brandProfile.userId,
-          'sponsorship_deal_report_submitted',
-          this.hostNameOf(interest),
-          'Submitted the deliverables report for your locked deal',
-          { sponsorshipInterestId: interest.id },
-        )
-        .catch((err) => this.logger.error('Failed to notify brand of submitted deal report', err));
+      const brandUserId = interest.campaignId ? (interest.campaign?.brandProfile?.userId ?? interest.brandProfile?.userId) : interest.brandProfile?.userId;
+      if (brandUserId) {
+        void this.notificationsService
+          .create(
+            brandUserId,
+            'sponsorship_deal_report_submitted',
+            this.hostNameOf(interest),
+            'Submitted the deliverables report for your locked deal',
+            { sponsorshipInterestId: interest.id },
+          )
+          .catch((err) => this.logger.error('Failed to notify brand of submitted deal report', err));
+      }
     } else {
       // Brand approving/requesting revision — best-effort read of the status the frontend
       // embeds in the summary JSON, since it isn't sent as a top-level dto field.
       let brandStatus = 'reviewed';
-      try {
-        brandStatus = JSON.parse(dto.summary)?.status === 'APPROVED' ? 'approved' : 'requested changes to';
-      } catch {
-        /* keep generic wording */
+      if (dto.status === 'APPROVED') {
+        brandStatus = 'approved';
+      } else if (dto.status === 'REVISION_REQUESTED') {
+        brandStatus = 'requested changes to';
+      } else {
+        try {
+          brandStatus = JSON.parse(dto.summary)?.status === 'APPROVED' ? 'approved' : 'requested changes to';
+        } catch {
+          /* keep generic wording */
+        }
       }
+      const brandName = this.brandNameOf(interest);
       await this.postDealSystemMessage(
         interest.id,
         ChatSenderType.BRAND,
         userId,
-        `${interest.brandProfile.brandName} ${brandStatus} the deliverables report.`,
+        `${brandName} ${brandStatus} the deliverables report.`,
       );
 
-      void this.notificationsService
-        .create(
-          interest.campaignId ? interest.hostProfile?.userId : interest.sponsorshipProposal?.hostProfile?.userId,
-          'sponsorship_deal_report_reviewed',
-          interest.brandProfile.brandName,
-          `${brandStatus === 'approved' ? 'Approved' : 'Requested changes to'} your deliverables report`,
-          { sponsorshipInterestId: interest.id },
-        )
-        .catch((err) => this.logger.error('Failed to notify host of report review', err));
+      const hostUserId = interest.campaignId ? interest.hostProfile?.userId : interest.sponsorshipProposal?.hostProfile?.userId;
+      if (hostUserId) {
+        void this.notificationsService
+          .create(
+            hostUserId,
+            'sponsorship_deal_report_reviewed',
+            brandName,
+            `${brandStatus === 'approved' ? 'Approved' : 'Requested changes to'} your deliverables report`,
+            { sponsorshipInterestId: interest.id },
+          )
+          .catch((err) => this.logger.error('Failed to notify host of report review', err));
+      }
     }
 
     const proofUrls = await Promise.all(report.proofKeys.map((key) => this.storageService.getPresignedDownloadUrl(key)));

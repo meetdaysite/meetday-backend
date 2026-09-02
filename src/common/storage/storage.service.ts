@@ -369,8 +369,12 @@ export class StorageService {
           where: { id: dto.resourceId },
           select: {
             chatStatus: true,
+            hostProfileId: true,
+            hostProfile: { select: { id: true } },
             sponsorshipProposal: { select: { hostProfile: { select: { id: true } } } },
+            brandProfileId: true,
             brandProfile: { select: { id: true } },
+            campaign: { select: { brandProfile: { select: { id: true } } } },
           },
         });
         if (!interest) throw new NotFoundException('Chat thread not found');
@@ -378,9 +382,11 @@ export class StorageService {
           this.teamAccessService.getHostProfileIds(userId),
           this.teamAccessService.getBrandProfileIds(userId),
         ]);
+        const hostProfileId = interest.hostProfileId ?? interest.hostProfile?.id ?? interest.sponsorshipProposal?.hostProfile?.id;
+        const brandProfileId = interest.brandProfileId ?? interest.brandProfile?.id ?? interest.campaign?.brandProfile?.id;
         const isParticipant =
-          (!!interest.sponsorshipProposal?.hostProfile.id && chatHostProfileIds.includes(interest.sponsorshipProposal.hostProfile.id)) ||
-          chatBrandProfileIds.includes(interest.brandProfile.id) ||
+          (!!hostProfileId && chatHostProfileIds.includes(hostProfileId)) ||
+          (!!brandProfileId && chatBrandProfileIds.includes(brandProfileId)) ||
           SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '');
         if (!isParticipant) throw new ForbiddenException('You do not have access to this chat');
         if (interest.chatStatus !== 'ACCEPTED') {
@@ -425,12 +431,17 @@ export class StorageService {
         }
         const interest = await this.prisma.sponsorshipInterest.findUnique({
           where: { id: dto.resourceId },
-          select: { sponsorshipProposal: { select: { hostProfile: { select: { id: true } } } } },
+          select: {
+            hostProfileId: true,
+            hostProfile: { select: { id: true } },
+            sponsorshipProposal: { select: { hostProfile: { select: { id: true } } } },
+          },
         });
         if (!interest) throw new NotFoundException('Chat thread not found');
+        const hostProfileId = interest.hostProfileId ?? interest.hostProfile?.id ?? interest.sponsorshipProposal?.hostProfile?.id;
         const dealReportHostProfileIds = await this.teamAccessService.getHostProfileIds(userId);
         const isOwner =
-          (!!interest.sponsorshipProposal?.hostProfile.id && dealReportHostProfileIds.includes(interest.sponsorshipProposal.hostProfile.id)) ||
+          (!!hostProfileId && dealReportHostProfileIds.includes(hostProfileId)) ||
           SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '');
         if (!isOwner) throw new ForbiddenException('You do not own this sponsorship deal');
         key = `sponsorship-deal-reports/${dto.resourceId}/${randomUUID()}.${ext}`;
