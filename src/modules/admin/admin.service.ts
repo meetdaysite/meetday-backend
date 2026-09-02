@@ -180,6 +180,7 @@ export class AdminService {
 
       const resetLink = await firebaseAdmin.auth().generatePasswordResetLink(dto.email, {
         url: `${adminUrl}/set-password`,
+        handleCodeInApp: true,
       });
 
       await this.prisma.user.update({
@@ -217,9 +218,12 @@ export class AdminService {
     // Generate password reset link pointing to the ADMIN app's invite-acceptance page (calls
     // POST /auth/activate on submit) — NOT the consumer frontend (separate Vercel app, no
     // matching route) and NOT the admin app's own /reset-password (forgot-password flow, never
-    // calls the backend to confirm anything).
+    // calls the backend to confirm anything). `handleCodeInApp: true` is required or Firebase
+    // shows its OWN generic hosted reset page first and consumes the oobCode before redirecting
+    // here — our page then sees an already-used code and shows "Link expired".
     const resetLink = await firebaseAdmin.auth().generatePasswordResetLink(dto.email, {
       url: `${adminUrl}/set-password`,
+      handleCodeInApp: true,
     });
 
     // Create DB user — inactive until they complete profile

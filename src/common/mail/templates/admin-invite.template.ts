@@ -1,6 +1,6 @@
 // CITY_ADMIN is surfaced to users simply as "Admin" everywhere else in the product (it's a
 // full-access role, not scoped to any city concept) — mirror that here instead of the raw enum.
-function toRoleLabel(name: string): string {
+export function toRoleLabel(name: string): string {
   if (name === 'CITY_ADMIN') return 'Admin';
   return name
     .split('_')
