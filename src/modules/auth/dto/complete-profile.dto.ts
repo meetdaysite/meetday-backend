@@ -1,5 +1,6 @@
-import { IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsEnum, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Gender } from '@prisma/client';
 
 export class CompleteProfileDto {
   @ApiProperty({ minLength: 1, maxLength: 50, example: 'Aishik' })
@@ -18,4 +19,9 @@ export class CompleteProfileDto {
   @IsOptional()
   @Matches(/^\+[1-9]\d{7,14}$/, { message: 'phone must be in E.164 format' })
   phone?: string;
+
+  @ApiPropertyOptional({ enum: Gender, example: 'FEMALE' })
+  @IsOptional()
+  @IsEnum(Gender)
+  gender?: Gender;
 }

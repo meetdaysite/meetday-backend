@@ -41,6 +41,8 @@ const mockMailQueue = { add: jest.fn().mockResolvedValue(undefined) };
 const mockTeamAccessService = {
   matchPendingHostInvite: jest.fn().mockResolvedValue(null),
   matchPendingBrandInvite: jest.fn().mockResolvedValue(null),
+  getHostProfileIds: jest.fn().mockResolvedValue([]),
+  getBrandProfileIds: jest.fn().mockResolvedValue([]),
 };
 const mockNotificationsService = { create: jest.fn().mockResolvedValue(undefined) };
 

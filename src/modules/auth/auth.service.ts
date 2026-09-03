@@ -484,6 +484,10 @@ export class AuthService {
           avatarUrl: resolved.avatarUrl,
           gender: resolved.gender,
           roleId: hostRole.id,
+          // Invited team members skip the normal onboarding form entirely (they're just
+          // attached to an existing HostProfile) — force a details-completion step so they
+          // don't land on the dashboard with a Google-token name and no phone/gender on file.
+          mustCompleteProfile: true,
         },
         select: {
           id: true,
@@ -493,6 +497,7 @@ export class AuthService {
           lastName: true,
           avatarUrl: true,
           isActive: true,
+          mustCompleteProfile: true,
           role: { select: { name: true } },
           createdAt: true,
         },
@@ -533,6 +538,8 @@ export class AuthService {
           avatarUrl: resolved.avatarUrl,
           gender: resolved.gender,
           roleId: brandRole.id,
+          // Same rationale as joinAsHostTeamMember — force the details-completion step.
+          mustCompleteProfile: true,
         },
         select: {
           id: true,
@@ -542,6 +549,7 @@ export class AuthService {
           lastName: true,
           avatarUrl: true,
           isActive: true,
+          mustCompleteProfile: true,
           role: { select: { name: true } },
           createdAt: true,
         },
@@ -784,6 +792,7 @@ export class AuthService {
         firstName: dto.firstName,
         lastName: dto.lastName,
         phone: dto.phone,
+        gender: dto.gender,
         isActive: true,
         mustCompleteProfile: false,
       },
@@ -833,10 +842,19 @@ export class AuthService {
     // frontend checks); `hasHostAccess`/`hasBrandAccess`/`adminRole` expose the full picture for
     // a single identity that holds host, brand, and/or admin access at once.
     const { hostProfile, brandProfile, adminRole, ...rest } = user;
+
+    // A team member (invited via Team-Access) has access to an EXISTING host/brand profile
+    // without owning one themselves — `!!hostProfile`/`!!brandProfile` alone missed that,
+    // making every invited member's login/signup flow think they had no account at all.
+    const [hostProfileIds, brandProfileIds] = await Promise.all([
+      hostProfile ? Promise.resolve([hostProfile.id]) : this.teamAccessService.getHostProfileIds(user.id),
+      brandProfile ? Promise.resolve([brandProfile.id]) : this.teamAccessService.getBrandProfileIds(user.id),
+    ]);
+
     return {
       ...rest,
-      hasHostAccess: !!hostProfile,
-      hasBrandAccess: !!brandProfile,
+      hasHostAccess: hostProfileIds.length > 0,
+      hasBrandAccess: brandProfileIds.length > 0,
       adminRole: adminRole?.name ?? null,
       avatarUrl: user.avatarUrl
         ? await this.storageService.getPresignedDownloadUrl(user.avatarUrl)
