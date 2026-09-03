@@ -130,11 +130,13 @@ export class StorageService {
     return { deleted, failed };
   }
 
-  async getPresignedDownloadUrl(key: string): Promise<string> {
+  // `downloadFilename`, when set, forces the browser to save the file (Content-Disposition:
+  // attachment) instead of rendering it inline — used for admin-facing document downloads.
+  async getPresignedDownloadUrl(key: string, opts?: { downloadFilename?: string }): Promise<string> {
     // OAuth providers (Google, Apple) store a full URL directly — return as-is
     if (key.startsWith('http://') || key.startsWith('https://')) return key;
 
-    const cacheKey = `presign:${key}`;
+    const cacheKey = opts?.downloadFilename ? `presign:${key}:dl:${opts.downloadFilename}` : `presign:${key}`;
     const cached = await this.redis.get<string>(cacheKey);
     if (cached) return cached;
 
@@ -142,6 +144,9 @@ export class StorageService {
       version: 'v4',
       action: 'read',
       expires: Date.now() + PRESIGN_TTL * 1000,
+      ...(opts?.downloadFilename && {
+        responseDisposition: `attachment; filename="${opts.downloadFilename.replace(/"/g, '')}"`,
+      }),
     });
     await this.redis.set(cacheKey, url, PRESIGN_CACHE_TTL);
     return url;

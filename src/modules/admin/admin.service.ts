@@ -1648,18 +1648,26 @@ export class AdminService {
 
     const [imageUrl, docUrl] = await Promise.all([
       proposal.imageKey ? this.storageService.getPresignedDownloadUrl(proposal.imageKey) : null,
-      proposal.docKey ? this.storageService.getPresignedDownloadUrl(proposal.docKey) : null,
+      proposal.docKey
+        ? this.storageService.getPresignedDownloadUrl(proposal.docKey, {
+            downloadFilename: proposal.docName ?? 'proposal-document',
+          })
+        : null,
     ]);
 
     let pendingRevision = proposal.pendingRevision as
-      | (Record<string, unknown> & { imageKey?: string; docKey?: string })
+      | (Record<string, unknown> & { imageKey?: string; docKey?: string; docName?: string })
       | null;
     if (pendingRevision) {
       // Only sign a URL for keys actually present in the diff — otherwise an unrelated field
       // edit (e.g. just the date) would overwrite the still-valid live image/doc URL with null.
       const [revImageUrl, revDocUrl] = await Promise.all([
         pendingRevision.imageKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.imageKey) : undefined,
-        pendingRevision.docKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.docKey) : undefined,
+        pendingRevision.docKey
+          ? this.storageService.getPresignedDownloadUrl(pendingRevision.docKey, {
+              downloadFilename: pendingRevision.docName ?? proposal.docName ?? 'proposal-document',
+            })
+          : undefined,
       ]);
       pendingRevision = {
         ...pendingRevision,
@@ -2968,6 +2976,30 @@ export class AdminService {
           }
         : null,
     };
+  }
+
+  // Looks up (without creating) the existing Meetday support thread for a specific user — used
+  // to open a chat window for a Brand/Community picked from the admin's search dropdown before
+  // any message has been sent, so an empty state doesn't spuriously create a thread row.
+  async getMeetdayChatByUserId(userId: string) {
+    const thread = await this.prisma.meetdayChatThread.findUnique({ where: { userId } });
+    if (!thread) return { threadId: null, messages: [] };
+    const { messages } = await this.getMeetdayChatMessages(thread.id);
+    return { threadId: thread.id, messages };
+  }
+
+  // Admin-initiated conversation: creates the thread (if this user has never messaged support
+  // before) on first send, so they immediately appear in the Support Chats list.
+  async startMeetdayChatByUser(userId: string, adminId: string, dto: SendChatMessageDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const thread = await this.prisma.meetdayChatThread.upsert({
+      where: { userId },
+      create: { userId },
+      update: {},
+    });
+    return this.sendMeetdayChatMessage(thread.id, adminId, dto);
   }
 
   // Marks a Talk to Meetday thread resolved: posts a system message and resets the bot so it

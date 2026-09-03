@@ -1869,6 +1869,34 @@ export class AdminController {
     return this.adminService.countUnreadMeetdayChats();
   }
 
+  @Get('meetday-chats/by-user/:userId')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({
+    summary: 'Get (without creating) the existing Meetday support thread for a specific user',
+    description: 'Used to open a chat window for a Brand/Community picked from the search dropdown before any message has been sent.',
+  })
+  @ApiOkResponse({ description: 'Existing thread id + messages, or a null threadId if none exists yet.' })
+  getMeetdayChatByUser(@Param('userId', ParseUUIDPipe) userId: string) {
+    return this.adminService.getMeetdayChatByUserId(userId);
+  }
+
+  @Post('meetday-chats/by-user/:userId/messages')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Start (or continue) a Meetday support chat with a specific Brand/Community user',
+    description: 'Creates the thread on first send, so the user immediately appears in the Support Chats list.',
+  })
+  @ApiOkResponse({ description: 'Message sent.' })
+  @ApiNotFoundResponse({ description: 'User not found.' })
+  startMeetdayChatByUser(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Body() dto: SendChatMessageDto,
+    @GetUser('id') adminId: string,
+  ) {
+    return this.adminService.startMeetdayChatByUser(userId, adminId, dto);
+  }
+
   @Get('meetday-chats/:threadId/messages')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
   @ApiOperation({ summary: 'List messages in a "Talk to Meetday" thread' })
