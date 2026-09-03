@@ -6,7 +6,7 @@ export function teamInviteTemplate(
 ): string {
   return `
     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2>You've been invited to join ${accountName} on Meetday</h2>
+      <h2>Join ${accountName}'s Dashboard on Meetday</h2>
       <p>Hi,</p>
       <p><strong>${inviterName}</strong> has invited you to join <strong>${accountName}</strong>'s ${accountTypeLabel} account on Meetday, with full access to the dashboard.</p>
       <p>Sign up with this email address to be automatically added.</p>

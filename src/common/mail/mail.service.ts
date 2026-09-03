@@ -180,7 +180,7 @@ export class MailService {
   async sendTeamInvite(to: string, inviterName: string, accountName: string, accountTypeLabel: string, signupUrl: string): Promise<void> {
     await this.sendMail(
       to,
-      `You've been invited to join ${accountName} on Meetday`,
+      `Join ${accountName}'s Dashboard on Meetday`,
       teamInviteTemplate(inviterName, accountName, accountTypeLabel, signupUrl),
     );
   }
