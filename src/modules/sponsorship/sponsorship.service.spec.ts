@@ -22,7 +22,7 @@ function makePrisma() {
   return prisma;
 }
 
-const mockNotifications = { create: jest.fn().mockResolvedValue(undefined) };
+const mockNotifications = { create: jest.fn().mockResolvedValue(undefined), markAllReadForThread: jest.fn().mockResolvedValue(undefined) };
 const mockMailQueue = { add: jest.fn().mockResolvedValue(undefined) };
 
 // Delegates to the same prisma.hostProfile/brandProfile mocks each test already sets up via
