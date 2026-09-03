@@ -1465,7 +1465,15 @@ export class SponsorshipService {
     const report = await this.prisma.sponsorshipDealReport.findUnique({ where: { sponsorshipDealId: deal.id } });
     if (!report) return null;
 
-    const proofUrls = await Promise.all(report.proofKeys.map((key) => this.storageService.getPresignedDownloadUrl(key)));
+    const proofUrls = await Promise.all(
+      (report.proofKeys ?? []).filter(Boolean).map(async (key) => {
+        try {
+          return await this.storageService.getPresignedDownloadUrl(key);
+        } catch {
+          return '';
+        }
+      }),
+    );
     return { ...report, proofUrls };
   }
 
@@ -1484,6 +1492,20 @@ export class SponsorshipService {
       throw new ForbiddenException('Only the community can submit the deliverables report');
     }
 
+    let parsedSummaryStatus: string | undefined;
+    if (dto.summary) {
+      try {
+        parsedSummaryStatus = JSON.parse(dto.summary)?.status;
+      } catch {}
+    }
+
+    const explicitStatus = dto.status || parsedSummaryStatus;
+    const isBrandReviewAction = explicitStatus === 'APPROVED' || explicitStatus === 'REVISION_REQUESTED';
+    const isHostSubmission = !isBrandReviewAction || isHost;
+
+    const finalStatus = isBrandReviewAction && !isHost ? explicitStatus : (explicitStatus ?? 'PENDING');
+    const finalRevisionNote = finalStatus === 'REVISION_REQUESTED' ? (dto.revisionNote ?? dto.notes ?? null) : null;
+
     const report = await this.prisma.sponsorshipDealReport.upsert({
       where: { sponsorshipDealId: deal.id },
       create: {
@@ -1497,8 +1519,8 @@ export class SponsorshipService {
         deliverables: dto.deliverables ?? [],
         videoLinks: dto.videoLinks ?? [],
         socialLinks: dto.socialLinks ?? [],
-        status: dto.status ?? 'PENDING',
-        revisionNote: dto.revisionNote,
+        status: finalStatus,
+        revisionNote: finalRevisionNote,
         summary: dto.summary,
         proofKeys: dto.proofKeys ?? [],
         notes: dto.notes,
@@ -1514,8 +1536,8 @@ export class SponsorshipService {
         deliverables: dto.deliverables ?? [],
         videoLinks: dto.videoLinks ?? [],
         socialLinks: dto.socialLinks ?? [],
-        status: dto.status ?? 'PENDING',
-        revisionNote: dto.revisionNote,
+        status: finalStatus,
+        revisionNote: finalRevisionNote,
         summary: dto.summary,
         proofKeys: dto.proofKeys ?? [],
         notes: dto.notes,
@@ -1523,9 +1545,7 @@ export class SponsorshipService {
       },
     });
 
-    const isHostSubmission = isHost && (!existingReport || !isBrand || dto.status === 'PENDING');
-
-    if (isHostSubmission) {
+    if (finalStatus === 'PENDING') {
       await this.postDealSystemMessage(
         interest.id,
         ChatSenderType.HOST,
@@ -1546,20 +1566,7 @@ export class SponsorshipService {
           .catch((err) => this.logger.error('Failed to notify brand of submitted deal report', err));
       }
     } else {
-      // Brand approving/requesting revision — best-effort read of the status the frontend
-      // embeds in the summary JSON, since it isn't sent as a top-level dto field.
-      let brandStatus = 'reviewed';
-      if (dto.status === 'APPROVED') {
-        brandStatus = 'approved';
-      } else if (dto.status === 'REVISION_REQUESTED') {
-        brandStatus = 'requested changes to';
-      } else {
-        try {
-          brandStatus = JSON.parse(dto.summary)?.status === 'APPROVED' ? 'approved' : 'requested changes to';
-        } catch {
-          /* keep generic wording */
-        }
-      }
+      const brandStatus = finalStatus === 'APPROVED' ? 'approved' : 'requested changes to';
       const brandName = this.brandNameOf(interest);
       await this.postDealSystemMessage(
         interest.id,
@@ -1582,7 +1589,15 @@ export class SponsorshipService {
       }
     }
 
-    const proofUrls = await Promise.all(report.proofKeys.map((key) => this.storageService.getPresignedDownloadUrl(key)));
+    const proofUrls = await Promise.all(
+      (report.proofKeys ?? []).filter(Boolean).map(async (key) => {
+        try {
+          return await this.storageService.getPresignedDownloadUrl(key);
+        } catch {
+          return '';
+        }
+      }),
+    );
     return { ...report, proofUrls };
   }
 

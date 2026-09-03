@@ -2780,7 +2780,13 @@ export class AdminService {
     if (!report) return null;
 
     const proofUrls = await Promise.all(
-      (report.proofKeys ?? []).map((key) => this.storageService.getPresignedDownloadUrl(key)),
+      (report.proofKeys ?? []).filter(Boolean).map(async (key) => {
+        try {
+          return await this.storageService.getPresignedDownloadUrl(key);
+        } catch {
+          return '';
+        }
+      }),
     );
     return { ...report, proofUrls };
   }

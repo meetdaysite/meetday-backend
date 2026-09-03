@@ -41,10 +41,14 @@ export class SponsorshipInvoicePdfService {
       where: { id: dealId },
       include: {
         sponsorshipInterest: {
-          select: {
+          include: {
             sponsorshipProposal: {
               select: { name: true, hostProfile: { select: { displayName: true, communityProfile: { select: { name: true } } } } },
             },
+            campaign: {
+              select: { name: true, brandProfile: { select: { brandName: true } } },
+            },
+            hostProfile: { select: { displayName: true, communityProfile: { select: { name: true } } } },
             brandProfile: { select: { brandName: true } },
           },
         },
@@ -53,10 +57,24 @@ export class SponsorshipInvoicePdfService {
     if (!deal) throw new NotFoundException('Deal not found');
     if (deal.paymentStatus !== 'PAID') throw new NotFoundException('This deal has not been paid for yet');
 
+    const interest = deal.sponsorshipInterest;
     const communityName =
-      deal.sponsorshipInterest.sponsorshipProposal.hostProfile.communityProfile?.name ??
-      deal.sponsorshipInterest.sponsorshipProposal.hostProfile.displayName ??
+      interest?.hostProfile?.communityProfile?.name ??
+      interest?.hostProfile?.displayName ??
+      interest?.sponsorshipProposal?.hostProfile?.communityProfile?.name ??
+      interest?.sponsorshipProposal?.hostProfile?.displayName ??
       'Community';
+
+    const brandName =
+      interest?.campaign?.brandProfile?.brandName ??
+      interest?.brandProfile?.brandName ??
+      'Brand';
+
+    const projectName =
+      deal.projectName ||
+      interest?.campaign?.name ||
+      interest?.sponsorshipProposal?.name ||
+      'Proposal / Project';
 
     const paymentDate = (deal.paidAt ?? deal.updatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
     const legalName = this.configService.get<string>('company.legalName') ?? 'Meetday Global Pvt. Ltd';
@@ -91,9 +109,9 @@ export class SponsorshipInvoicePdfService {
   </div>
 
   <table>
-    <tr><td class="label">Brand</td><td class="value">${escapeHtml(deal.sponsorshipInterest.brandProfile.brandName)}</td></tr>
+    <tr><td class="label">Brand</td><td class="value">${escapeHtml(brandName)}</td></tr>
     <tr><td class="label">Community</td><td class="value">${escapeHtml(communityName)}</td></tr>
-    <tr><td class="label">Proposal / Project</td><td class="value">${escapeHtml(deal.sponsorshipInterest.sponsorshipProposal.name)}</td></tr>
+    <tr><td class="label">Proposal / Project</td><td class="value">${escapeHtml(projectName)}</td></tr>
     <tr><td class="label">Payment Date</td><td class="value">${escapeHtml(paymentDate)}</td></tr>
     <tr><td class="label">Payment Mode</td><td class="value">${isOffline ? 'Offline' : 'Online'}</td></tr>
     ${deal.razorpayPaymentId ? `<tr><td class="label">Payment Reference</td><td class="value">${escapeHtml(deal.razorpayPaymentId)}</td></tr>` : ''}
