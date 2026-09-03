@@ -54,7 +54,11 @@ import { VerifySponsorshipDealPaymentDto } from './dto/verify-sponsorship-deal-p
 import { SponsorshipInvoicePdfService } from './sponsorship-invoice-pdf.service';
 import { SponsorshipReportPdfService } from './sponsorship-report-pdf.service';
 import { ProposalPdfGeneratorService } from './proposal-pdf-generator.service';
+import { ProposalDeckContentService } from './proposal-deck-content.service';
 import { GenerateProposalPdfDto } from './dto/generate-proposal-pdf.dto';
+import { ExpandProposalDeckContentDto } from './dto/expand-proposal-deck-content.dto';
+import { ExpandProposalDeckContentResponseDto } from './dto/expand-proposal-deck-content-response.dto';
+import { GenerateProposalDeckPdfDto } from './dto/generate-proposal-deck-pdf.dto';
 import { DocumentExtractionService } from '../../common/document-extraction/document-extraction.service';
 
 @ApiTags('Sponsorship Proposals')
@@ -67,6 +71,7 @@ export class SponsorshipController {
     private readonly sponsorshipInvoicePdfService: SponsorshipInvoicePdfService,
     private readonly sponsorshipReportPdfService: SponsorshipReportPdfService,
     private readonly proposalPdfGeneratorService: ProposalPdfGeneratorService,
+    private readonly proposalDeckContentService: ProposalDeckContentService,
     private readonly documentExtractionService: DocumentExtractionService,
   ) {}
 
@@ -85,6 +90,45 @@ export class SponsorshipController {
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': 'attachment; filename="sponsorship-proposal.pdf"',
+      'Content-Length': buffer.length,
+    });
+    res.send(buffer);
+  }
+
+  @Post('proposals/deck/expand-content')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'AI-expand basic proposal form inputs into pitch-deck slide copy',
+    description:
+      'Takes the same bare-bones form inputs as generate-pdf and returns AI-elaborated copy for ' +
+      'each of the 5 content slides (value proposition, campaign overview, audience reach, ' +
+      'deliverables, timeline) — meant to be shown back to the host for editing before the final ' +
+      'deck PDF is generated.',
+  })
+  @ApiOkResponse({ description: 'AI-expanded slide copy.', type: ExpandProposalDeckContentResponseDto })
+  expandProposalDeckContent(
+    @GetUser('uid') uid: string,
+    @Body() dto: ExpandProposalDeckContentDto,
+  ) {
+    return this.proposalDeckContentService.expandContent(dto, uid);
+  }
+
+  @Post('proposals/deck/generate-pdf')
+  @UseGuards(RolesGuard)
+  @Roles('HOST')
+  @ApiOperation({
+    summary: 'Generate the final presentation-style (6-slide) sponsorship pitch deck PDF',
+    description:
+      'Stateless — renders the (optionally user-edited) AI-expanded slide copy into a fixed-design, ' +
+      'multi-page landscape deck and streams back the PDF for immediate download.',
+  })
+  @ApiOkResponse({ description: 'PDF file stream.' })
+  async generateProposalDeckPdf(@Body() dto: GenerateProposalDeckPdfDto, @Res() res: Response) {
+    const buffer = await this.proposalPdfGeneratorService.generateDeck(dto);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'attachment; filename="sponsorship-pitch-deck.pdf"',
       'Content-Length': buffer.length,
     });
     res.send(buffer);
