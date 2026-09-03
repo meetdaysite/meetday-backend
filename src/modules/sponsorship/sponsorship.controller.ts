@@ -238,8 +238,12 @@ export class SponsorshipController {
   @ApiOkResponse({ description: 'Messages, oldest first.' })
   @ApiForbiddenResponse({ description: 'Not a participant in this chat.' })
   @ApiNotFoundResponse({ description: 'Chat thread not found.' })
-  listChatMessages(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string) {
-    return this.sponsorshipService.listChatMessages(userId, interestId);
+  listChatMessages(
+    @GetUser('id') userId: string,
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Query('role') role?: 'HOST' | 'BRAND',
+  ) {
+    return this.sponsorshipService.listChatMessages(userId, interestId, role);
   }
 
   @Post('chats/:interestId/messages')

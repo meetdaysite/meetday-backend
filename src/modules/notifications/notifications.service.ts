@@ -105,4 +105,38 @@ export class NotificationsService {
     await this.redis.del(this.unreadKey(userId));
     return { message: `${count} notification(s) marked as read` };
   }
+
+  async markAllReadForThread(userId: string, threadId: string): Promise<void> {
+    if (!threadId) return;
+    try {
+      const unread = await this.prisma.notification.findMany({
+        where: { userId, isRead: false },
+        select: { id: true, metadata: true },
+      });
+      const matchingIds = unread
+        .filter((n) => {
+          const m = (n.metadata as any) || {};
+          const tId =
+            m.sponsorshipInterestId ||
+            m.threadId ||
+            m.interestId ||
+            m.chatId ||
+            m.thread_id ||
+            m.interest_id ||
+            m.chat_id;
+          return tId === threadId;
+        })
+        .map((n) => n.id);
+
+      if (matchingIds.length > 0) {
+        await this.prisma.notification.updateMany({
+          where: { id: { in: matchingIds } },
+          data: { isRead: true, readAt: new Date() },
+        });
+        await this.redis.del(this.unreadKey(userId));
+      }
+    } catch {
+      // Non-critical background failure
+    }
+  }
 }

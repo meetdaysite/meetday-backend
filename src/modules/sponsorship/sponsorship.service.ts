@@ -957,8 +957,8 @@ export class SponsorshipService {
     return { interest, senderType, isHost, isBrand };
   }
 
-  async listChatMessages(userId: string, interestId: string) {
-    const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
+  async listChatMessages(userId: string, interestId: string, preferredRole?: 'HOST' | 'BRAND') {
+    const { interest, senderType } = await this.getInterestForParticipant(userId, interestId, preferredRole);
 
     // Captured before this call marks the thread read below, so both the unread-divider and the
     // seen-tick reflect state as of the moment the thread was opened, not after.
@@ -1016,6 +1016,11 @@ export class SponsorshipService {
         data: senderType === ChatSenderType.HOST ? { hostLastReadAt: new Date() } : { brandLastReadAt: new Date() },
       })
       .catch((err) => this.logger.error('Failed to update chat read state', err));
+
+    // Automatically mark all notifications for this thread as read in database
+    void this.notificationsService
+      .markAllReadForThread(userId, interest.id)
+      .catch((err) => this.logger.error('Failed to mark thread notifications read', err));
 
     return { messages: withMediaUrls, chatStatus: interest.chatStatus, unreadCount, firstUnreadMessageId };
   }
@@ -1176,7 +1181,13 @@ export class SponsorshipService {
     const message = await this.prisma.sponsorshipChatMessage.create({
       data: { sponsorshipInterestId: interestId, senderType, senderId, content, messageType: 'SYSTEM' },
     });
-    await this.prisma.sponsorshipInterest.update({ where: { id: interestId }, data: { lastMessageAt: message.createdAt } });
+    await this.prisma.sponsorshipInterest.update({
+      where: { id: interestId },
+      data: {
+        lastMessageAt: message.createdAt,
+        ...(senderType === ChatSenderType.HOST ? { hostLastReadAt: message.createdAt } : { brandLastReadAt: message.createdAt }),
+      },
+    });
     return message;
   }
 

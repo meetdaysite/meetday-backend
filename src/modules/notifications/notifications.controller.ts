@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   HttpCode,
@@ -70,6 +71,19 @@ export class NotificationsController {
   @ApiOkResponse({ schema: { example: { success: true, timestamp: '2026-05-07T10:00:00.000Z', data: { message: '3 notification(s) marked as read' } } } })
   markAllRead(@GetUser('id') userId: string) {
     return this.notificationsService.markAllRead(userId);
+  }
+
+  @Patch('read-by-thread')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Mark all notifications for a specific thread as read' })
+  @ApiOkResponse({ schema: { example: { success: true, timestamp: '2026-05-07T10:00:00.000Z', data: { message: 'Marked as read for thread' } } } })
+  async markReadByThread(
+    @GetUser('id') userId: string,
+    @Body('threadId') threadId: string,
+  ) {
+    if (!threadId) return { message: 'Thread id required' };
+    await this.notificationsService.markAllReadForThread(userId, threadId);
+    return { message: 'Marked as read for thread' };
   }
 
   @Patch(':id/read')
