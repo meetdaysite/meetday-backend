@@ -1,4 +1,8 @@
-export function announcementTemplate(subject: string, message: string): string {
+export function announcementTemplate(
+  subject: string,
+  message: string,
+  attachments?: Array<{ name: string; size?: number; type?: string; url?: string }>,
+): string {
   // If message contains rich HTML tags, sanitize script/event handlers and render formatted HTML with email client styles.
   // If message is plain text, escape HTML and convert line breaks to <br/>.
   const hasHtml = /<[a-z][\s\S]*>/i.test(message);
@@ -20,6 +24,28 @@ export function announcementTemplate(subject: string, message: string): string {
       .replace(/>/g, '&gt;')
       .replace(/\n/g, '<br/>');
   }
+
+  const attachmentsHtml =
+    attachments && attachments.length > 0
+      ? `
+        <div style="margin-top: 24px; padding: 16px; background-color: #f3f4f6; border: 2px solid #000000; border-radius: 12px;">
+          <p style="font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; color: #111827; margin: 0 0 10px 0;">
+            📎 Attached Files (${attachments.length}):
+          </p>
+          <ul style="margin: 0; padding-left: 18px; list-style-type: disc;">
+            ${attachments
+              .map(
+                (att) => `
+                <li style="font-size: 13px; font-weight: 700; color: #1f2937; margin-bottom: 4px;">
+                  ${att.name} ${att.size ? `<span style="font-size: 11px; color: #6b7280; font-weight: normal;">(${Math.round(att.size / 1024)} KB)</span>` : ''}
+                </li>
+              `,
+              )
+              .join('')}
+          </ul>
+        </div>
+      `
+      : '';
 
   return `
     <!DOCTYPE html>
@@ -56,6 +82,7 @@ export function announcementTemplate(subject: string, message: string): string {
           <div class="content">
             ${formattedContent}
           </div>
+          ${attachmentsHtml}
           <div class="footer">
             <p style="margin: 0; font-weight: 800; color: #111827;">The Meetday Team</p>
             <p style="margin: 4px 0 0 0; font-size: 11px; color: #9ca3af;">You are receiving this announcement as a member of the Meetday network.</p>

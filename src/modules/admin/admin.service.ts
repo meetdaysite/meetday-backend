@@ -2200,9 +2200,10 @@ export class AdminService {
     if (emails.length === 0) throw new BadRequestException('No recipients matched');
 
     const subject = dto.subject?.trim() || 'An update from Meetday';
+    const attachments = dto.attachments ?? [];
     for (const to of emails) {
       void this.mailQueue
-        .add('announcement', { to, subject, message: dto.message })
+        .add('announcement', { to, subject, message: dto.message, attachments })
         .catch((err) => this.logger.error('Failed to queue announcement mail', err));
     }
 
@@ -2221,6 +2222,7 @@ export class AdminService {
         message: dto.message,
         recipientCount: emails.length,
         recipientsSummary,
+        attachments: attachments.length > 0 ? (attachments as unknown as Prisma.InputJsonValue) : undefined,
         sentById: adminId,
       },
     });
@@ -2231,7 +2233,7 @@ export class AdminService {
       action: 'ADMIN_ANNOUNCEMENT_SENT',
       entityType: 'ANNOUNCEMENT',
       entityId: record.id,
-      metadata: { recipientCount: emails.length, subject, allBrands: !!dto.allBrands, allCommunity: !!dto.allCommunity },
+      metadata: { recipientCount: emails.length, subject, allBrands: !!dto.allBrands, allCommunity: !!dto.allCommunity, attachmentCount: attachments.length },
     });
 
     return { queued: emails.length };
@@ -2251,7 +2253,29 @@ export class AdminService {
       this.prisma.adminAnnouncement.count(),
     ]);
 
-    return { announcements, total, page, limit };
+    const resolved = await Promise.all(
+      announcements.map(async (ann) => {
+        let attachmentsWithUrls = ann.attachments as Array<{ name: string; key: string; size?: number; type: string; url?: string }> | null;
+        if (Array.isArray(attachmentsWithUrls)) {
+          attachmentsWithUrls = await Promise.all(
+            attachmentsWithUrls.map(async (att) => {
+              try {
+                const url = await this.storageService.getPresignedDownloadUrl(att.key);
+                return { ...att, url };
+              } catch {
+                return att;
+              }
+            }),
+          );
+        }
+        return {
+          ...ann,
+          attachments: attachmentsWithUrls,
+        };
+      }),
+    );
+
+    return { announcements: resolved, total, page, limit };
   }
 
   // ── TriChat: admin observes/participates in every Host ↔ Brand chat thread ─────

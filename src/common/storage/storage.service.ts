@@ -58,6 +58,7 @@ const CONTEXT_CONTENT_TYPES: Record<UploadContext, readonly string[]> = {
   [UploadContext.COMMUNITY_PAST_EVENT_MEDIA]: IMAGE_TYPES,
   [UploadContext.SPONSORSHIP_DEAL_REPORT_MEDIA]: IMAGE_TYPES,
   [UploadContext.COMMUNITY_BRAND_LOGO_MEDIA]: IMAGE_TYPES,
+  [UploadContext.ADMIN_ANNOUNCEMENT_ATTACHMENT]: [...IMAGE_TYPES, 'application/pdf'],
 };
 
 // Platform-admin roles required by the admin-only contexts.
@@ -467,11 +468,25 @@ export class StorageService {
         break;
       }
 
+      case UploadContext.ADMIN_ANNOUNCEMENT_ATTACHMENT: {
+        const isAdmin = SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '');
+        if (!isAdmin) {
+          throw new ForbiddenException('Only admins can upload announcement attachments');
+        }
+        key = `announcements/attachments/${randomUUID()}.${ext}`;
+        break;
+      }
+
       default:
         throw new BadRequestException('Unsupported upload context');
     }
 
     const uploadUrl = await this.getPresignedUploadUrl(key, dto.contentType);
     return { uploadUrl, key };
+  }
+
+  async getFileBuffer(key: string): Promise<Buffer> {
+    const [buffer] = await this.bucket.file(key).download();
+    return buffer;
   }
 }

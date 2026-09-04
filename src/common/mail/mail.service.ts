@@ -27,6 +27,8 @@ import { announcementTemplate } from './templates/announcement.template';
 import { unreadChatMessageTemplate } from './templates/unread-chat-message.template';
 import { teamInviteTemplate } from './templates/team-invite.template';
 
+import { StorageService } from '../storage/storage.service';
+
 // Admin-facing operational alerts (new signups, pending reviews) are sent from a distinct
 // address from the regular user-facing transactional emails (host-approved, tickets, etc).
 const ADMIN_NOTIFICATIONS_FROM = 'info@meetday.ai';
@@ -37,7 +39,10 @@ export class MailService {
   private readonly resend: Resend;
   private readonly from: string;
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly storageService: StorageService,
+  ) {
     this.from = this.configService.get<string>('mail.from');
     this.resend = new Resend(this.configService.get<string>('mail.apiKey'));
   }
@@ -148,8 +153,41 @@ export class MailService {
     await this.sendMail(to, `User action: ${method} ${path} — Meetday`, userActionTemplate(userLabel, method, path), ADMIN_NOTIFICATIONS_FROM);
   }
 
-  async sendAnnouncement(to: string, subject: string, message: string): Promise<void> {
-    await this.sendMail(to, subject, announcementTemplate(subject, message));
+  async sendAnnouncement(
+    to: string,
+    subject: string,
+    message: string,
+    attachments?: Array<{ name: string; key: string; size?: number; type: string }>,
+  ): Promise<void> {
+    const mailAttachments: Array<{ filename: string; content: Buffer }> = [];
+    if (attachments && attachments.length > 0) {
+      for (const att of attachments) {
+        try {
+          const buffer = await this.storageService.getFileBuffer(att.key);
+          mailAttachments.push({ filename: att.name, content: buffer });
+        } catch (err) {
+          this.logger.error(`Failed to fetch attachment buffer for key ${att.key}: ${(err as Error).message}`);
+        }
+      }
+    }
+
+    const html = announcementTemplate(subject, message, attachments);
+    if (mailAttachments.length > 0) {
+      const { error } = await this.resend.emails.send({
+        from: this.from,
+        to,
+        subject,
+        html,
+        attachments: mailAttachments,
+      });
+      if (error) {
+        this.logger.error(`Failed to send email to ${to}: ${error.message}`);
+      } else {
+        this.logger.log(`Email sent to ${to}: ${subject} (with ${mailAttachments.length} attachments)`);
+      }
+    } else {
+      await this.sendMail(to, subject, html);
+    }
   }
 
   async sendHostRejected(to: string, hostName: string, reason: string): Promise<void> {

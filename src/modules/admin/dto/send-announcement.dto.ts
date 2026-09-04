@@ -1,5 +1,25 @@
-import { IsArray, IsBoolean, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsNumber, IsOptional, IsString, IsUUID, MaxLength, MinLength, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
+
+export class AnnouncementAttachmentDto {
+  @ApiProperty({ example: 'document.pdf' })
+  @IsString()
+  name: string;
+
+  @ApiProperty({ example: 'announcements/attachments/uuid.pdf' })
+  @IsString()
+  key: string;
+
+  @ApiPropertyOptional({ example: 1048576 })
+  @IsOptional()
+  @IsNumber()
+  size?: number;
+
+  @ApiProperty({ example: 'application/pdf' })
+  @IsString()
+  type: string;
+}
 
 export class SendAnnouncementDto {
   @ApiPropertyOptional({ description: 'Send to every brand account, ignoring brandIds.' })
@@ -45,4 +65,11 @@ export class SendAnnouncementDto {
   @IsString()
   @MaxLength(200)
   recipientsSummary?: string;
+
+  @ApiPropertyOptional({ type: [AnnouncementAttachmentDto], description: 'List of attached PDFs and images' })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AnnouncementAttachmentDto)
+  attachments?: AnnouncementAttachmentDto[];
 }

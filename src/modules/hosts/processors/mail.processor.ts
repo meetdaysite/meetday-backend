@@ -185,9 +185,21 @@ export class MailProcessor {
   }
 
   @Process('announcement')
-  async handleAnnouncement(job: Job<{ to: string; subject: string; message: string }>) {
+  async handleAnnouncement(
+    job: Job<{
+      to: string;
+      subject: string;
+      message: string;
+      attachments?: Array<{ name: string; key: string; size?: number; type: string }>;
+    }>,
+  ) {
     try {
-      await this.mailService.sendAnnouncement(job.data.to, job.data.subject, job.data.message);
+      await this.mailService.sendAnnouncement(
+        job.data.to,
+        job.data.subject,
+        job.data.message,
+        job.data.attachments,
+      );
     } catch (error) {
       this.logger.error(`Failed to process announcement mail job: ${(error as Error).message}`);
     }

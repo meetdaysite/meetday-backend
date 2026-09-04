@@ -1764,6 +1764,7 @@ model AdminAnnouncement {
   message           String
   recipientCount    Int
   recipientsSummary String // human-readable, e.g. "All Brands, 3 Host(s)" — precomputed by the caller
+  attachments       Json?
 
   sentById String
   sentBy   User   @relation("AdminAnnouncementSentBy", fields: [sentById], references: [id])
