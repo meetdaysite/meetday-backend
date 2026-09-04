@@ -27,15 +27,28 @@ export class ProposalPdfGeneratorService {
   constructor(private readonly storageService: StorageService) {}
 
   async finalizeDeck(dto: FinalizeProposalDeckDto): Promise<FinalizeProposalDeckResponseDto> {
-    const [darkBgLogo, lightBgLogo] = await Promise.all([
+    const [darkBgLogo, lightBgLogo, mediaAssetUris] = await Promise.all([
       this.keyToDataUri(dto.primaryLogoKey),
       this.keyToDataUri(dto.secondaryLogoKey),
+      Promise.all((dto.mediaAssetKeys ?? []).slice(0, 4).map((k) => this.keyToDataUri(k))),
     ]);
     const usingFallbackLogo = !!(darkBgLogo || lightBgLogo) && !(darkBgLogo && lightBgLogo);
     const fallbackLogo = darkBgLogo ?? lightBgLogo ?? null;
+    const galleryUris = mediaAssetUris.filter((u): u is string => !!u);
 
-    const total = dto.slides.length;
-    const slidesHtml = dto.slides
+    // Past-sponsor logos need the same key -> data-URI treatment as the deck's own logos.
+    const slidesWithResolvedLogos = await Promise.all(
+      dto.slides.map(async (slide) => {
+        if (slide.layout !== 'PAST_SPONSORS' || !slide.pastSponsors?.length) return slide;
+        const resolved = await Promise.all(
+          slide.pastSponsors.map(async (p) => ({ ...p, logoUri: await this.keyToDataUri(p.logoKey) })),
+        );
+        return { ...slide, resolvedPastSponsors: resolved };
+      }),
+    );
+
+    const total = slidesWithResolvedLogos.length;
+    const slidesHtml = slidesWithResolvedLogos
       .map((slide, index) => {
         const bg = this.resolveSlideBg(dto.theme, slide.layout, index, total);
         const logo = bg === 'dark' ? (darkBgLogo ?? fallbackLogo) : (lightBgLogo ?? fallbackLogo);
@@ -46,9 +59,13 @@ export class ProposalPdfGeneratorService {
           index,
           total,
           isLast: index === total - 1,
+          // "About <Host>" is always the 3rd slide (index 2) in the fixed 10-slide template.
+          galleryUris: index === 2 ? galleryUris : [],
+          mediaKitUrl: index === 2 ? dto.mediaKitUrl : undefined,
         });
       })
       .join('');
+
 
     const fonts = FONT_STACKS[dto.fontVibe];
     const minimalist = dto.fontVibe === 'MINIMALIST';
@@ -97,6 +114,18 @@ export class ProposalPdfGeneratorService {
   .bg-dark .tier-price { color: var(--accent); }
   .contact-block p { margin: 0 0 6px; }
   .contact-block .contact-label { opacity: 0.6; font-weight: 600; }
+  .sponsors-grid { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 16px; }
+  .sponsor-card { display: flex; flex-direction: column; align-items: center; gap: 8px; border: 2px solid var(--primary); border-radius: 16px; padding: 18px 24px; min-width: 160px; }
+  .bg-dark .sponsor-card { border-color: var(--accent); }
+  .sponsor-logo { height: 40px; max-width: 120px; object-fit: contain; }
+  .sponsor-name { font-weight: 700; font-size: 16px; }
+  .sponsor-ref { font-size: 12px; opacity: 0.6; }
+  .barter-badge { display: inline-block; margin-top: 12px; padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 700; background: var(--primary); color: #fff; }
+  .bg-dark .barter-badge { background: var(--accent); color: #111; }
+  .deadline-note { font-size: 15px; opacity: 0.7; margin-top: 10px; }
+  .media-gallery { display: flex; gap: 10px; margin-top: 20px; }
+  .media-gallery img { width: 90px; height: 90px; object-fit: cover; border-radius: 10px; border: 2px solid currentColor; opacity: 0.9; }
+  .media-kit-link { font-size: 13px; opacity: 0.6; margin-top: 10px; }
   .slide-footer { display: flex; align-items: center; justify-content: space-between; padding-top: 14px; margin-top: 20px;
     border-top: 1px solid currentColor; opacity: 0.55; font-size: 11px; }
   .powered-by { display: flex; align-items: center; gap: 6px; font-weight: 700; }
@@ -136,8 +165,17 @@ export class ProposalPdfGeneratorService {
   }
 
   private renderSlide(
-    slide: DeckSlideDto,
-    opts: { bg: SlideBg; logo: string | null; logoNeedsChip: boolean; index: number; total: number; isLast: boolean },
+    slide: DeckSlideDto & { resolvedPastSponsors?: Array<{ name: string; projectReference?: string; logoUri: string | null }> },
+    opts: {
+      bg: SlideBg;
+      logo: string | null;
+      logoNeedsChip: boolean;
+      index: number;
+      total: number;
+      isLast: boolean;
+      galleryUris: string[];
+      mediaKitUrl?: string;
+    },
   ): string {
     const nl2p = (text?: string) =>
       text
@@ -150,13 +188,20 @@ export class ProposalPdfGeneratorService {
     const logoImg = opts.logo ? `<img class="logo" src="${opts.logo}" alt="Logo" />` : '';
     const logoBlock = opts.logoNeedsChip ? `<div class="logo-chip">${logoImg}</div>` : logoImg;
 
+    const gallery = opts.galleryUris.length
+      ? `<div class="media-gallery">${opts.galleryUris.map((u) => `<img src="${u}" alt="" />`).join('')}</div>`
+      : '';
+    const mediaKitLink = opts.mediaKitUrl
+      ? `<p class="media-kit-link">Brand Media Kit: ${escapeHtml(opts.mediaKitUrl)}</p>`
+      : '';
+
     let body = '';
     switch (slide.layout) {
       case 'COVER':
-        body = `<h1>${escapeHtml(slide.title)}</h1>${slide.subtitle ? `<p class="subtitle">${escapeHtml(slide.subtitle)}</p>` : ''}`;
+        body = `<h1>${escapeHtml(slide.title)}</h1>${slide.subtitle ? `<p class="subtitle">${escapeHtml(slide.subtitle)}</p>` : ''}${slide.body ? `<p class="subtitle">${escapeHtml(slide.body)}</p>` : ''}`;
         break;
       case 'VALUE_PROP':
-        body = `<h2>${escapeHtml(slide.title)}</h2>${nl2p(slide.body)}`;
+        body = `<h2>${escapeHtml(slide.title)}</h2>${nl2p(slide.body)}${gallery}${mediaKitLink}`;
         break;
       case 'STAT_HIGHLIGHT': {
         const stats = (slide.stats ?? [])
@@ -172,13 +217,29 @@ export class ProposalPdfGeneratorService {
         body = `<h2>${escapeHtml(slide.title)}</h2><ul class="bullet-list">${items}</ul>`;
         break;
       }
+      case 'PAST_SPONSORS': {
+        const sponsors = slide.resolvedPastSponsors ?? [];
+        const cards = sponsors
+          .map(
+            (s) => `<div class="sponsor-card">
+              ${s.logoUri ? `<img class="sponsor-logo" src="${s.logoUri}" alt="${escapeHtml(s.name)}" />` : `<span class="sponsor-name">${escapeHtml(s.name)}</span>`}
+              ${s.logoUri ? `<span class="sponsor-name">${escapeHtml(s.name)}</span>` : ''}
+              ${s.projectReference ? `<span class="sponsor-ref">${escapeHtml(s.projectReference)}</span>` : ''}
+            </div>`,
+          )
+          .join('');
+        body = `<h2>${escapeHtml(slide.title)}</h2>${sponsors.length ? `<div class="sponsors-grid">${cards}</div>` : nl2p(slide.body)}`;
+        break;
+      }
       case 'PRICING_COMPARISON': {
         const tiers = (slide.pricingTiers ?? [])
           .map(
             (t) => `<div class="tier"><span class="tier-name">${escapeHtml(t.name)}</span><span class="tier-price">${escapeHtml(t.price.startsWith('₹') ? t.price : `₹${t.price}`)}</span></div>`,
           )
           .join('');
-        body = `<h2>${escapeHtml(slide.title)}</h2><div class="tiers">${tiers}</div>`;
+        const barter = slide.openToBarter ? `<span class="barter-badge">Open to Barter</span>` : '';
+        const deadline = slide.sponsorshipDeadline ? `<p class="deadline-note">Sponsorship deadline: ${escapeHtml(slide.sponsorshipDeadline)}</p>` : '';
+        body = `<h2>${escapeHtml(slide.title)}</h2><div class="tiers">${tiers}</div>${barter}${deadline}${nl2p(slide.body)}`;
         break;
       }
       case 'CLOSING_CONTACT': {

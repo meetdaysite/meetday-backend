@@ -1,14 +1,16 @@
-import { IsArray, IsIn, IsNotEmpty, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsNotEmpty, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-// COVER/PRICING_COMPARISON/CLOSING_CONTACT are assembled deterministically from the proposal's
-// own data; VALUE_PROP/STAT_HIGHLIGHT/BULLET_LIST are chosen by the AI planner per middle slide.
+// Every slide in the fixed 10-slide deck template is one of these layouts — layout assignment
+// per slide position is deterministic (see ProposalDeckContentService.generatePlan), not chosen
+// by the AI; the AI's job is purely filling in fallback COPY for empty optional fields.
 export const DECK_SLIDE_LAYOUTS = [
   'COVER',
   'VALUE_PROP',
   'STAT_HIGHLIGHT',
   'BULLET_LIST',
+  'PAST_SPONSORS',
   'PRICING_COMPARISON',
   'CLOSING_CONTACT',
 ] as const;
@@ -40,6 +42,25 @@ export class DeckStatDto {
   @IsNotEmpty()
   @MaxLength(40)
   value: string;
+}
+
+export class PastSponsorDto {
+  @ApiProperty({ example: 'Acme Beverages' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  name: string;
+
+  @ApiPropertyOptional({ example: 'past-sponsor-logos/abc123.png' })
+  @IsOptional()
+  @IsString()
+  logoKey?: string;
+
+  @ApiPropertyOptional({ example: 'Night Rituals Vol. 3' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  projectReference?: string;
 }
 
 // A single editable slide — the shape is a superset covering every layout; only the fields
@@ -104,4 +125,21 @@ export class DeckSlideDto {
   @IsString()
   @MaxLength(30)
   contactPhone?: string;
+
+  @ApiPropertyOptional({ type: [PastSponsorDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PastSponsorDto)
+  pastSponsors?: PastSponsorDto[];
+
+  @ApiPropertyOptional({ example: true })
+  @IsOptional()
+  @IsBoolean()
+  openToBarter?: boolean;
+
+  @ApiPropertyOptional({ example: '2026-10-15' })
+  @IsOptional()
+  @IsString()
+  sponsorshipDeadline?: string;
 }

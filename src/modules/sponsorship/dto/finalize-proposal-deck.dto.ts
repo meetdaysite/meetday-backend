@@ -1,4 +1,4 @@
-import { ArrayMinSize, IsArray, IsHexColor, IsIn, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsHexColor, IsIn, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { DeckSlideDto } from './deck-slide.dto';
@@ -47,6 +47,19 @@ export class FinalizeProposalDeckDto {
   @IsOptional()
   @IsString()
   secondaryLogoKey?: string;
+
+  @ApiPropertyOptional({ example: 'https://example.com/brand-guidelines.pdf' })
+  @IsOptional()
+  @IsString()
+  mediaKitUrl?: string;
+
+  // Up to 10 additional brand images — the first few are shown as a small gallery strip.
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsString({ each: true })
+  mediaAssetKeys?: string[];
 }
 
 export class FinalizeProposalDeckResponseDto {
