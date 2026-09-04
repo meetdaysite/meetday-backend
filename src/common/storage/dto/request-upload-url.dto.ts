@@ -27,6 +27,7 @@ const ALLOWED_CONTENT_TYPES = [
   'image/jpeg',
   'image/png',
   'image/webp',
+  'image/svg+xml', // brand/deck logos (Proposal Deck spec requires SVG support)
   'video/mp4',
   'application/pdf', // host documents
   'application/msword',
