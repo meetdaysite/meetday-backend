@@ -55,10 +55,8 @@ import { SponsorshipInvoicePdfService } from './sponsorship-invoice-pdf.service'
 import { SponsorshipReportPdfService } from './sponsorship-report-pdf.service';
 import { ProposalPdfGeneratorService } from './proposal-pdf-generator.service';
 import { ProposalDeckContentService } from './proposal-deck-content.service';
-import { GenerateProposalPdfDto } from './dto/generate-proposal-pdf.dto';
-import { ExpandProposalDeckContentDto } from './dto/expand-proposal-deck-content.dto';
-import { ExpandProposalDeckContentResponseDto } from './dto/expand-proposal-deck-content-response.dto';
-import { GenerateProposalDeckPdfDto } from './dto/generate-proposal-deck-pdf.dto';
+import { GenerateProposalDeckPlanDto, GenerateProposalDeckPlanResponseDto } from './dto/generate-proposal-deck-plan.dto';
+import { FinalizeProposalDeckDto, FinalizeProposalDeckResponseDto } from './dto/finalize-proposal-deck.dto';
 import { DocumentExtractionService } from '../../common/document-extraction/document-extraction.service';
 
 @ApiTags('Sponsorship Proposals')
@@ -75,63 +73,37 @@ export class SponsorshipController {
     private readonly documentExtractionService: DocumentExtractionService,
   ) {}
 
-  @Post('proposals/generate-pdf')
+  @Post('proposals/deck/plan')
   @UseGuards(RolesGuard)
   @Roles('HOST')
   @ApiOperation({
-    summary: 'Generate a quick sponsorship proposal PDF from form data',
+    summary: "Plan a sponsorship proposal's AI pitch-deck content",
     description:
-      'Stateless — accepts proposal details directly in the request body and streams back a styled PDF ' +
-      'for immediate download. Not tied to any saved proposal record.',
+      'Takes the proposal\'s own structured fields (not personalized to any one brand) and returns an ' +
+      'editable slide array — cover/pricing/closing are assembled deterministically, the AI writes and ' +
+      'picks a layout for 2-3 middle content slides. Meant to be shown back to the host for editing ' +
+      'before the final deck is rendered.',
   })
-  @ApiOkResponse({ description: 'PDF file stream.' })
-  async generateProposalPdf(@Body() dto: GenerateProposalPdfDto, @Res() res: Response) {
-    const buffer = await this.proposalPdfGeneratorService.generate(dto);
-    res.set({
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': 'attachment; filename="sponsorship-proposal.pdf"',
-      'Content-Length': buffer.length,
-    });
-    res.send(buffer);
-  }
-
-  @Post('proposals/deck/expand-content')
-  @UseGuards(RolesGuard)
-  @Roles('HOST')
-  @ApiOperation({
-    summary: 'AI-expand basic proposal form inputs into pitch-deck slide copy',
-    description:
-      'Takes the same bare-bones form inputs as generate-pdf and returns AI-elaborated copy for ' +
-      'each of the 5 content slides (value proposition, campaign overview, audience reach, ' +
-      'deliverables, timeline) — meant to be shown back to the host for editing before the final ' +
-      'deck PDF is generated.',
-  })
-  @ApiOkResponse({ description: 'AI-expanded slide copy.', type: ExpandProposalDeckContentResponseDto })
-  expandProposalDeckContent(
+  @ApiOkResponse({ description: 'Editable slide plan.', type: GenerateProposalDeckPlanResponseDto })
+  generateProposalDeckPlan(
     @GetUser('uid') uid: string,
-    @Body() dto: ExpandProposalDeckContentDto,
+    @Body() dto: GenerateProposalDeckPlanDto,
   ) {
-    return this.proposalDeckContentService.expandContent(dto, uid);
+    return this.proposalDeckContentService.generatePlan(dto, uid);
   }
 
-  @Post('proposals/deck/generate-pdf')
+  @Post('proposals/deck/finalize')
   @UseGuards(RolesGuard)
   @Roles('HOST')
   @ApiOperation({
-    summary: 'Generate the final presentation-style (6-slide) sponsorship pitch deck PDF',
+    summary: 'Render the (host-edited) slide plan into a themed pitch-deck PDF and attach it to storage',
     description:
-      'Stateless — renders the (optionally user-edited) AI-expanded slide copy into a fixed-design, ' +
-      'multi-page landscape deck and streams back the PDF for immediate download.',
+      'Stateless render + upload — NOT a direct download. Returns a docKey/docName/docType/docSize meant ' +
+      'to be set directly into the sponsorship proposal form, replacing a manual document upload.',
   })
-  @ApiOkResponse({ description: 'PDF file stream.' })
-  async generateProposalDeckPdf(@Body() dto: GenerateProposalDeckPdfDto, @Res() res: Response) {
-    const buffer = await this.proposalPdfGeneratorService.generateDeck(dto);
-    res.set({
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': 'attachment; filename="sponsorship-pitch-deck.pdf"',
-      'Content-Length': buffer.length,
-    });
-    res.send(buffer);
+  @ApiOkResponse({ description: 'Uploaded document reference.', type: FinalizeProposalDeckResponseDto })
+  finalizeProposalDeck(@Body() dto: FinalizeProposalDeckDto) {
+    return this.proposalPdfGeneratorService.finalizeDeck(dto);
   }
 
   @Post('copilot/generate-draft')

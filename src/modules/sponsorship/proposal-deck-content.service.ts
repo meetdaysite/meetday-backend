@@ -1,19 +1,25 @@
 import { Injectable, InternalServerErrorException, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ExpandProposalDeckContentDto } from './dto/expand-proposal-deck-content.dto';
-import { ExpandProposalDeckContentResponseDto } from './dto/expand-proposal-deck-content-response.dto';
+import { GenerateProposalDeckPlanDto, GenerateProposalDeckPlanResponseDto } from './dto/generate-proposal-deck-plan.dto';
+import { DeckSlideDto } from './dto/deck-slide.dto';
 
-type AiDeckContentResponse = {
-  value_proposition: string;
-  campaign_overview: string;
-  audience_reach: string;
-  deliverables_expanded: string;
-  timeline_expanded: string;
+type AiDeckStat = { label: string; value: string };
+type AiMiddleSlide = {
+  layout: 'VALUE_PROP' | 'STAT_HIGHLIGHT' | 'BULLET_LIST';
+  title: string;
+  body: string;
+  bullets: string[];
+  stats: AiDeckStat[];
+};
+type AiDeckPlanResponse = {
+  middle_slides: AiMiddleSlide[];
+  closing_message: string;
 };
 
-// Calls the meetday-ai microservice to expand a host's bare-bones "Generate Proposal PDF" form
-// inputs into polished, brand-facing copy for a slide-deck-style pitch — mirrors
-// ProposalCopilotService's calling convention (same AI server, same error handling).
+// Calls the meetday-ai microservice to plan a proposal's pitch-deck content — the AI writes/
+// elaborates copy and picks a layout per "middle" content slide, while the cover, pricing, and
+// closing slides are assembled deterministically here from the proposal's own structured data.
+// Mirrors ProposalCopilotService's calling convention (same AI server, same error handling).
 @Injectable()
 export class ProposalDeckContentService {
   private readonly logger = new Logger(ProposalDeckContentService.name);
@@ -23,8 +29,8 @@ export class ProposalDeckContentService {
     this.aiServerUrl = this.config.get<string>('aiServerUrl')!;
   }
 
-  async expandContent(dto: ExpandProposalDeckContentDto, hostId: string): Promise<ExpandProposalDeckContentResponseDto> {
-    const url = `${this.aiServerUrl}/proposal-deck/expand-content`;
+  async generatePlan(dto: GenerateProposalDeckPlanDto, hostId: string): Promise<GenerateProposalDeckPlanResponseDto> {
+    const url = `${this.aiServerUrl}/proposal-deck/plan`;
 
     let response: Response;
     try {
@@ -33,12 +39,14 @@ export class ProposalDeckContentService {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           host_id: hostId,
-          sponsor_name: dto.sponsorName,
-          event_title: dto.eventTitle,
-          deliverables: dto.deliverables,
-          timeline: dto.timeline,
-          pricing_summary: dto.pricingTiers?.map((t) => `${t.name}: ${t.price}`).join(', '),
-          terms: dto.terms,
+          event_name: dto.eventName,
+          about: dto.about,
+          venues: dto.venues ?? [],
+          event_date: dto.eventDate,
+          audience_profile: dto.audienceProfile ?? [],
+          age_group: dto.ageGroup,
+          guest_count: dto.guestCount,
+          sponsor_tiers: (dto.sponsorTiers ?? []).map((t) => ({ name: t.name, price: t.price })),
         }),
       });
     } catch {
@@ -46,7 +54,7 @@ export class ProposalDeckContentService {
       throw new InternalServerErrorException('AI service is currently unavailable. Please try again later.');
     }
 
-    const data = (await response.json()) as AiDeckContentResponse & { error?: string; detail?: string };
+    const data = (await response.json()) as AiDeckPlanResponse & { error?: string; detail?: string };
 
     if (!response.ok) {
       this.logger.error(`AI server returned ${response.status}: ${JSON.stringify(data)}`);
@@ -55,15 +63,42 @@ export class ProposalDeckContentService {
         throw new ServiceUnavailableException('AI model is currently experiencing high demand. Please try again in a moment.');
       }
 
-      throw new InternalServerErrorException('Failed to expand proposal content. Please try again.');
+      throw new InternalServerErrorException('Failed to plan proposal deck content. Please try again.');
     }
 
-    return {
-      valueProposition: data.value_proposition,
-      campaignOverview: data.campaign_overview,
-      audienceReach: data.audience_reach,
-      deliverablesExpanded: data.deliverables_expanded,
-      timelineExpanded: data.timeline_expanded,
-    };
+    const slides: DeckSlideDto[] = [
+      {
+        layout: 'COVER',
+        title: dto.eventName,
+        subtitle: dto.venues?.length ? dto.venues.join(', ') : undefined,
+      } as DeckSlideDto,
+      ...data.middle_slides.map(
+        (m) =>
+          ({
+            layout: m.layout,
+            title: m.title,
+            body: m.body,
+            bullets: m.bullets,
+            stats: m.stats,
+          }) as DeckSlideDto,
+      ),
+    ];
+
+    if (dto.sponsorTiers?.length) {
+      slides.push({
+        layout: 'PRICING_COMPARISON',
+        title: 'Sponsor Pricing',
+        pricingTiers: dto.sponsorTiers,
+      } as DeckSlideDto);
+    }
+
+    slides.push({
+      layout: 'CLOSING_CONTACT',
+      title: "Let's Talk",
+      body: data.closing_message,
+    } as DeckSlideDto);
+
+    return { slides };
   }
 }
+
