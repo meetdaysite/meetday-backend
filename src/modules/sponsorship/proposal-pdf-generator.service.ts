@@ -148,8 +148,10 @@ export class ProposalPdfGeneratorService {
       });
     }
     const key = `sponsorship-proposal-decks/${randomUUID()}.pdf`;
+    const docName = 'sponsorship-proposal-deck.pdf';
     await this.storageService.uploadBuffer(key, buffer, 'application/pdf');
-    return { docKey: key, docName: 'sponsorship-proposal-deck.pdf', docType: 'application/pdf', docSize: buffer.length };
+    const docUrl = await this.storageService.getPresignedDownloadUrl(key, { downloadFilename: docName });
+    return { docKey: key, docName, docType: 'application/pdf', docSize: buffer.length, docUrl };
   }
 
   private resolveSlideBg(theme: DeckTheme, layout: DeckSlideDto['layout'], index: number, total: number): SlideBg {

@@ -74,4 +74,9 @@ export class FinalizeProposalDeckResponseDto {
 
   @ApiProperty()
   docSize: number;
+
+  // Presigned, forced-download URL — lets the host download the deck right after generating it,
+  // without waiting for the proposal itself to be saved first.
+  @ApiProperty()
+  docUrl: string;
 }
