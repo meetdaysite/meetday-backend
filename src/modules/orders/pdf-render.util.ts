@@ -31,7 +31,11 @@ export async function renderHtmlsToPdfs(
 
   const browser = await puppeteer.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    // --disable-dev-shm-usage: container /dev/shm is tiny by default (often 64MB) and Chrome's
+    // renderer crashes ("Connection closed") under memory pressure from image-heavy pages
+    // (e.g. multi-logo pitch decks) unless it's told to use /tmp instead — well-documented fix
+    // for headless Chrome in Docker/Cloud Run.
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
   });
   try {
     const buffers: Buffer[] = [];

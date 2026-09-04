@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { escapeHtml, renderHtmlToPdf } from '../orders/pdf-render.util';
 import { MEETDAY_LOGO_DATA_URI } from '../../common/assets/meetday-logo.base64';
@@ -137,7 +137,16 @@ export class ProposalPdfGeneratorService {
 </body>
 </html>`;
 
-    const buffer = await renderHtmlToPdf(html, { width: '1280px', height: '720px' });
+    let buffer: Buffer;
+    try {
+      buffer = await renderHtmlToPdf(html, { width: '1280px', height: '720px' });
+    } catch (err) {
+      // Puppeteer/container crashes (e.g. transient memory pressure) surface as an opaque
+      // "Connection closed" — translate to a clear, retryable error instead of a raw 500.
+      throw new ServiceUnavailableException('Failed to render the proposal deck. Please try again in a moment.', {
+        cause: err instanceof Error ? err : undefined,
+      });
+    }
     const key = `sponsorship-proposal-decks/${randomUUID()}.pdf`;
     await this.storageService.uploadBuffer(key, buffer, 'application/pdf');
     return { docKey: key, docName: 'sponsorship-proposal-deck.pdf', docType: 'application/pdf', docSize: buffer.length };
@@ -150,6 +159,10 @@ export class ProposalPdfGeneratorService {
     return layout === 'COVER' || layout === 'CLOSING_CONTACT' || index === total - 1 ? 'dark' : 'light';
   }
 
+  // Caps embedded image size defensively — even though the frontend already enforces a 5MB
+  // limit, an oversized image here (bypassed client check, or a very large SVG) could still
+  // blow Puppeteer's container memory once several logos/media assets are all embedded into
+  // one 10-slide document at once. Skips the image (renders without it) rather than crashing.
   private async keyToDataUri(key: string | undefined): Promise<string | null> {
     if (!key) return null;
     try {
@@ -158,6 +171,7 @@ export class ProposalPdfGeneratorService {
       if (!res.ok) return null;
       const contentType = res.headers.get('content-type') || 'image/png';
       const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length > 8 * 1024 * 1024) return null;
       return `data:${contentType};base64,${buf.toString('base64')}`;
     } catch {
       return null;
