@@ -1682,9 +1682,9 @@ export class AdminController {
   @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Send a mass announcement email to brands and/or hosts',
+    summary: 'Send a mass announcement email to brands and/or community',
     description:
-      'Queues one email per matched recipient (real brand/host account emails). ' +
+      'Queues one email per matched recipient (real brand/community account emails). ' +
       'Select `allBrands`/`allCommunity` for every account in that group, or pass specific ' +
       '`brandIds`/`hostIds` to target a subset. Only `SUPER_ADMIN` can call this endpoint.',
   })
@@ -1700,7 +1700,7 @@ export class AdminController {
   @Get('announcements')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({
-    summary: 'List past announcements sent to brands/hosts',
+    summary: 'List past announcements sent to brands/community',
     description: 'Paginated history of mass-emails sent via `POST /admin/announcements/send`, newest first.',
   })
   @ApiOkResponse({ description: 'Paginated list of past announcements.' })

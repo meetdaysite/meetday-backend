@@ -2211,7 +2211,7 @@ export class AdminService {
       dto.recipientsSummary?.trim() ||
       [
         dto.allBrands ? 'All Brands' : dto.brandIds?.length ? `${dto.brandIds.length} Brand(s)` : null,
-        dto.allCommunity ? 'All Community' : dto.hostIds?.length ? `${dto.hostIds.length} Host(s)` : null,
+        dto.allCommunity ? 'All Community' : dto.hostIds?.length ? `${dto.hostIds.length} Community` : null,
       ]
         .filter(Boolean)
         .join(', ');
