@@ -210,11 +210,14 @@ export class StorageService {
   async requestUploadUrl(firebaseUid: string, dto: RequestUploadUrlDto) {
     const user = await this.prisma.user.findUnique({
       where: { firebaseUid },
-      select: { id: true, role: { select: { name: true } } },
+      select: { id: true, role: { select: { name: true } }, adminRole: { select: { name: true } } },
     });
     if (!user) throw new NotFoundException('User not found');
     const userId = user.id;
-    const roleName = user.role?.name;
+    // A user's admin access can come from a secondary `adminRole` grant while their primary
+    // `role` stays HOST/BRAND (see RolesGuard) — check both, not just the primary role, or a
+    // primarily-HOST/BRAND admin gets wrongly rejected from admin-only upload contexts.
+    const roleName = user.adminRole?.name ?? user.role?.name;
 
     // Narrow the globally-allowed content types to what this context accepts.
     if (!CONTEXT_CONTENT_TYPES[dto.context].includes(dto.contentType)) {
