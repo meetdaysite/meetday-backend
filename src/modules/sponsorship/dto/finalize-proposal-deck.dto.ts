@@ -28,13 +28,19 @@ export class FinalizeProposalDeckDto {
   @IsIn(DECK_FONT_VIBES)
   fontVibe: DeckFontVibe;
 
-  @ApiProperty({ example: '#EE2C2C' })
-  @IsHexColor()
-  primaryColor: string;
+  @ApiProperty({ type: [String], example: ['#EE2C2C', '#111111'], description: 'Up to 2 primary brand colors.' })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(2)
+  @IsHexColor({ each: true })
+  primaryColors: string[];
 
-  @ApiProperty({ example: '#111111' })
-  @IsHexColor()
-  accentColor: string;
+  @ApiProperty({ type: [String], example: ['#FFC940', '#0EA5E9', '#22C55E'], description: 'Up to 3 accent/highlight colors.' })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(3)
+  @IsHexColor({ each: true })
+  accentColors: string[];
 
   // Logo variant meant for DARK slide backgrounds (e.g. a white/light-colored logo file).
   @ApiPropertyOptional({ example: 'community-logos/abc123-dark.png' })
@@ -75,8 +81,8 @@ export class FinalizeProposalDeckResponseDto {
   @ApiProperty()
   docSize: number;
 
-  // Presigned, forced-download URL — lets the host download the deck right after generating it,
-  // without waiting for the proposal itself to be saved first.
+  // Presigned, inline-viewable URL (no forced download) — used to show the deck in-app via
+  // PdfViewer right after generating it, without waiting for the proposal itself to be saved.
   @ApiProperty()
   docUrl: string;
 }

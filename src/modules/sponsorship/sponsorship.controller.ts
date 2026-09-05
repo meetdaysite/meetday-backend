@@ -79,9 +79,10 @@ export class SponsorshipController {
   @ApiOperation({
     summary: "Plan a sponsorship proposal's AI pitch-deck content",
     description:
-      'Takes the proposal\'s own structured fields (not personalized to any one brand) and returns an ' +
-      'editable slide array — cover/pricing/closing are assembled deterministically, the AI writes and ' +
-      'picks a layout for 2-3 middle content slides. Meant to be shown back to the host for editing ' +
+      "Takes the proposal's own structured fields (not personalized to any one brand) and returns the " +
+      'fixed 10-slide plan (cover/overview/about/audience/why-sponsor/past-sponsors/on-site/digital/' +
+      'pricing/closing) — slide layout per position is deterministic, the AI only fills fallback copy ' +
+      'for any optional narrative fields left empty. Meant to be shown back to the host for editing ' +
       'before the final deck is rendered.',
   })
   @ApiOkResponse({ description: 'Editable slide plan.', type: GenerateProposalDeckPlanResponseDto })

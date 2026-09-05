@@ -49,6 +49,18 @@ export class GenerateProposalDeckPlanDto {
   @MaxLength(200)
   location?: string;
 
+  @ApiPropertyOptional({ example: '2026-10-15', description: 'Event date(s) — a single date or a range as free text.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  eventDate?: string;
+
+  @ApiPropertyOptional({ example: '7:00 PM – 11:00 PM' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  eventTime?: string;
+
   @ApiPropertyOptional({ example: '1,200' })
   @IsOptional()
   @IsString()
