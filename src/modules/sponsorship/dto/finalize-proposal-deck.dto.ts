@@ -59,6 +59,13 @@ export class FinalizeProposalDeckDto {
   @IsString()
   mediaKitUrl?: string;
 
+  // Alternative to mediaKitUrl — an uploaded file's storage key, resolved to a long-lived link
+  // at render time. Takes precedence over mediaKitUrl if both are provided.
+  @ApiPropertyOptional({ example: 'sponsorship-media/abc123-guidelines.pdf' })
+  @IsOptional()
+  @IsString()
+  mediaKitKey?: string;
+
   // Up to 10 additional brand images — the first few are shown as a small gallery strip.
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()

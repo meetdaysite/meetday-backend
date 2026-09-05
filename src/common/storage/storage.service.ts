@@ -133,25 +133,30 @@ export class StorageService {
 
   // `downloadFilename`, when set, forces the browser to save the file (Content-Disposition:
   // attachment) instead of rendering it inline — used for admin-facing document downloads.
-  async getPresignedDownloadUrl(key: string, opts?: { downloadFilename?: string }): Promise<string> {
+  // `ttlSeconds`, when set, overrides the default 15-minute expiry (e.g. for a link embedded as
+  // static text in a generated document, where a longer-lived link is worth the tradeoff) — capped
+  // at 7 days, GCS V4 signed URLs' maximum allowed validity.
+  async getPresignedDownloadUrl(key: string, opts?: { downloadFilename?: string; ttlSeconds?: number }): Promise<string> {
     // OAuth providers (Google, Apple) store a full URL directly — return as-is
     if (key.startsWith('http://') || key.startsWith('https://')) return key;
 
-    const cacheKey = opts?.downloadFilename ? `presign:${key}:dl:${opts.downloadFilename}` : `presign:${key}`;
+    const ttlSeconds = Math.min(opts?.ttlSeconds ?? PRESIGN_TTL, 7 * 24 * 60 * 60);
+    const cacheKey = opts?.downloadFilename ? `presign:${key}:dl:${opts.downloadFilename}` : `presign:${key}:ttl:${ttlSeconds}`;
     const cached = await this.redis.get<string>(cacheKey);
     if (cached) return cached;
 
     const [url] = await this.bucket.file(key).getSignedUrl({
       version: 'v4',
       action: 'read',
-      expires: Date.now() + PRESIGN_TTL * 1000,
+      expires: Date.now() + ttlSeconds * 1000,
       ...(opts?.downloadFilename && {
         responseDisposition: `attachment; filename="${opts.downloadFilename.replace(/"/g, '')}"`,
       }),
     });
-    await this.redis.set(cacheKey, url, PRESIGN_CACHE_TTL);
+    await this.redis.set(cacheKey, url, Math.max(ttlSeconds - 60, 60));
     return url;
   }
+
 
   private officialHostProfileIdCache: string | null = null;
 

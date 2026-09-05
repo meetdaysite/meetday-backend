@@ -54,6 +54,7 @@ export class ProposalDeckContentService {
           sponsor_roi_pitch: dto.sponsorROIPitch,
           location: dto.location,
           event_date: dto.eventDate,
+          event_end_date: dto.eventEndDate,
           event_time: dto.eventTime,
           hero_metric_value: dto.heroMetricValue,
           hero_metric_label: dto.heroMetricLabel,
@@ -84,12 +85,18 @@ export class ProposalDeckContentService {
 
     const hasPastSponsors = (dto.pastSponsors ?? []).length > 0;
 
+    // Multi-day events show a "start – end" range; single-day events just show the one date.
+    const dateRange =
+      dto.eventEndDate && dto.eventEndDate !== dto.eventDate
+        ? [dto.eventDate, dto.eventEndDate].filter(Boolean).join(' – ')
+        : dto.eventDate;
+
     const slides: DeckSlideDto[] = [
       {
         layout: 'COVER',
         title: dto.eventTitle,
         subtitle: data.tagline,
-        body: [dto.hostName, [dto.eventDate, dto.eventTime].filter(Boolean).join(', '), dto.location].filter(Boolean).join(' • '),
+        body: [dto.hostName, [dateRange, dto.eventTime].filter(Boolean).join(', '), dto.location].filter(Boolean).join(' • '),
       } as DeckSlideDto,
       { layout: 'VALUE_PROP', title: 'Event Overview', body: data.event_overview } as DeckSlideDto,
       { layout: 'VALUE_PROP', title: `About ${dto.hostName}`, body: data.about_community } as DeckSlideDto,
