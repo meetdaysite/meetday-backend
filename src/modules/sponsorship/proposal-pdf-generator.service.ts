@@ -43,16 +43,11 @@ export class ProposalPdfGeneratorService {
   constructor(private readonly storageService: StorageService) {}
 
   async finalizeDeck(dto: FinalizeProposalDeckDto): Promise<FinalizeProposalDeckResponseDto> {
-    const [darkBgLogo, lightBgLogo, mediaAssetUris, mediaKitUrl] = await Promise.all([
+    const [darkBgLogo, lightBgLogo, mediaAssetUris] = await Promise.all([
       this.keyToDataUri(dto.primaryLogoKey),
       this.keyToDataUri(dto.secondaryLogoKey),
       // 1 hero (cover) + up to 2 on "About Host" + up to 2 on "Why Sponsor This".
       Promise.all((dto.mediaAssetKeys ?? []).slice(0, 5).map((k) => this.keyToDataUri(k))),
-      // An uploaded media-kit file takes precedence over a plain URL — resolved to the longest
-      // GCS allows (7 days) since this link gets baked as static text into the rendered PDF.
-      dto.mediaKitKey
-        ? this.storageService.getPresignedDownloadUrl(dto.mediaKitKey, { ttlSeconds: 7 * 24 * 60 * 60 })
-        : Promise.resolve(dto.mediaKitUrl),
     ]);
     const usingFallbackLogo = !!(darkBgLogo || lightBgLogo) && !(darkBgLogo && lightBgLogo);
     const fallbackLogo = darkBgLogo ?? lightBgLogo ?? null;
@@ -96,7 +91,6 @@ export class ProposalPdfGeneratorService {
           // "About <Host>" (index 2) and "Why Sponsor This" (index 4) are fixed positions in
           // the 10-slide template — each gets up to 2 of the remaining brand images.
           galleryUris: index === 2 ? aboutGalleryUris : index === 4 ? whySponsorGalleryUris : [],
-          mediaKitUrl: index === 2 ? mediaKitUrl : undefined,
         });
       })
       .join('');
@@ -179,7 +173,6 @@ export class ProposalPdfGeneratorService {
   .sponsor-ref { font-size: 13px; opacity: 0.6; }
   .barter-badge { display: inline-block; margin-top: 16px; padding: 8px 18px; border-radius: 999px; font-size: 14px; font-weight: 700; background: var(--primary); color: #fff; }
   .deadline-note { font-size: 16px; opacity: 0.7; margin-top: 12px; }
-  .media-kit-link { font-size: 13px; opacity: 0.6; margin-top: 14px; }
   .slide-footer { display: flex; align-items: center; justify-content: space-between; padding-top: 14px; margin-top: 20px;
     border-top: 1px solid currentColor; opacity: 0.55; font-size: 11px; position: relative; z-index: 1; }
   .powered-by { display: flex; align-items: center; gap: 6px; font-weight: 700; }
@@ -280,7 +273,6 @@ export class ProposalPdfGeneratorService {
       isLast: boolean;
       heroImageUri: string | null;
       galleryUris: string[];
-      mediaKitUrl?: string;
     },
   ): string {
     const nl2p = (text?: string) =>
@@ -294,9 +286,6 @@ export class ProposalPdfGeneratorService {
     const logoImg = opts.logo ? `<img class="logo${opts.logoLarge ? ' logo-large' : ''}" src="${opts.logo}" alt="Logo" />` : '';
     const logoBlock = opts.logoNeedsChip ? `<div class="logo-chip">${logoImg}</div>` : logoImg;
 
-    const mediaKitLink = opts.mediaKitUrl
-      ? `<p class="media-kit-link">Brand Media Kit: ${escapeHtml(opts.mediaKitUrl)}</p>`
-      : '';
     const kicker = kickerFor(slide.layout, opts.index);
     const kickerHtml = kicker ? `<span class="kicker">${kicker}</span>` : '';
 
@@ -332,7 +321,6 @@ export class ProposalPdfGeneratorService {
               <h2>${escapeHtml(slide.title)}</h2>
               <div class="accent-rule"></div>
               ${nl2p(slide.body)}
-              ${mediaKitLink}
             </div>
             ${visual}
           </div>`;
