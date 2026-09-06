@@ -19,6 +19,7 @@ const CONTENT_TYPE_EXT: Record<string, string> = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
   'image/webp': 'webp',
+  'image/svg+xml': 'svg',
   'video/mp4': 'mp4',
   'application/pdf': 'pdf',
   'application/msword': 'doc',
@@ -28,6 +29,9 @@ const CONTENT_TYPE_EXT: Record<string, string> = {
 };
 
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+// Logo-style uploads (deck logos, brand-worked-with showcase logos) need SVG support too —
+// safe here since these are always rendered via <img>, which never executes embedded SVG script.
+const LOGO_IMAGE_TYPES = [...IMAGE_TYPES, 'image/svg+xml'] as const;
 
 // Pitch-deck document types accepted for sponsorship proposals.
 const PITCH_DOC_TYPES = [
@@ -51,13 +55,13 @@ const CONTEXT_CONTENT_TYPES: Record<UploadContext, readonly string[]> = {
   [UploadContext.COMMUNITY_ANNOUNCEMENT]: IMAGE_TYPES,
   [UploadContext.COMMUNITY_DM_MEDIA]: IMAGE_TYPES,
   [UploadContext.COMMUNITY_FEED_MEDIA]: [...IMAGE_TYPES, 'video/mp4'],
-  [UploadContext.SPONSORSHIP_MEDIA]: IMAGE_TYPES,
+  [UploadContext.SPONSORSHIP_MEDIA]: LOGO_IMAGE_TYPES,
   [UploadContext.SPONSORSHIP_DOCUMENT]: PITCH_DOC_TYPES,
   [UploadContext.SPONSORSHIP_CHAT_MEDIA]: [...IMAGE_TYPES, 'application/pdf'],
   [UploadContext.MEETDAY_CHAT_MEDIA]: IMAGE_TYPES,
   [UploadContext.COMMUNITY_PAST_EVENT_MEDIA]: IMAGE_TYPES,
   [UploadContext.SPONSORSHIP_DEAL_REPORT_MEDIA]: IMAGE_TYPES,
-  [UploadContext.COMMUNITY_BRAND_LOGO_MEDIA]: IMAGE_TYPES,
+  [UploadContext.COMMUNITY_BRAND_LOGO_MEDIA]: LOGO_IMAGE_TYPES,
   [UploadContext.ADMIN_ANNOUNCEMENT_ATTACHMENT]: [...IMAGE_TYPES, 'application/pdf'],
 };
 
