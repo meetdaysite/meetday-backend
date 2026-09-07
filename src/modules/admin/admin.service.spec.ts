@@ -728,6 +728,7 @@ describe('AdminService', () => {
       avgGuestCount: '60',
       experiencesPerYear: '12',
       categoryIds: ['cat-1'],
+      operatingCities: ['Bangalore'],
     };
 
     it('creates an APPROVED community profile and notifies the host', async () => {

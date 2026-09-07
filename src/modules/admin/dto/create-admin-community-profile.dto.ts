@@ -56,6 +56,14 @@ export class CreateAdminCommunityProfileDto {
   @Type(() => SocialLinksDto)
   socialLinks?: SocialLinksDto;
 
+  // Written onto the host's own profile — required unless the target host profile already has
+  // at least one operating city set (see AdminService.createCommunityProfileAsAdmin).
+  @ApiPropertyOptional({ type: [String], example: ['Mumbai', 'Pune'] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  operatingCities?: string[];
+
   @ApiPropertyOptional({ type: [PastEventDto], description: 'Past events/experiences to showcase on the profile' })
   @IsOptional()
   @IsArray()

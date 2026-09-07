@@ -64,6 +64,13 @@ export class UpdateAdminCommunityProfileDto {
   @Type(() => SocialLinksDto)
   socialLinks?: SocialLinksDto;
 
+  // Written onto the host's own profile (not the community profile row).
+  @ApiPropertyOptional({ type: [String], example: ['Mumbai', 'Pune'] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  operatingCities?: string[];
+
   @ApiPropertyOptional({ type: [PastEventDto], description: 'Past events/experiences to showcase on the profile' })
   @IsOptional()
   @IsArray()

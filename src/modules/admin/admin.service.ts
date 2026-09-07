@@ -3190,6 +3190,7 @@ export class AdminService {
         select: {
           id: true,
           displayName: true,
+          operatingCities: true,
           user: { select: { id: true, firstName: true, lastName: true, email: true } },
         },
         orderBy: { createdAt: 'desc' },
@@ -3211,6 +3212,14 @@ export class AdminService {
     });
     if (!hostProfile) throw new NotFoundException('Host profile not found');
     if (hostProfile.communityProfile) throw new ConflictException('This host already has a community profile');
+
+    // Community-facing profile forms treat operating cities as mandatory — mirror that here so
+    // an admin-created profile never ends up with none, which would otherwise only surface later
+    // as a confusing validation error when the host themselves tries to edit their profile.
+    const hasExistingCities = (hostProfile.operatingCities?.length ?? 0) > 0;
+    if (!dto.operatingCities?.length && !hasExistingCities) {
+      throw new BadRequestException('At least one operating city is required.');
+    }
 
     const validCategories = await this.prisma.category.findMany({
       where: { id: { in: dto.categoryIds } },
@@ -3242,10 +3251,14 @@ export class AdminService {
     });
 
     // Guards against an empty/all-blank object wiping the host's existing social links.
-    if (dto.socialLinks && Object.values(dto.socialLinks).some(Boolean)) {
+    const hasSocialLinksUpdate = dto.socialLinks && Object.values(dto.socialLinks).some(Boolean);
+    if (hasSocialLinksUpdate || dto.operatingCities?.length) {
       await this.prisma.hostProfile.update({
         where: { id: hostProfile.id },
-        data: { socialLinks: JSON.parse(JSON.stringify(dto.socialLinks)) },
+        data: {
+          ...(hasSocialLinksUpdate && { socialLinks: JSON.parse(JSON.stringify(dto.socialLinks)) }),
+          ...(dto.operatingCities?.length && { operatingCities: dto.operatingCities }),
+        },
       });
     }
 
@@ -3318,10 +3331,14 @@ export class AdminService {
     });
 
     // Guards against an empty/all-blank object wiping the host's existing social links.
-    if (dto.socialLinks && Object.values(dto.socialLinks).some(Boolean)) {
+    const hasSocialLinksUpdate = dto.socialLinks && Object.values(dto.socialLinks).some(Boolean);
+    if (hasSocialLinksUpdate || dto.operatingCities?.length) {
       await this.prisma.hostProfile.update({
         where: { id: existing.hostProfileId },
-        data: { socialLinks: JSON.parse(JSON.stringify(dto.socialLinks)) },
+        data: {
+          ...(hasSocialLinksUpdate && { socialLinks: JSON.parse(JSON.stringify(dto.socialLinks)) }),
+          ...(dto.operatingCities?.length && { operatingCities: dto.operatingCities }),
+        },
       });
     }
 
