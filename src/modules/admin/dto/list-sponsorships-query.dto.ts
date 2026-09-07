@@ -1,13 +1,13 @@
-import { IsEnum, IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { SponsorshipStatus } from '@prisma/client';
 
 export class ListSponsorshipsQueryDto {
-  @ApiPropertyOptional({ enum: SponsorshipStatus })
+  @ApiPropertyOptional({ enum: [...Object.values(SponsorshipStatus), 'COMPLETED'] })
   @IsOptional()
-  @IsEnum(SponsorshipStatus)
-  status?: SponsorshipStatus;
+  @IsIn([...Object.values(SponsorshipStatus), 'COMPLETED'])
+  status?: SponsorshipStatus | 'COMPLETED';
 
   @ApiPropertyOptional({ example: 'Mumbai' })
   @IsOptional()

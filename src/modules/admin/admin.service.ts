@@ -9,7 +9,7 @@ import {
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { ConfigService } from '@nestjs/config';
-import { Prisma } from '@prisma/client';
+import { Prisma, SponsorshipStatus } from '@prisma/client';
 import * as crypto from 'crypto';
 import * as firebaseAdmin from 'firebase-admin';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -1599,7 +1599,23 @@ export class AdminService {
     const limit = query.limit ?? 20;
 
     const where: any = {};
-    if (query.status) where.status = query.status;
+    if (query.status) {
+      if ((query.status as string) === 'COMPLETED') {
+        const startOfToday = new Date();
+        startOfToday.setUTCHours(0, 0, 0, 0);
+        where.status = SponsorshipStatus.PUBLISHED;
+        where.AND = [
+          {
+            OR: [
+              { eventEndDate: { not: null, lt: startOfToday } },
+              { eventEndDate: null, eventDate: { lt: startOfToday } },
+            ],
+          },
+        ];
+      } else {
+        where.status = query.status;
+      }
+    }
     if (query.city) where.city = { contains: query.city, mode: 'insensitive' };
     if (query.hostProfileId) where.hostProfileId = query.hostProfileId;
 

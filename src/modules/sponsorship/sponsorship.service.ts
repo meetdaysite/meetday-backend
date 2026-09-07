@@ -339,12 +339,20 @@ export class SponsorshipService {
 
   // Brand-facing: every published proposal across all hosts, newest first. Optionally filtered by
   // category, matched against the host's APPROVED community profile categories.
+  // Filters out proposals whose event has already ended (eventEndDate or eventDate < start of today).
   async getAllPublishedProposals(query: ListPublishedQueryDto) {
+    const startOfToday = new Date();
+    startOfToday.setUTCHours(0, 0, 0, 0);
+
     const proposals = await this.prisma.sponsorshipProposal.findMany({
       where: {
         status: SponsorshipStatus.PUBLISHED,
         // A community an admin has hidden must not surface in brand browse/discovery at all.
         NOT: { hostProfile: { communityProfile: { isHidden: true } } },
+        OR: [
+          { eventEndDate: { gte: startOfToday } },
+          { eventEndDate: null, eventDate: { gte: startOfToday } },
+        ],
         ...(query.categoryId && {
           hostProfile: {
             communityProfile: {
@@ -391,6 +399,44 @@ export class SponsorshipService {
     // A hidden community's proposals are treated as not found for brands, same as unpublished.
     if (proposal.hostProfile.communityProfile?.isHidden) throw new NotFoundException('Sponsorship proposal not found');
 
+    let alreadyInterested = false;
+    if (userId) {
+      const brandProfileIds = await this.teamAccessService.getBrandProfileIds(userId);
+      const brand = brandProfileIds[0] ? { id: brandProfileIds[0] } : null;
+      if (brand) {
+        const interest = await this.prisma.sponsorshipInterest.findUnique({
+          where: {
+            sponsorshipProposalId_brandProfileId: {
+              sponsorshipProposalId: id,
+              brandProfileId: brand.id,
+            },
+          },
+        });
+        if (interest) {
+          alreadyInterested = true;
+        }
+      }
+    }
+
+    // If the proposal has passed its end date, it is no longer visible to arbitrary brands/public.
+    // However, if a brand already expressed interest / was talking to the host (or caller is host team),
+    // they can still view it.
+    const effectiveEndDate = proposal.eventEndDate ?? proposal.eventDate;
+    const startOfToday = new Date();
+    startOfToday.setUTCHours(0, 0, 0, 0);
+    const isPastEndDate = effectiveEndDate ? effectiveEndDate < startOfToday : false;
+
+    if (isPastEndDate && !alreadyInterested) {
+      let isHostMember = false;
+      if (userId) {
+        const hostProfileIds = await this.teamAccessService.getHostProfileIds(userId);
+        isHostMember = hostProfileIds.includes(proposal.hostProfile.id);
+      }
+      if (!isHostMember) {
+        throw new NotFoundException('Sponsorship proposal not found');
+      }
+    }
+
     const withUrls = await this.withSignedUrls(proposal);
     const { hostProfile, ...rest } = withUrls;
     const { communityProfile, ...hostRest } = hostProfile;
@@ -416,25 +462,6 @@ export class SponsorshipService {
 
     // Brands must never see the host's not-yet-approved pending edits.
     const { pendingRevision: _pendingRevision, ...restWithoutPendingRevision } = rest;
-
-    let alreadyInterested = false;
-    if (userId) {
-      const brandProfileIds = await this.teamAccessService.getBrandProfileIds(userId);
-      const brand = brandProfileIds[0] ? { id: brandProfileIds[0] } : null;
-      if (brand) {
-        const interest = await this.prisma.sponsorshipInterest.findUnique({
-          where: {
-            sponsorshipProposalId_brandProfileId: {
-              sponsorshipProposalId: id,
-              brandProfileId: brand.id,
-            },
-          },
-        });
-        if (interest) {
-          alreadyInterested = true;
-        }
-      }
-    }
 
     return { ...restWithoutPendingRevision, hostProfile: hostRest, community, alreadyInterested };
   }
@@ -484,6 +511,13 @@ export class SponsorshipService {
     });
     if (!proposal || proposal.status !== SponsorshipStatus.PUBLISHED)
       throw new NotFoundException('Sponsorship proposal not found');
+
+    const effectiveEndDate = proposal.eventEndDate ?? proposal.eventDate;
+    const startOfToday = new Date();
+    startOfToday.setUTCHours(0, 0, 0, 0);
+    if (effectiveEndDate && effectiveEndDate < startOfToday) {
+      throw new BadRequestException('This sponsorship proposal has already ended and is no longer accepting new inquiries.');
+    }
 
     const existing = await this.prisma.sponsorshipInterest.findUnique({
       where: { sponsorshipProposalId_brandProfileId: { sponsorshipProposalId: proposalId, brandProfileId: brandProfile.id } },

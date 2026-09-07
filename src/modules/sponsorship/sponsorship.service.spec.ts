@@ -13,7 +13,7 @@ function makePrisma() {
   const prisma: any = {
     hostProfile: { findUnique: jest.fn() },
     brandProfile: { findUnique: jest.fn() },
-    sponsorshipProposal: { findUnique: jest.fn(), delete: jest.fn().mockResolvedValue({}) },
+    sponsorshipProposal: { findUnique: jest.fn(), findMany: jest.fn().mockResolvedValue([]), create: jest.fn(), update: jest.fn(), delete: jest.fn().mockResolvedValue({}) },
     sponsorshipInterest: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}), count: jest.fn().mockResolvedValue(0) },
     sponsorshipChatMessage: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), count: jest.fn().mockResolvedValue(0) },
     sponsorshipDeal: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
@@ -643,6 +643,98 @@ describe('SponsorshipService — TriChat', () => {
         const result = await service.requestDealChanges('host-user', 'interest-camp', { note: 'Please increase barter amount' });
         expect(result.status).toBe('CHANGES_REQUESTED');
       });
+    });
+  });
+
+  describe('Published Proposals Visibility & Expiration', () => {
+    it('getAllPublishedProposals filters by active end date (gte startOfToday)', async () => {
+      prisma.sponsorshipProposal.findMany.mockResolvedValue([]);
+
+      await service.getAllPublishedProposals({});
+
+      expect(prisma.sponsorshipProposal.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            status: 'PUBLISHED',
+            OR: expect.arrayContaining([
+              expect.objectContaining({ eventEndDate: expect.objectContaining({ gte: expect.any(Date) }) }),
+              expect.objectContaining({ eventEndDate: null, eventDate: expect.objectContaining({ gte: expect.any(Date) }) }),
+            ]),
+          }),
+        }),
+      );
+    });
+
+    it('getPublishedProposalDetail allows brand that already expressed interest even if proposal is expired', async () => {
+      const pastDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      prisma.sponsorshipProposal.findUnique.mockResolvedValue({
+        id: 'prop-past',
+        name: 'Past Fest',
+        status: 'PUBLISHED',
+        eventDate: pastDate,
+        eventEndDate: pastDate,
+        pendingRevision: null,
+        hostProfile: {
+          id: 'host-1',
+          displayName: 'Host 1',
+          user: { firstName: 'Host', lastName: 'User' },
+          communityProfile: null,
+        },
+      });
+      prisma.brandProfile.findUnique.mockResolvedValue({ id: 'brand-1' });
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue({
+        id: 'interest-1',
+        sponsorshipProposalId: 'prop-past',
+        brandProfileId: 'brand-1',
+      });
+
+      const detail = await service.getPublishedProposalDetail('prop-past', 'brand-user');
+      expect(detail.id).toBe('prop-past');
+      expect(detail.alreadyInterested).toBe(true);
+    });
+
+    it('getPublishedProposalDetail throws NotFoundException for unassociated user if proposal is expired', async () => {
+      const pastDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      prisma.sponsorshipProposal.findUnique.mockResolvedValue({
+        id: 'prop-past',
+        name: 'Past Fest',
+        status: 'PUBLISHED',
+        eventDate: pastDate,
+        eventEndDate: pastDate,
+        pendingRevision: null,
+        hostProfile: {
+          id: 'host-1',
+          displayName: 'Host 1',
+          user: { firstName: 'Host', lastName: 'User' },
+          communityProfile: null,
+        },
+      });
+      prisma.brandProfile.findUnique.mockResolvedValue({ id: 'brand-2' });
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue(null);
+
+      await expect(service.getPublishedProposalDetail('prop-past', 'brand-user-2')).rejects.toThrow(NotFoundException);
+    });
+
+    it('markInterest rejects marking interest if proposal is past its end date', async () => {
+      const pastDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      prisma.brandProfile.findUnique.mockResolvedValue({
+        id: 'brand-1',
+        brandName: 'Acme',
+        approvalStatus: 'APPROVED',
+        socialLinks: { website: 'https://acme.com' },
+        categories: [{ category: { name: 'Tech' } }],
+        user: { email: 'brand@acme.com' },
+      });
+      prisma.sponsorshipProposal.findUnique.mockResolvedValue({
+        id: 'prop-past',
+        name: 'Past Fest',
+        status: 'PUBLISHED',
+        eventDate: pastDate,
+        eventEndDate: pastDate,
+        hostProfile: { user: { id: 'host-user' }, communityProfile: { name: 'Host Community' } },
+      });
+
+      await expect(service.markInterest('brand-user', 'prop-past')).rejects.toThrow(BadRequestException);
     });
   });
 });
