@@ -692,7 +692,22 @@ export class AuthService {
 
   // Registers a new user with a SpaceProfile (SPACE_PARTNER role)
   private async registerSpace(firebaseUid: string, resolved: ResolvedIdentity, dto: RegisterDto) {
-    const spaceRole = await this.prisma.role.findUniqueOrThrow({ where: { name: 'SPACE_PARTNER' } });
+    let spaceRole = await this.prisma.role.findUnique({ where: { name: 'SPACE_PARTNER' } });
+    if (!spaceRole) {
+      try {
+        spaceRole = await this.prisma.role.create({
+          data: { name: 'SPACE_PARTNER', description: 'Space Partner / Venue Partner' },
+        });
+      } catch {
+        spaceRole = await this.prisma.role.findFirst({
+          where: { name: { in: ['SPACE_PARTNER', 'USER'] } },
+        });
+        if (!spaceRole) {
+          throw new BadRequestException('Role not found for registration');
+        }
+      }
+    }
+
     const businessName = dto.businessName ?? dto.venueChainName ?? '';
     const phone = dto.phone ?? resolved.phone;
 

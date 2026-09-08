@@ -26,7 +26,7 @@ function makePrisma() {
       create: jest.fn(),
       update: jest.fn(),
     },
-    role: { findUniqueOrThrow: jest.fn() },
+    role: { findUnique: jest.fn(), findUniqueOrThrow: jest.fn(), create: jest.fn(), findFirst: jest.fn() },
     category: { findMany: jest.fn() },
     hostProfile: { create: jest.fn() },
     brandProfile: { create: jest.fn() },
@@ -449,6 +449,7 @@ describe('AuthService', () => {
 
     it('creates a new User and SpaceProfile for a brand-new user', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
+      prisma.role.findUnique.mockResolvedValue({ id: 'space-role-id', name: 'SPACE_PARTNER' });
       prisma.role.findUniqueOrThrow.mockResolvedValue({ id: 'space-role-id', name: 'SPACE_PARTNER' });
       prisma.user.create.mockResolvedValue(createdUser);
       prisma.spaceProfile.create.mockResolvedValue({
