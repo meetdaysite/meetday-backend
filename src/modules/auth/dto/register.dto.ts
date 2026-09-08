@@ -70,16 +70,15 @@ export class RegisterDto {
   email?: string;
 
   @ApiPropertyOptional({
-    enum: ['USER', 'HOST', 'BRAND'],
+    enum: ['USER', 'HOST', 'BRAND', 'SPACE', 'SPACE_PARTNER'],
     default: 'USER',
     description:
       'Choose USER for a regular attendee account, HOST to register as an event host, ' +
-      'or BRAND to register as a brand/sponsor account. ' +
-      'HOST role is assigned immediately but the profile must complete KYC and admin approval before going live.',
+      'BRAND to register as a brand/sponsor account, or SPACE/SPACE_PARTNER to register as a Space Partner.',
   })
   @IsOptional()
-  @IsEnum(['USER', 'HOST', 'BRAND'], { message: 'accountType must be USER, HOST, or BRAND' })
-  accountType?: 'USER' | 'HOST' | 'BRAND' = 'USER';
+  @IsEnum(['USER', 'HOST', 'BRAND', 'SPACE', 'SPACE_PARTNER'], { message: 'accountType must be USER, HOST, BRAND, or SPACE' })
+  accountType?: 'USER' | 'HOST' | 'BRAND' | 'SPACE' | 'SPACE_PARTNER' = 'USER';
 
   // ── Attendee-specific fields (only used when accountType === 'USER') ─────────
 
@@ -222,8 +221,6 @@ export class RegisterDto {
   @Type(() => HostAddressDto)
   address?: HostAddressDto;
 
-  // ── Brand-specific fields (only used when accountType === 'BRAND') ────────────
-
   @ApiPropertyOptional({
     maxLength: 100,
     example: 'Acme Corp',
@@ -233,4 +230,26 @@ export class RegisterDto {
   @IsString()
   @MaxLength(100)
   brandName?: string;
+
+  // ── Space Partner-specific fields (only used when accountType is SPACE / SPACE_PARTNER) ──
+
+  @ApiPropertyOptional({
+    maxLength: 150,
+    example: 'WeWork India',
+    description: 'Business or Venue Chain Name. Required when accountType is SPACE / SPACE_PARTNER.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  businessName?: string;
+
+  @ApiPropertyOptional({
+    maxLength: 150,
+    example: 'WeWork India',
+    description: 'Alias for businessName.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  venueChainName?: string;
 }

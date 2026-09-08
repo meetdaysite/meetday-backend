@@ -30,6 +30,7 @@ function makePrisma() {
     category: { findMany: jest.fn() },
     hostProfile: { create: jest.fn() },
     brandProfile: { create: jest.fn() },
+    spaceProfile: { create: jest.fn() },
     orderAttendee: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
   };
   prisma.$transaction = jest.fn().mockImplementation(async (fn: any) => fn(prisma));
@@ -405,25 +406,101 @@ describe('AuthService', () => {
         adminRole: null,
         hasHostAccess: false,
         hasBrandAccess: false,
+        hasSpaceAccess: false,
       });
     });
 
-    it('reports hasHostAccess/hasBrandAccess/adminRole when those are present', async () => {
+    it('reports hasHostAccess/hasBrandAccess/hasSpaceAccess/adminRole when those are present', async () => {
       const fullUser = {
         ...createdUser,
         adminRole: { name: 'CITY_ADMIN' },
         hostProfile: { id: 'hp-id' },
         brandProfile: { id: 'bp-id' },
+        spaceProfile: { id: 'sp-id' },
       };
       prisma.user.findUnique.mockResolvedValue(fullUser);
 
       const result = await service.getMe('firebase-uid');
-      expect(result).toMatchObject({ adminRole: 'CITY_ADMIN', hasHostAccess: true, hasBrandAccess: true });
+      expect(result).toMatchObject({
+        adminRole: 'CITY_ADMIN',
+        hasHostAccess: true,
+        hasBrandAccess: true,
+        hasSpaceAccess: true,
+      });
     });
 
     it('throws NotFoundException when user is not registered', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
       await expect(service.getMe('unknown-uid')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ── Space Partner Registration & Attachment ────────────────────────────────
+
+  describe('Space Partner registration', () => {
+    const spaceDto: any = {
+      firstName: 'Test',
+      lastName: 'Partner',
+      accountType: 'SPACE',
+      businessName: 'WeWork India',
+      operatingCities: ['Bengaluru', 'Delhi'],
+      phone: '+919876543210',
+    };
+
+    it('creates a new User and SpaceProfile for a brand-new user', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.role.findUniqueOrThrow.mockResolvedValue({ id: 'space-role-id', name: 'SPACE_PARTNER' });
+      prisma.user.create.mockResolvedValue(createdUser);
+      prisma.spaceProfile.create.mockResolvedValue({
+        id: 'space-profile-id',
+        userId: createdUser.id,
+        businessName: 'WeWork India',
+        operatingCities: ['Bengaluru', 'Delhi'],
+      });
+
+      const result = await service.register(tokenUser, spaceDto);
+      expect(result).toBeDefined();
+      expect(prisma.spaceProfile.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            businessName: 'WeWork India',
+            operatingCities: ['Bengaluru', 'Delhi'],
+          }),
+        }),
+      );
+    });
+
+    it('attaches SpaceProfile to an EXISTING Community/Brand user without conflict', async () => {
+      const existingUser = {
+        id: 'existing-user-id',
+        firebaseUid: tokenUser.uid,
+        email: tokenUser.email,
+        phone: '+919876543210',
+        firstName: 'Existing',
+        lastName: 'User',
+        hostProfile: { id: 'hp-1' },
+        brandProfile: null,
+        spaceProfile: null,
+      };
+      prisma.user.findUnique.mockResolvedValue(existingUser);
+      prisma.user.findUniqueOrThrow.mockResolvedValue(existingUser);
+      prisma.spaceProfile.create.mockResolvedValue({
+        id: 'new-space-id',
+        userId: existingUser.id,
+        businessName: 'WeWork India',
+        operatingCities: ['Bengaluru', 'Delhi'],
+      });
+
+      const result = await service.register(tokenUser, spaceDto);
+      expect(result).toBeDefined();
+      expect(prisma.spaceProfile.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            userId: 'existing-user-id',
+            businessName: 'WeWork India',
+          }),
+        }),
+      );
     });
   });
 });

@@ -32,6 +32,7 @@ export class RolesGuard implements CanActivate {
         adminRole: true,
         hostProfile: { select: { id: true } },
         brandProfile: { select: { id: true } },
+        spaceProfile: { select: { id: true } },
         hostTeamMemberships: { where: { status: 'ACTIVE' }, select: { id: true } },
         brandTeamMemberships: { where: { status: 'ACTIVE' }, select: { id: true } },
       },
@@ -48,15 +49,16 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('Access denied');
     }
 
-    // A single Firebase identity can hold host, brand, and admin access at once — the primary
+    // A single Firebase identity can hold host, brand, space, and admin access at once — the primary
     // `role` covers whichever account type was registered first, `adminRole` covers a
-    // separately-granted admin role, and `hostProfile`/`brandProfile` existence covers the
-    // other two regardless of which one is primary. An ACTIVE team membership grants the same
+    // separately-granted admin role, and `hostProfile`/`brandProfile`/`spaceProfile` existence covers the
+    // others regardless of which one is primary. An ACTIVE team membership grants the same
     // effective role as owning the profile outright (full access, per team-invite feature).
     const effectiveRoles = new Set<string>([user.role.name]);
     if (user.adminRole) effectiveRoles.add(user.adminRole.name);
     if (user.hostProfile || user.hostTeamMemberships?.length) effectiveRoles.add('HOST');
     if (user.brandProfile || user.brandTeamMemberships?.length) effectiveRoles.add('BRAND');
+    if (user.spaceProfile) effectiveRoles.add('SPACE_PARTNER');
 
     // Always enrich request.user with DB profile so @GetUser('id') works
     // regardless of whether @Roles() is applied on the route.

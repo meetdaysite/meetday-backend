@@ -101,11 +101,15 @@ export class AuthService {
     // constraint at the DB level and a create would fail if we miss it.
     const existing = await this.prisma.user.findUnique({
       where: { firebaseUid: tokenUser.uid },
-      include: { hostProfile: { select: { id: true } }, brandProfile: { select: { id: true } } },
+      include: {
+        hostProfile: { select: { id: true } },
+        brandProfile: { select: { id: true } },
+        spaceProfile: { select: { id: true } },
+      },
     });
 
-    // A single Firebase identity (host/brand/admin) can hold host, brand, and admin access at
-    // once — if this account already exists (e.g. as HOST or an admin), a HOST/BRAND signup
+    // A single Firebase identity (host/brand/spaces/admin) can hold host, brand, spaces, and admin access at
+    // once — if this account already exists (e.g. as HOST or an admin), a HOST/BRAND/SPACE signup
     // attaches the missing profile onto the SAME user row instead of being rejected outright.
     // Re-registering for a profile type they already have (or a plain USER re-register) is
     // still a conflict.
@@ -129,6 +133,9 @@ export class AuthService {
           return this.loadUserWithBrandProfile(existing.id, pendingBrandInvite.brandProfileId);
         }
         return this.attachBrandProfile(existing.id, dto);
+      }
+      if ((dto.accountType === 'SPACE' || dto.accountType === 'SPACE_PARTNER') && !existing.spaceProfile) {
+        return this.attachSpaceProfile(existing.id, dto);
       }
       throw new ConflictException('User already registered');
     }
@@ -156,6 +163,8 @@ export class AuthService {
         result = await this.registerHost(tokenUser.uid, resolved, dto);
       } else if (dto.accountType === 'BRAND') {
         result = await this.registerBrand(tokenUser.uid, resolved, dto);
+      } else if (dto.accountType === 'SPACE' || dto.accountType === 'SPACE_PARTNER') {
+        result = await this.registerSpace(tokenUser.uid, resolved, dto);
       } else {
         const userRole = await this.prisma.role.findUniqueOrThrow({ where: { name: 'USER' } });
 
@@ -681,6 +690,96 @@ export class AuthService {
     return result;
   }
 
+  // Registers a new user with a SpaceProfile (SPACE_PARTNER role)
+  private async registerSpace(firebaseUid: string, resolved: ResolvedIdentity, dto: RegisterDto) {
+    const spaceRole = await this.prisma.role.findUniqueOrThrow({ where: { name: 'SPACE_PARTNER' } });
+    const businessName = dto.businessName ?? dto.venueChainName ?? '';
+    const phone = dto.phone ?? resolved.phone;
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          firebaseUid,
+          email: resolved.email,
+          phone: phone,
+          firstName: resolved.firstName,
+          lastName: resolved.lastName,
+          avatarUrl: resolved.avatarUrl,
+          gender: resolved.gender,
+          roleId: spaceRole.id,
+        },
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          firstName: true,
+          lastName: true,
+          avatarUrl: true,
+          isActive: true,
+          mustCompleteProfile: true,
+          role: { select: { name: true } },
+          createdAt: true,
+        },
+      });
+
+      const spaceProfile = await tx.spaceProfile.create({
+        data: {
+          userId: user.id,
+          businessName,
+          operatingCities: dto.operatingCities ?? [],
+          phone,
+        },
+      });
+
+      return { ...user, spaceProfile };
+    });
+
+    return result;
+  }
+
+  // Attaches a SpaceProfile to an EXISTING user (e.g. an already-registered HOST or BRAND account)
+  private async attachSpaceProfile(userId: string, dto: RegisterDto) {
+    const businessName = dto.businessName ?? dto.venueChainName ?? '';
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          firstName: true,
+          lastName: true,
+          avatarUrl: true,
+          isActive: true,
+          role: { select: { name: true } },
+          createdAt: true,
+        },
+      });
+
+      if (dto.phone && !user.phone) {
+        await tx.user.update({
+          where: { id: userId },
+          data: { phone: dto.phone },
+        });
+        user.phone = dto.phone;
+      }
+
+      const spaceProfile = await tx.spaceProfile.create({
+        data: {
+          userId,
+          businessName,
+          operatingCities: dto.operatingCities ?? [],
+          phone: dto.phone ?? user.phone,
+        },
+      });
+
+      return { ...user, spaceProfile };
+    });
+
+    return result;
+  }
+
   /**
    * Resolves user identity from token + body.
    * Token fields are authoritative; body fills in what the token doesn't provide.
@@ -828,6 +927,7 @@ export class AuthService {
         adminRole: { select: { name: true } },
         hostProfile: { select: { id: true } },
         brandProfile: { select: { id: true } },
+        spaceProfile: { select: { id: true } },
         attendeeProfile: true,
         createdAt: true,
         updatedAt: true,
@@ -839,9 +939,9 @@ export class AuthService {
     }
 
     // `role` stays whichever account type was registered first (for back-compat with existing
-    // frontend checks); `hasHostAccess`/`hasBrandAccess`/`adminRole` expose the full picture for
-    // a single identity that holds host, brand, and/or admin access at once.
-    const { hostProfile, brandProfile, adminRole, ...rest } = user;
+    // frontend checks); `hasHostAccess`/`hasBrandAccess`/`hasSpaceAccess`/`adminRole` expose the full picture for
+    // a single identity that holds host, brand, space, and/or admin access at once.
+    const { hostProfile, brandProfile, spaceProfile, adminRole, ...rest } = user;
 
     // A team member (invited via Team-Access) has access to an EXISTING host/brand profile
     // without owning one themselves — `!!hostProfile`/`!!brandProfile` alone missed that,
@@ -855,6 +955,7 @@ export class AuthService {
       ...rest,
       hasHostAccess: hostProfileIds.length > 0,
       hasBrandAccess: brandProfileIds.length > 0,
+      hasSpaceAccess: !!spaceProfile,
       adminRole: adminRole?.name ?? null,
       avatarUrl: user.avatarUrl
         ? await this.storageService.getPresignedDownloadUrl(user.avatarUrl)

@@ -38,6 +38,7 @@ import { MaintenanceModule } from './modules/maintenance/maintenance.module';
 import { SponsorshipModule } from './modules/sponsorship/sponsorship.module';
 import { MeetdayChatModule } from './modules/meetday-chat/meetday-chat.module';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
+import { SpacesModule } from './modules/spaces/spaces.module';
 import { FirebaseAuthGuard } from './common/guards/firebase-auth.guard';
 import { IpRateLimitMiddleware } from './common/middleware/ip-rate-limit.middleware';
 import { RegistrationVelocityMiddleware } from './common/middleware/registration-velocity.middleware';
@@ -103,6 +104,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     SponsorshipModule,
     MeetdayChatModule,
     CampaignsModule,
+    SpacesModule,
     BullModule.registerQueue({ name: 'mail' }),
   ],
   providers: [

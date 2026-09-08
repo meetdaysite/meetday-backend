@@ -63,6 +63,7 @@ model User {
   hostProfile     HostProfile?     @relation("HostUser")
   adminProfile    AdminProfile?
   brandProfile    BrandProfile?
+  spaceProfile    SpaceProfile?
 
   // Team membership — a User can additionally act as a full-access team member of a
   // Brand/Host(Community) profile they do not own (see BrandTeamMember/HostTeamMember).
@@ -494,6 +495,23 @@ model Campaign {
   @@index([brandProfileId])
   @@index([status])
   @@map("campaigns")
+}
+
+// Profile for SPACE_PARTNER accounts — venue & space partners list their spaces,
+// locations, and audience capacity.
+model SpaceProfile {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  businessName    String
+  operatingCities String[] @default([])
+  phone           String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("space_profiles")
 }
 
 enum CompanyType {
