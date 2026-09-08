@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Resend } from 'resend';
 import { kycFailedTemplate } from './templates/kyc-failed.template';
+import { kycVerifiedTemplate } from './templates/kyc-verified.template';
 import { hostApprovedTemplate } from './templates/host-approved.template';
 import { hostRejectedTemplate } from './templates/host-rejected.template';
 import { subscriptionActivatedTemplate } from './templates/subscription-activated.template';
@@ -86,6 +87,10 @@ export class MailService {
 
   async sendKycFailed(to: string, hostName: string, reason: string | null): Promise<void> {
     await this.sendMail(to, 'KYC Verification Failed — Meetday', kycFailedTemplate(hostName, reason));
+  }
+
+  async sendKycVerified(to: string, hostName: string): Promise<void> {
+    await this.sendMail(to, 'KYC Verified — Meetday', kycVerifiedTemplate(hostName));
   }
 
   async sendUnreadChatMessage(to: string, name: string, unreadCount: number, ctaUrl: string): Promise<void> {

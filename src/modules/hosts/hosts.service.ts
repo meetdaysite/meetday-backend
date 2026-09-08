@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
-  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -16,9 +15,7 @@ import { BillingCycle, CouponTarget, DiscountType, HostPlan, Prisma, Subscriptio
 import { DashboardPeriod } from './dto/dashboard-query.dto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
-import { KYC_PROVIDER, KycProvider } from './interfaces/kyc-provider.interface';
 import { SubscriptionService } from './subscription.service';
-import { PennyDropService } from './penny-drop.service';
 import { ApplyHostDto } from './dto/apply-host.dto';
 import { UpdateHostProfileDto } from './dto/update-host-profile.dto';
 import { ActivateCommunityDto } from './dto/activate-community.dto';
@@ -50,9 +47,7 @@ export class HostsService {
     private readonly prisma: PrismaService,
     private readonly cryptoService: CryptoService,
     private readonly configService: ConfigService,
-    @Inject(KYC_PROVIDER) private readonly kycProvider: KycProvider,
     private readonly subscriptionService: SubscriptionService,
-    private readonly pennyDropService: PennyDropService,
     @InjectQueue('mail') private readonly mailQueue: Queue,
     private readonly notificationsService: NotificationsService,
     private readonly storageService: StorageService,
@@ -466,6 +461,9 @@ export class HostsService {
     return this.teamAccessService.setHostMemberPermission(hostProfileId, userId, memberId, canManageMembers);
   }
 
+  // KYC is now manually reviewed by an admin (see AdminService.verifyHostKyc/rejectHostKyc) —
+  // this no longer calls out to the Sandbox PAN-verification API. It just records that PAN
+  // details have been submitted and are awaiting manual review.
   async verifyPanOnly(userId: string) {
     const profile = await this.prisma.hostProfile.findUnique({
       where: { userId },
@@ -487,53 +485,17 @@ export class HostsService {
       throw new ConflictException('PAN is already verified');
     }
 
-    const decryptedPan = this.cryptoService.decrypt(profile.panEncrypted!);
-    const panResult = await this.kycProvider.initiateVerification(
-      profile.id,
-      decryptedPan,
-      profile.legalName,
-    );
-
-    await this.prisma.hostProfile.update({
-      where: { id: profile.id },
-      data: { panVerificationReference: panResult.referenceId },
-    });
-
-    // Sandbox is synchronous — process the result immediately.
-    // Async providers leave verificationStatus undefined and rely on the webhook instead.
-    // Unlike verifyBank, this method never touches kycStatus — that belongs to verifyBank.
-    if (panResult.verificationStatus !== undefined) {
-      if (panResult.verificationStatus === 'VERIFIED') {
-        await this.prisma.hostProfile.update({
-          where: { id: profile.id },
-          data: { panVerificationStatus: 'VERIFIED' },
-        });
-      } else {
-        await this.prisma.hostProfile.update({
-          where: { id: profile.id },
-          data: {
-            panVerificationStatus: 'FAILED',
-            kycFailureReason: panResult.failureReason ?? null,
-          },
-        });
-        void this.mailQueue.add('kyc-failed', {
-          to: profile.user.email,
-          hostName: profile.user.firstName,
-          reason: panResult.failureReason ?? null,
-        }).catch((err) => this.logger.error('Failed to queue kyc-failed mail', err));
-        void this.notificationsService.create(
-          userId,
-          'kyc_failed',
-          'PAN Verification Failed',
-          `PAN verification failed.${panResult.failureReason ? ` ${panResult.failureReason}` : ''}`,
-        ).catch((err) => this.logger.error('Failed to create kyc_failed notification', err));
-      }
+    if (profile.panVerificationStatus !== 'PENDING') {
+      await this.prisma.hostProfile.update({
+        where: { id: profile.id },
+        data: { panVerificationStatus: 'PENDING', panVerificationReference: null },
+      });
     }
 
     return {
-      referenceId: panResult.referenceId,
-      panVerificationStatus: panResult.verificationStatus ?? 'PENDING',
-      failureReason: panResult.failureReason ?? null,
+      referenceId: null,
+      panVerificationStatus: 'PENDING' as const,
+      failureReason: null,
     };
   }
 
@@ -593,6 +555,12 @@ export class HostsService {
         },
       });
 
+      // KYC is now manually reviewed by an admin — bank details go straight to
+      // PENDING_ADMIN_REVIEW instead of PENDING_PENNY_DROP; no automated Razorpay/Sandbox
+      // check runs. Full account number is encrypted (never stored raw) so an admin can
+      // decrypt it on demand to manually verify against submitted documents.
+      const accountNumberEncrypted = this.cryptoService.encrypt(dto.bankAccount.accountNumber);
+
       // hostProfileId is unique on HostPayoutAccount — a host can only ever have one row.
       // Reuse the existing row for a new attempt instead of inserting a second one; the
       // audit trail is preserved via HostPayoutAccountHistory, not by keeping the old row.
@@ -601,7 +569,7 @@ export class HostsService {
           data: {
             hostPayoutAccountId: existingPayout.id,
             previousStatus: existingPayout.status,
-            newStatus: 'PENDING_PENNY_DROP',
+            newStatus: 'PENDING_ADMIN_REVIEW',
             previousMaskedAccountNumber: existingPayout.maskedAccountNumber,
             newMaskedAccountNumber: maskedAccountNumber,
             previousBankName: existingPayout.bankName,
@@ -616,12 +584,14 @@ export class HostsService {
           where: { id: existingPayout.id },
           data: {
             maskedAccountNumber,
+            accountNumberEncrypted,
+            ifscCode: dto.bankAccount.ifscCode,
             accountHolderName: dto.bankAccount.accountHolderName,
             bankName: dto.bankAccount.bankName,
             accountType: null,
-            status: 'PENDING_PENNY_DROP',
+            status: 'PENDING_ADMIN_REVIEW',
             pennyDropReference: null,
-            pennyDropInitiatedAt: new Date(),
+            pennyDropInitiatedAt: null,
             pennyDropCompletedAt: null,
             pennyDropFailReason: null,
             razorpayContactId: null,
@@ -636,101 +606,21 @@ export class HostsService {
         });
         newPayoutAccountId = reset.id;
       } else {
-        // First-ever submission — bankName from user input; overwritten by Razorpay on success
         const created = await tx.hostPayoutAccount.create({
           data: {
             hostProfileId: profile.id,
             maskedAccountNumber,
+            accountNumberEncrypted,
+            ifscCode: dto.bankAccount.ifscCode,
             accountHolderName: dto.bankAccount.accountHolderName,
             bankName: dto.bankAccount.bankName,
-            status: 'PENDING_PENNY_DROP',
-            pennyDropInitiatedAt: new Date(),
+            status: 'PENDING_ADMIN_REVIEW',
             kycStatusAtSubmission: 'PENDING',
           },
         });
         newPayoutAccountId = created.id;
       }
     });
-
-    // --- PAN verification ---
-    // Skip if PAN was pre-verified via POST /hosts/kyc/pan/verify; run inline otherwise.
-    let panReferenceId: string;
-    let panSucceededSync = false;
-
-    if (panAlreadyVerified) {
-      panReferenceId = profile.panVerificationReference!;
-    } else {
-      // Decrypt stored PAN to pass to KYC provider — discarded immediately after the call
-      const decryptedPan = this.cryptoService.decrypt(profile.panEncrypted!);
-      const panResult = await this.kycProvider.initiateVerification(
-        profile.id,
-        decryptedPan,
-        profile.legalName,
-      );
-      panReferenceId = panResult.referenceId;
-      await this.prisma.hostProfile.update({
-        where: { id: profile.id },
-        data: { panVerificationReference: panResult.referenceId },
-      });
-
-      // Sandbox is synchronous — process the result immediately.
-      // Async providers leave verificationStatus undefined and rely on the webhook instead.
-      if (panResult.verificationStatus !== undefined) {
-        await this.applyPanVerificationResult(
-          { id: profile.id, userId: profile.userId, payoutAccount: { status: 'PENDING_PENNY_DROP' }, user: profile.user },
-          panResult.verificationStatus,
-          panResult.failureReason,
-        );
-        panSucceededSync = panResult.verificationStatus === 'VERIFIED';
-      }
-
-      // Skip bank verification if PAN already failed synchronously — the kyc_failed
-      // notification was already sent by applyPanVerificationResult above.
-      // Async providers (verificationStatus === undefined) always proceed.
-      if (panResult.verificationStatus === 'FAILED') {
-        const failedProfile = await this.prisma.hostProfile.findUnique({
-          where: { id: profile.id },
-          select: { kycStatus: true, panVerificationStatus: true, bankVerificationStatus: true, kycFailureReason: true },
-        });
-        return {
-          panReferenceId,
-          pennyDropReference: null,
-          kycStatus: failedProfile!.kycStatus,
-          panVerificationStatus: failedProfile!.panVerificationStatus,
-          bankVerificationStatus: failedProfile!.bankVerificationStatus,
-          kycFailureReason: failedProfile!.kycFailureReason ?? null,
-        };
-      }
-    }
-
-    // --- Bank verification ---
-    const bankResult = await this.pennyDropService.initiatePennyDrop(
-      newPayoutAccountId!,
-      dto.bankAccount.accountNumber,
-      dto.bankAccount.ifscCode,
-      dto.bankAccount.accountHolderName,
-      profile.user.phone ?? '',
-    );
-    const pennyDropReference = bankResult.pennyDropReference;
-    await this.prisma.hostPayoutAccount.update({
-      where: { id: newPayoutAccountId! },
-      data: { pennyDropReference: bankResult.pennyDropReference },
-    });
-
-    // Sandbox is synchronous — process the result immediately.
-    // Async providers leave verificationStatus undefined and rely on the webhook instead.
-    if (bankResult.verificationStatus !== undefined) {
-      // Use panAlreadyVerified flag rather than the stale profile.panVerificationStatus
-      // (which was reset to PENDING in the transaction above if PAN wasn't pre-verified).
-      const effectivePanStatus = (panAlreadyVerified || panSucceededSync) ? 'VERIFIED' : (profile.panVerificationStatus as string);
-      await this.applyBankVerificationResult(
-        newPayoutAccountId!,
-        { ...profile, panVerificationStatus: effectivePanStatus },
-        bankResult.verificationStatus,
-        bankResult.bankName,
-        bankResult.failureReason,
-      );
-    }
 
     this.auditLogService.log({
       actorId: userId,
@@ -753,79 +643,17 @@ export class HostsService {
       userId,
       'kyc_submitted',
       'KYC Under Review',
-      'Your KYC documents have been submitted and are being verified.',
+      'Your KYC documents have been submitted and are being manually reviewed by our team.',
     ).catch((err) => this.logger.error('Failed to create kyc_submitted notification', err));
 
-    // Re-read the updated profile to include synchronous verification results in the response.
-    // For async providers the statuses remain PENDING — accurate until webhooks arrive.
-    const updatedProfile = await this.prisma.hostProfile.findUnique({
-      where: { id: profile.id },
-      select: { kycStatus: true, panVerificationStatus: true, bankVerificationStatus: true, kycFailureReason: true },
-    });
-
     return {
-      panReferenceId,
-      pennyDropReference,
-      kycStatus: updatedProfile!.kycStatus,
-      panVerificationStatus: updatedProfile!.panVerificationStatus,
-      bankVerificationStatus: updatedProfile!.bankVerificationStatus,
-      kycFailureReason: updatedProfile!.kycFailureReason ?? null,
+      panReferenceId: null,
+      pennyDropReference: null,
+      kycStatus: 'PENDING' as const,
+      panVerificationStatus: 'PENDING' as const,
+      bankVerificationStatus: 'PENDING' as const,
+      kycFailureReason: null,
     };
-  }
-
-  private async applyPanVerificationResult(
-    profile: {
-      id: string;
-      userId: string;
-      payoutAccount: { status: string } | null;
-      user: { email: string; firstName: string };
-    },
-    status: 'VERIFIED' | 'FAILED',
-    failureReason?: string,
-  ): Promise<void> {
-    if (status === 'VERIFIED') {
-      const updateData: Record<string, unknown> = {
-        panVerificationStatus: 'VERIFIED',
-        kycFailureReason: null,
-      };
-
-      // If penny drop has also succeeded, both legs are done → kycStatus VERIFIED
-      if (profile.payoutAccount?.status === 'PENDING_ADMIN_REVIEW') {
-        updateData.kycStatus = 'VERIFIED';
-        updateData.kycVerifiedAt = new Date();
-        void this.notificationsService.create(
-          profile.userId,
-          'kyc_verified',
-          'KYC Verified',
-          'Your identity and bank account have been verified. Your application is pending admin approval.',
-        ).catch((err) => this.logger.error('Failed to create kyc_verified notification', err));
-      }
-
-      await this.prisma.hostProfile.update({ where: { id: profile.id }, data: updateData });
-    } else {
-      await this.prisma.hostProfile.update({
-        where: { id: profile.id },
-        data: {
-          panVerificationStatus: 'FAILED',
-          // Bank verification is skipped when PAN fails synchronously (see verifyBank) — reset it
-          // from the 'PENDING' set moments earlier so it doesn't look like a check is in progress.
-          bankVerificationStatus: 'NOT_SUBMITTED',
-          kycStatus: 'FAILED',
-          kycFailureReason: failureReason ?? null,
-        },
-      });
-      void this.mailQueue.add('kyc-failed', {
-        to: profile.user.email,
-        hostName: profile.user.firstName,
-        reason: failureReason ?? null,
-      }).catch((err) => this.logger.error('Failed to queue kyc-failed mail', err));
-      void this.notificationsService.create(
-        profile.userId,
-        'kyc_failed',
-        'KYC Verification Failed',
-        `PAN verification failed.${failureReason ? ` ${failureReason}` : ''}`,
-      ).catch((err) => this.logger.error('Failed to create kyc_failed notification', err));
-    }
   }
 
   private async applyBankVerificationResult(

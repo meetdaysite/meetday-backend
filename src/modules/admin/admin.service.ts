@@ -55,6 +55,7 @@ import { SponsorshipInvoicePdfService } from '../sponsorship/sponsorship-invoice
 import { SponsorshipReportPdfService } from '../sponsorship/sponsorship-report-pdf.service';
 import { RESOLVED_SYSTEM_MESSAGE } from '../meetday-chat/meetday-chat.service';
 import { StorageService } from '../../common/storage/storage.service';
+import { CryptoService } from '../../common/crypto/crypto.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 import { RedisService } from '../../common/redis/redis.service';
@@ -88,6 +89,7 @@ export class AdminService {
     private readonly sponsorshipInvoicePdfService: SponsorshipInvoicePdfService,
     private readonly sponsorshipReportPdfService: SponsorshipReportPdfService,
     private readonly teamAccessService: TeamAccessService,
+    private readonly cryptoService: CryptoService,
   ) {}
 
   async listAdmins(query: ListAdminsQueryDto) {
@@ -2091,6 +2093,9 @@ export class AdminService {
         displayName: true,
         operatingCities: true,
         socialLinks: true,
+        kycStatus: true,
+        panVerificationStatus: true,
+        bankVerificationStatus: true,
         user: { select: { id: true, firstName: true, lastName: true, email: true } },
       },
     },
@@ -2111,6 +2116,185 @@ export class AdminService {
     ]);
 
     return { profiles: profiles.map((p) => AdminService.flattenCommunityProfileCategories(p)), total, page, limit };
+  }
+
+  // Full KYC details for manual admin review — decrypts PAN and the full bank account number
+  // (never shown anywhere else; the rest of the app only ever sees the masked last-4 digits).
+  // Every view is audit-logged since this decrypts sensitive PII/financial data on demand.
+  async getHostKycDetails(hostProfileId: string, adminId: string) {
+    const profile = await this.prisma.hostProfile.findUnique({
+      where: { id: hostProfileId },
+      select: {
+        id: true,
+        legalName: true,
+        panEncrypted: true,
+        gstin: true,
+        kycStatus: true,
+        panVerificationStatus: true,
+        bankVerificationStatus: true,
+        kycFailureReason: true,
+        kycVerifiedAt: true,
+        user: { select: { firstName: true, lastName: true, email: true, phone: true } },
+        payoutAccount: {
+          select: {
+            id: true,
+            status: true,
+            maskedAccountNumber: true,
+            accountNumberEncrypted: true,
+            ifscCode: true,
+            accountHolderName: true,
+            bankName: true,
+            verifiedBy: true,
+            adminReviewedAt: true,
+            rejectionReason: true,
+          },
+        },
+      },
+    });
+    if (!profile) throw new NotFoundException('Host profile not found');
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'KYC_DETAILS_VIEWED',
+      entityType: 'HOST',
+      entityId: profile.id,
+      metadata: {},
+    });
+
+    const { panEncrypted, payoutAccount, ...rest } = profile;
+    return {
+      ...rest,
+      pan: panEncrypted ? this.cryptoService.decrypt(panEncrypted) : null,
+      bankDetails: payoutAccount
+        ? {
+            id: payoutAccount.id,
+            status: payoutAccount.status,
+            accountHolderName: payoutAccount.accountHolderName,
+            bankName: payoutAccount.bankName,
+            maskedAccountNumber: payoutAccount.maskedAccountNumber,
+            accountNumber: payoutAccount.accountNumberEncrypted
+              ? this.cryptoService.decrypt(payoutAccount.accountNumberEncrypted)
+              : null,
+            ifscCode: payoutAccount.ifscCode,
+            verifiedBy: payoutAccount.verifiedBy,
+            adminReviewedAt: payoutAccount.adminReviewedAt,
+            rejectionReason: payoutAccount.rejectionReason,
+          }
+        : null,
+    };
+  }
+
+  // Manually marks a host's KYC (PAN + bank) as verified — replaces the old automated
+  // Sandbox/Razorpay penny-drop check with an admin's own review decision.
+  async verifyHostKyc(hostProfileId: string, adminId: string) {
+    const profile = await this.prisma.hostProfile.findUnique({
+      where: { id: hostProfileId },
+      select: { id: true, userId: true, payoutAccount: { select: { id: true } }, user: { select: { firstName: true, email: true } } },
+    });
+    if (!profile) throw new NotFoundException('Host profile not found');
+    if (!profile.payoutAccount) throw new BadRequestException('No KYC submission found for this host');
+
+    await this.prisma.$transaction([
+      this.prisma.hostProfile.update({
+        where: { id: profile.id },
+        data: {
+          kycStatus: 'VERIFIED',
+          panVerificationStatus: 'VERIFIED',
+          bankVerificationStatus: 'VERIFIED',
+          kycVerifiedAt: new Date(),
+          kycFailureReason: null,
+        },
+      }),
+      this.prisma.hostPayoutAccount.update({
+        where: { id: profile.payoutAccount.id },
+        data: {
+          status: 'APPROVED',
+          verifiedBy: adminId,
+          adminReviewedAt: new Date(),
+          rejectionReason: null,
+        },
+      }),
+    ]);
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'KYC_APPROVED',
+      entityType: 'HOST',
+      entityId: profile.id,
+      metadata: {},
+    });
+
+    void this.mailQueue.add('kyc-verified', {
+      to: profile.user.email,
+      hostName: profile.user.firstName,
+    }).catch((err) => this.logger.error('Failed to queue kyc-verified mail', err));
+
+    void this.notificationsService.create(
+      profile.userId,
+      'kyc_verified',
+      'KYC Verified',
+      'Your KYC (PAN and bank account) has been manually verified by our team.',
+    ).catch((err) => this.logger.error('Failed to create kyc_verified notification', err));
+
+    return this.getHostKycDetails(hostProfileId, adminId);
+  }
+
+  // Manually rejects a host's KYC submission, with a reason shown to the host so they can
+  // correct and resubmit via the normal PAN/bank verification flow.
+  async rejectHostKyc(hostProfileId: string, adminId: string, reason: string) {
+    const profile = await this.prisma.hostProfile.findUnique({
+      where: { id: hostProfileId },
+      select: { id: true, userId: true, payoutAccount: { select: { id: true } }, user: { select: { firstName: true, email: true } } },
+    });
+    if (!profile) throw new NotFoundException('Host profile not found');
+    if (!profile.payoutAccount) throw new BadRequestException('No KYC submission found for this host');
+
+    await this.prisma.$transaction([
+      this.prisma.hostProfile.update({
+        where: { id: profile.id },
+        data: {
+          kycStatus: 'FAILED',
+          panVerificationStatus: 'FAILED',
+          bankVerificationStatus: 'FAILED',
+          kycFailureReason: reason,
+        },
+      }),
+      this.prisma.hostPayoutAccount.update({
+        where: { id: profile.payoutAccount.id },
+        data: {
+          status: 'REJECTED',
+          verifiedBy: adminId,
+          adminReviewedAt: new Date(),
+          rejectionReason: reason,
+        },
+      }),
+    ]);
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'KYC_REJECTED',
+      entityType: 'HOST',
+      entityId: profile.id,
+      metadata: { reason },
+    });
+
+    void this.mailQueue.add('kyc-failed', {
+      to: profile.user.email,
+      hostName: profile.user.firstName,
+      reason,
+    }).catch((err) => this.logger.error('Failed to queue kyc-failed mail', err));
+
+    void this.notificationsService.create(
+      profile.userId,
+      'kyc_failed',
+      'KYC Verification Failed',
+      `Your KYC was reviewed and rejected. ${reason}`,
+    ).catch((err) => this.logger.error('Failed to create kyc_failed notification', err));
+
+    return this.getHostKycDetails(hostProfileId, adminId);
   }
 
   async listAllCommunityProfiles(query: ListCommunityProfilesQueryDto) {

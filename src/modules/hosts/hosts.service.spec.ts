@@ -312,10 +312,20 @@ describe('HostsService', () => {
       );
     });
 
-    it('initiates PAN verification and penny drop', async () => {
+    it('never calls the Sandbox/PennyDrop providers — KYC is manually reviewed by an admin', async () => {
       await service.verifyBank(userId, kycDto);
-      expect(mockKycProvider.initiateVerification).toHaveBeenCalled();
-      expect(mockPennyDropService.initiatePennyDrop).toHaveBeenCalled();
+      expect(mockKycProvider.initiateVerification).not.toHaveBeenCalled();
+      expect(mockPennyDropService.initiatePennyDrop).not.toHaveBeenCalled();
+    });
+
+    it('encrypts the full account number and stores the IFSC code for admin review', async () => {
+      await service.verifyBank(userId, kycDto);
+      expect(mockCrypto.encrypt).toHaveBeenCalledWith('123456789012');
+      expect(prisma.hostPayoutAccount.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ accountNumberEncrypted: 'enc::pan', ifscCode: 'HDFC0001234', status: 'PENDING_ADMIN_REVIEW' }),
+        }),
+      );
     });
 
     it('resets an existing PENDING_PENNY_DROP payout account in place instead of creating a new one', async () => {
@@ -333,7 +343,7 @@ describe('HostsService', () => {
       expect(prisma.hostPayoutAccount.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'old-pa' },
-          data: expect.objectContaining({ status: 'PENDING_PENNY_DROP', maskedAccountNumber: 'XXXX9012' }),
+          data: expect.objectContaining({ status: 'PENDING_ADMIN_REVIEW', maskedAccountNumber: 'XXXX9012' }),
         }),
       );
     });
@@ -354,7 +364,7 @@ describe('HostsService', () => {
           data: expect.objectContaining({
             hostPayoutAccountId: 'old-pa',
             previousStatus: 'PENDING_ADMIN_REVIEW',
-            newStatus: 'PENDING_PENNY_DROP',
+            newStatus: 'PENDING_ADMIN_REVIEW',
             changeReason: 'RESUBMITTED_KYC',
           }),
         }),
@@ -363,7 +373,7 @@ describe('HostsService', () => {
         expect.objectContaining({
           where: { id: 'old-pa' },
           data: expect.objectContaining({
-            status: 'PENDING_PENNY_DROP',
+            status: 'PENDING_ADMIN_REVIEW',
             deactivatedAt: null,
             deactivationReason: null,
           }),
@@ -404,80 +414,6 @@ describe('HostsService', () => {
         payoutAccount: null,
       });
       await expect(service.verifyBank(userId, kycDto)).rejects.toThrow(ConflictException);
-    });
-
-    describe('sync provider (Sandbox) — immediate result', () => {
-      it('sets kycStatus=VERIFIED when both legs succeed synchronously', async () => {
-        mockKycProvider.initiateVerification.mockResolvedValue({
-          referenceId: 'pan-ref',
-          verificationStatus: 'VERIFIED',
-        });
-        mockPennyDropService.initiatePennyDrop.mockResolvedValue({
-          pennyDropReference: 'pd-ref',
-          verificationStatus: 'VERIFIED',
-          bankName: 'HDFC Bank',
-        });
-        // Update calls chain: first for PAN, then bank history, then final kycStatus
-        prisma.hostProfile.update.mockResolvedValue({});
-        prisma.hostPayoutAccount.update.mockResolvedValue({});
-        prisma.hostPayoutAccountHistory.create.mockResolvedValue({});
-
-        await service.verifyBank(userId, kycDto);
-
-        // kycStatus=VERIFIED is set in applyBankVerificationResult or applyPanVerificationResult
-        const profileUpdateCalls = (prisma.hostProfile.update as jest.Mock).mock.calls;
-        const verifiedCall = profileUpdateCalls.find((call: any) =>
-          call[0]?.data?.kycStatus === 'VERIFIED',
-        );
-        expect(verifiedCall).toBeDefined();
-      });
-
-      it('sets kycStatus=FAILED and sends email when PAN fails', async () => {
-        mockKycProvider.initiateVerification.mockResolvedValue({
-          referenceId: 'pan-ref',
-          verificationStatus: 'FAILED',
-          failureReason: 'Name mismatch',
-        });
-        prisma.hostProfile.update.mockResolvedValue({});
-        prisma.hostPayoutAccount.update.mockResolvedValue({});
-        prisma.hostProfile.findUnique.mockResolvedValueOnce({ ...baseProfile, payoutAccount: null }).mockResolvedValueOnce({
-          kycStatus: 'FAILED',
-          panVerificationStatus: 'FAILED',
-          bankVerificationStatus: 'NOT_SUBMITTED',
-          kycFailureReason: 'Name mismatch',
-        });
-
-        await service.verifyBank(userId, kycDto);
-
-        const profileUpdateCalls = (prisma.hostProfile.update as jest.Mock).mock.calls;
-        const failedCall = profileUpdateCalls.find((call: any) =>
-          call[0]?.data?.kycStatus === 'FAILED',
-        );
-        expect(failedCall).toBeDefined();
-        // Bank verification never actually ran — its status shouldn't be left at 'PENDING'.
-        expect(failedCall[0].data.bankVerificationStatus).toBe('NOT_SUBMITTED');
-        expect(mockMailQueue.add).toHaveBeenCalledWith('kyc-failed', expect.any(Object));
-        // Must not send a misleading "under review" notification for a request that just failed.
-        expect(mockNotifications.create).not.toHaveBeenCalledWith(
-          expect.anything(),
-          'kyc_submitted',
-          expect.anything(),
-          expect.anything(),
-        );
-      });
-
-      it('does not touch the payout account status/bank flow when PAN fails synchronously', async () => {
-        mockKycProvider.initiateVerification.mockResolvedValue({
-          referenceId: 'pan-ref',
-          verificationStatus: 'FAILED',
-          failureReason: 'Name mismatch',
-        });
-        prisma.hostProfile.update.mockResolvedValue({});
-
-        await service.verifyBank(userId, kycDto);
-
-        expect(mockPennyDropService.initiatePennyDrop).not.toHaveBeenCalled();
-      });
     });
   });
 

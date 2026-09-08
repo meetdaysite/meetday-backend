@@ -36,6 +36,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { RejectHostDto } from './dto/reject-host.dto';
+import { RejectKycDto } from './dto/reject-kyc.dto';
 import { SuspendHostDto } from './dto/suspend-host.dto';
 import { RejectEventDto } from './dto/reject-event.dto';
 import { ForceCancelEventDto } from './dto/force-cancel-event.dto';
@@ -1623,6 +1624,52 @@ export class AdminController {
   @ApiNotFoundResponse({ description: 'Community profile not found.' })
   getCommunityProfileMembers(@Param('id', ParseUUIDPipe) id: string) {
     return this.adminService.getCommunityProfileMembers(id);
+  }
+
+  @Get('hosts/:id/kyc')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @ApiOperation({
+    summary: "Get a host's full KYC details for manual review",
+    description:
+      'Decrypts PAN and full bank account number for admin review \u2014 KYC is now manually verified, ' +
+      'not via an automated Sandbox/Razorpay check. Every view is audit-logged.',
+  })
+  @ApiParam({ name: 'id', description: 'Host profile UUID' })
+  @ApiOkResponse({ description: 'Decrypted PAN and bank details, plus current KYC status.' })
+  @ApiNotFoundResponse({ description: 'Host profile not found.' })
+  getHostKycDetails(@Param('id', ParseUUIDPipe) id: string, @GetUser('id') adminId: string) {
+    return this.adminService.getHostKycDetails(id, adminId);
+  }
+
+  @Post('hosts/:id/kyc/verify')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Manually mark a host's KYC as verified",
+    description: 'Sets kycStatus/panVerificationStatus/bankVerificationStatus to VERIFIED and notifies the host.',
+  })
+  @ApiParam({ name: 'id', description: 'Host profile UUID' })
+  @ApiOkResponse({ description: 'KYC marked verified.' })
+  @ApiNotFoundResponse({ description: 'Host profile not found.' })
+  @ApiBadRequestResponse({ description: 'No KYC submission found for this host.' })
+  verifyHostKyc(@Param('id', ParseUUIDPipe) id: string, @GetUser('id') adminId: string) {
+    return this.adminService.verifyHostKyc(id, adminId);
+  }
+
+  @Post('hosts/:id/kyc/reject')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Manually reject a host's KYC submission",
+    description: 'Sets kycStatus/panVerificationStatus/bankVerificationStatus to FAILED with a reason and notifies the host.',
+  })
+  @ApiParam({ name: 'id', description: 'Host profile UUID' })
+  @ApiBody({ type: RejectKycDto })
+  @ApiOkResponse({ description: 'KYC rejected.' })
+  @ApiNotFoundResponse({ description: 'Host profile not found.' })
+  @ApiBadRequestResponse({ description: 'No KYC submission found for this host.' })
+  rejectHostKyc(@Param('id', ParseUUIDPipe) id: string, @GetUser('id') adminId: string, @Body() dto: RejectKycDto) {
+    return this.adminService.rejectHostKyc(id, adminId, dto.reason);
   }
 
   @Patch('community-profiles/:id')

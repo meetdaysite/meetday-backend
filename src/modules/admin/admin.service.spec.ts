@@ -34,6 +34,7 @@ import { SponsorshipInvoicePdfService } from '../sponsorship/sponsorship-invoice
 import { SponsorshipReportPdfService } from '../sponsorship/sponsorship-report-pdf.service';
 import { TeamAccessService } from '../../common/team-access/team-access.service';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
+import { CryptoService } from '../../common/crypto/crypto.service';
 
 // ── Mock factories ───────────────────────────────────────────────────────────
 
@@ -49,6 +50,7 @@ function makePrisma() {
     },
     role: { findUnique: jest.fn(), findMany: jest.fn() },
     hostProfile: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn(), count: jest.fn() },
+    hostPayoutAccount: { findUnique: jest.fn(), update: jest.fn() },
     hostCommunityProfile: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn(), create: jest.fn() },
     brandProfile: { findMany: jest.fn() },
     adminAnnouncement: { create: jest.fn().mockResolvedValue({ id: 'announcement-uuid' }), findMany: jest.fn(), count: jest.fn() },
@@ -74,6 +76,8 @@ function makePrisma() {
 
 const mockMailQueue = { add: jest.fn().mockResolvedValue(undefined) };
 const mockConfig = { get: jest.fn().mockReturnValue('http://localhost:3000') };
+const mockCrypto = { encrypt: jest.fn().mockReturnValue('enc::value'), decrypt: jest.fn().mockReturnValue('decrypted-value') };
+const mockAuditLog = { log: jest.fn() };
 
 // Convenience: reference the mocked firebase-admin auth singleton
 const mockAuth = (firebaseAdmin.auth as jest.Mock)();
@@ -126,12 +130,13 @@ describe('AdminService', () => {
         { provide: NotificationsGateway, useValue: { getOnlineUserIds: jest.fn().mockResolvedValue(new Set()), emitUnreadCount: jest.fn(), server: { to: jest.fn().mockReturnThis(), emit: jest.fn() } } },
         { provide: StorageService, useValue: { getPresignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/img') } },
         { provide: RedisService, useValue: { get: jest.fn().mockResolvedValue(null), set: jest.fn(), del: jest.fn() } },
-        { provide: AuditLogService, useValue: { log: jest.fn() } },
+        { provide: AuditLogService, useValue: mockAuditLog },
         { provide: InterestsService, useValue: { invalidateCache: jest.fn().mockResolvedValue(undefined) } },
         { provide: RefundsService, useValue: { cancelEventOrders: jest.fn().mockResolvedValue(undefined) } },
         { provide: SponsorshipInvoicePdfService, useValue: { getDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/invoice.pdf') } },
         { provide: SponsorshipReportPdfService, useValue: { getDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/report.pdf') } },
         { provide: TeamAccessService, useValue: { getHostProfileIds: jest.fn().mockResolvedValue([]), getBrandProfileIds: jest.fn().mockResolvedValue([]) } },
+        { provide: CryptoService, useValue: mockCrypto },
       ],
     }).compile();
 
@@ -284,6 +289,144 @@ describe('AdminService', () => {
       await expect(service.rejectHost(pendingHost.id, adminId, rejectDto)).rejects.toThrow(
         BadRequestException,
       );
+    });
+  });
+
+  // ── Manual KYC review (getHostKycDetails / verifyHostKyc / rejectHostKyc) ─
+
+  describe('getHostKycDetails()', () => {
+    const kycHostProfile = {
+      id: 'hp-uuid',
+      legalName: 'Priya Nair',
+      panEncrypted: 'enc::pan',
+      gstin: null,
+      kycStatus: 'PENDING',
+      panVerificationStatus: 'PENDING',
+      bankVerificationStatus: 'PENDING',
+      kycFailureReason: null,
+      kycVerifiedAt: null,
+      user: { firstName: 'Priya', lastName: 'Nair', email: 'priya@test.com', phone: '+919876543210' },
+      payoutAccount: {
+        id: 'pa-uuid',
+        status: 'PENDING_ADMIN_REVIEW',
+        maskedAccountNumber: 'XXXX9012',
+        accountNumberEncrypted: 'enc::account',
+        ifscCode: 'HDFC0001234',
+        accountHolderName: 'Priya Nair',
+        bankName: 'HDFC Bank',
+        verifiedBy: null,
+        adminReviewedAt: null,
+        rejectionReason: null,
+      },
+    };
+
+    it('decrypts PAN and full account number, and audit-logs the view', async () => {
+      prisma.hostProfile.findUnique.mockResolvedValue(kycHostProfile);
+
+      const result = await service.getHostKycDetails('hp-uuid', adminId);
+
+      expect(mockCrypto.decrypt).toHaveBeenCalledWith('enc::pan');
+      expect(mockCrypto.decrypt).toHaveBeenCalledWith('enc::account');
+      expect(result.pan).toBe('decrypted-value');
+      expect(result.bankDetails?.accountNumber).toBe('decrypted-value');
+      expect(mockAuditLog.log).toHaveBeenCalledWith(
+        expect.objectContaining({ actorId: adminId, action: 'KYC_DETAILS_VIEWED', entityId: 'hp-uuid' }),
+      );
+    });
+
+    it('throws NotFoundException when host profile does not exist', async () => {
+      prisma.hostProfile.findUnique.mockResolvedValue(null);
+      await expect(service.getHostKycDetails('bad-id', adminId)).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('verifyHostKyc()', () => {
+    const profileWithPayout = {
+      id: 'hp-uuid',
+      userId: 'user-id',
+      payoutAccount: { id: 'pa-uuid' },
+      user: { firstName: 'Priya', email: 'priya@test.com' },
+    };
+
+    it('sets all KYC statuses to VERIFIED and payout account to APPROVED', async () => {
+      prisma.hostProfile.findUnique
+        .mockResolvedValueOnce(profileWithPayout)
+        .mockResolvedValueOnce({
+          id: 'hp-uuid',
+          legalName: 'Priya Nair',
+          panEncrypted: 'enc::pan',
+          gstin: null,
+          kycStatus: 'VERIFIED',
+          panVerificationStatus: 'VERIFIED',
+          bankVerificationStatus: 'VERIFIED',
+          kycFailureReason: null,
+          kycVerifiedAt: new Date(),
+          user: { firstName: 'Priya', lastName: 'Nair', email: 'priya@test.com', phone: null },
+          payoutAccount: null,
+        });
+
+      await service.verifyHostKyc('hp-uuid', adminId);
+
+      expect(prisma.hostProfile.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ kycStatus: 'VERIFIED', panVerificationStatus: 'VERIFIED', bankVerificationStatus: 'VERIFIED' }) }),
+      );
+      expect(prisma.hostPayoutAccount.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'pa-uuid' }, data: expect.objectContaining({ status: 'APPROVED', verifiedBy: adminId }) }),
+      );
+      expect(mockMailQueue.add).toHaveBeenCalledWith('kyc-verified', expect.any(Object));
+    });
+
+    it('throws BadRequestException when there is no KYC submission (no payout account)', async () => {
+      prisma.hostProfile.findUnique.mockResolvedValue({ ...profileWithPayout, payoutAccount: null });
+      await expect(service.verifyHostKyc('hp-uuid', adminId)).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws NotFoundException when host profile does not exist', async () => {
+      prisma.hostProfile.findUnique.mockResolvedValue(null);
+      await expect(service.verifyHostKyc('bad-id', adminId)).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('rejectHostKyc()', () => {
+    const profileWithPayout = {
+      id: 'hp-uuid',
+      userId: 'user-id',
+      payoutAccount: { id: 'pa-uuid' },
+      user: { firstName: 'Priya', email: 'priya@test.com' },
+    };
+    const reason = 'Bank account holder name does not match PAN legal name.';
+
+    it('sets all KYC statuses to FAILED with the given reason and payout account to REJECTED', async () => {
+      prisma.hostProfile.findUnique
+        .mockResolvedValueOnce(profileWithPayout)
+        .mockResolvedValueOnce({
+          id: 'hp-uuid',
+          legalName: 'Priya Nair',
+          panEncrypted: 'enc::pan',
+          gstin: null,
+          kycStatus: 'FAILED',
+          panVerificationStatus: 'FAILED',
+          bankVerificationStatus: 'FAILED',
+          kycFailureReason: reason,
+          kycVerifiedAt: null,
+          user: { firstName: 'Priya', lastName: 'Nair', email: 'priya@test.com', phone: null },
+          payoutAccount: null,
+        });
+
+      await service.rejectHostKyc('hp-uuid', adminId, reason);
+
+      expect(prisma.hostProfile.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ kycStatus: 'FAILED', kycFailureReason: reason }) }),
+      );
+      expect(prisma.hostPayoutAccount.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'pa-uuid' }, data: expect.objectContaining({ status: 'REJECTED', rejectionReason: reason }) }),
+      );
+      expect(mockMailQueue.add).toHaveBeenCalledWith('kyc-failed', expect.any(Object));
+    });
+
+    it('throws BadRequestException when there is no KYC submission (no payout account)', async () => {
+      prisma.hostProfile.findUnique.mockResolvedValue({ ...profileWithPayout, payoutAccount: null });
+      await expect(service.rejectHostKyc('hp-uuid', adminId, reason)).rejects.toThrow(BadRequestException);
     });
   });
 

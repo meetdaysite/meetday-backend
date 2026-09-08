@@ -577,6 +577,12 @@ model HostPayoutAccount {
   bankName            String? // e.g. "HDFC Bank"
   accountHolderName   String? // Name as registered on bank account
   accountType         String? // "SAVINGS" | "CURRENT"
+  ifscCode            String? // Bank branch IFSC code — not sensitive, needed for manual admin KYC review
+
+  // Full account number, encrypted (AES-256-GCM, same as HostProfile.panEncrypted) — needed so
+  // an admin can manually verify bank details now that automated penny-drop is not used.
+  // Decrypted only on-demand for an authorized admin viewing KYC details (audit-logged).
+  accountNumberEncrypted String?
 
   // Verification lifecycle
   status PayoutAccountStatus @default(PENDING_PENNY_DROP)
@@ -1824,6 +1830,7 @@ enum AuditAction {
   KYC_APPROVED
   KYC_REJECTED
   KYC_RESUBMITTED
+  KYC_DETAILS_VIEWED
 
   // Payout accounts (PMLA / RBI)
   PAYOUT_ACCOUNT_ADDED

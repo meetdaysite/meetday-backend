@@ -18,6 +18,15 @@ export class MailProcessor {
     }
   }
 
+  @Process('kyc-verified')
+  async handleKycVerified(job: Job<{ to: string; hostName: string }>) {
+    try {
+      await this.mailService.sendKycVerified(job.data.to, job.data.hostName);
+    } catch (error) {
+      this.logger.error(`Failed to process kyc-verified mail job: ${(error as Error).message}`);
+    }
+  }
+
   @Process('host-approved')
   async handleHostApproved(job: Job<{ to: string; hostName: string }>) {
     try {
