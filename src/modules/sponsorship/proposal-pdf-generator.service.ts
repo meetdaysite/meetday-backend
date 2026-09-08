@@ -97,6 +97,7 @@ export class ProposalPdfGeneratorService {
 
     const fonts = FONT_STACKS[dto.fontVibe];
     const minimalist = dto.fontVibe === 'MINIMALIST';
+    const executive = dto.layoutStyle === 'EXECUTIVE';
     const html = `
 <!DOCTYPE html>
 <html>
@@ -105,7 +106,7 @@ export class ProposalPdfGeneratorService {
   body { margin: 0; font-family: ${fonts.body}; }
   .slide {
     width: 1280px; height: 720px; padding: ${minimalist ? '72px 96px' : '56px 72px'}; display: flex; flex-direction: column;
-    break-after: page; page-break-after: always; position: relative;
+    break-after: page; page-break-after: always; position: relative; overflow: hidden;
   }
   .slide-last { break-after: auto; page-break-after: auto; }
   .slide.bg-light { color: #111; }
@@ -181,8 +182,28 @@ export class ProposalPdfGeneratorService {
   .progress-dots span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.3; }
   .progress-dots span.active { opacity: 1; background: var(--primary); width: 16px; border-radius: 4px; }
   .page-num { font-weight: 700; }
+
+  /* EXECUTIVE style variant — purely CSS overrides layered on top of the same HTML structure
+     as CLASSIC, so all dynamic-length content (stats/bullets/sponsors/tiers) keeps reflowing
+     exactly the same way. Squared-off corners, hairline double-rules, and a numbered-badge
+     treatment on stat cards for a more formal/corporate feel. */
+  body.style-executive .slide-header { border-bottom-width: 1px; box-shadow: 0 3px 0 -1px currentColor; opacity: 1; }
+  body.style-executive .kicker { border: 1px solid var(--accent); border-radius: 999px; padding: 4px 14px; letter-spacing: 0.2em; }
+  body.style-executive .accent-rule { width: 100%; max-width: 120px; height: 3px; border-radius: 0; background: none;
+    border-top: 3px double var(--accent); }
+  body.style-executive .stat-card, body.style-executive .tier, body.style-executive .sponsor-card, body.style-executive .bullet-list li {
+    border-radius: 6px; box-shadow: 6px 6px 0 color-mix(in srgb, var(--primary) 18%, transparent); }
+  body.style-executive .stats-grid { counter-reset: stat-badge; }
+  body.style-executive .stat-card { counter-increment: stat-badge; position: relative; padding-left: 30px; }
+  body.style-executive .stat-card::before { content: counter(stat-badge); position: absolute; top: -12px; left: -12px; width: 28px; height: 28px;
+    border-radius: 50%; background: var(--primary); color: #fff; font-size: 13px; font-weight: 900; display: flex; align-items: center; justify-content: center; }
+  body.style-executive .decor-shape { border-radius: 4px; transform: rotate(8deg); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+  body.style-executive .decor-shape::after { border-radius: 4px; }
+  body.style-executive .progress-dots span { border-radius: 2px; }
+  body.style-executive .progress-dots span.active { border-radius: 2px; }
+  body.style-executive .logo-chip { border-radius: 4px; }
 </style></head>
-<body>
+<body class="${executive ? 'style-executive' : ''}">
   ${slidesHtml}
 </body>
 </html>`;

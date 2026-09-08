@@ -9,6 +9,12 @@ export type DeckTheme = (typeof DECK_THEMES)[number];
 export const DECK_FONT_VIBES = ['MODERN_SANS', 'CLASSIC_SERIF', 'TECH_GEOMETRIC', 'MINIMALIST'] as const;
 export type DeckFontVibe = (typeof DECK_FONT_VIBES)[number];
 
+// Purely a CSS-level visual variant (card shapes, kicker/rule styling, decorative touches) —
+// does NOT change slide layout structure or dynamic-content handling, so all existing
+// variable-length data (bullets/stats/sponsors/tiers) keeps working unchanged in either style.
+export const DECK_LAYOUT_STYLES = ['CLASSIC', 'EXECUTIVE'] as const;
+export type DeckLayoutStyle = (typeof DECK_LAYOUT_STYLES)[number];
+
 // Finalize step — renders the (possibly host-edited) slide plan into an actual PDF and uploads
 // it to storage. Deliberately does NOT stream the PDF back for direct download — the response
 // is a docKey meant to be attached to the proposal record, replacing the manual document upload.
@@ -27,6 +33,13 @@ export class FinalizeProposalDeckDto {
   @ApiProperty({ enum: DECK_FONT_VIBES })
   @IsIn(DECK_FONT_VIBES)
   fontVibe: DeckFontVibe;
+
+  // Optional, defaults to CLASSIC (today's existing look) when omitted — so existing callers
+  // that don't send this field keep behaving exactly as before.
+  @ApiPropertyOptional({ enum: DECK_LAYOUT_STYLES, default: 'CLASSIC' })
+  @IsOptional()
+  @IsIn(DECK_LAYOUT_STYLES)
+  layoutStyle?: DeckLayoutStyle;
 
   @ApiProperty({ type: [String], example: ['#EE2C2C', '#111111'], description: 'Up to 2 primary brand colors.' })
   @IsArray()
