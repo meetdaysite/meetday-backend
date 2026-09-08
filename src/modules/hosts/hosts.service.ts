@@ -144,13 +144,14 @@ export class HostsService {
           categories: { include: { category: true } },
           address: true,
           subscriptions: { orderBy: { createdAt: 'desc' }, take: 1 },
+          payoutAccount: true,
         },
       }),
     ]);
     if (!profile) throw new NotFoundException('Host profile not found');
     if (!user) throw new NotFoundException('User not found');
 
-    const { panEncrypted, ...rest } = profile;
+    const { panEncrypted, payoutAccount, ...rest } = profile;
     const avatarUrl = user.avatarUrl
       ? await this.storageService.getPresignedDownloadUrl(user.avatarUrl)
       : null;
@@ -165,6 +166,20 @@ export class HostsService {
       ...rest,
       displayName,
       pan: panEncrypted ? this.cryptoService.decrypt(panEncrypted) : null,
+      // Shown back to the host so a pending/rejected submission can be reviewed and edited
+      // before resubmitting — this is the host's own data, not exposed to anyone else.
+      bankDetails: payoutAccount
+        ? {
+            status: payoutAccount.status,
+            accountHolderName: payoutAccount.accountHolderName,
+            bankName: payoutAccount.bankName,
+            ifscCode: payoutAccount.ifscCode,
+            accountNumber: payoutAccount.accountNumberEncrypted
+              ? this.cryptoService.decrypt(payoutAccount.accountNumberEncrypted)
+              : null,
+            rejectionReason: payoutAccount.rejectionReason,
+          }
+        : null,
       avatarUrl,
       phone: user.phone,
       email: user.email,
@@ -645,6 +660,24 @@ export class HostsService {
       'KYC Under Review',
       'Your KYC documents have been submitted and are being manually reviewed by our team.',
     ).catch((err) => this.logger.error('Failed to create kyc_submitted notification', err));
+
+    // Notify admins so a submitted/resubmitted KYC surfaces for manual review — mirrors the
+    // community-profile-submission admin-notify pattern above.
+    const admins = await this.prisma.user.findMany({
+      where: { isActive: true, role: { name: { in: ['SUPER_ADMIN', 'CITY_ADMIN'] } } },
+      select: { id: true },
+    });
+    void Promise.allSettled(
+      admins.map((admin) =>
+        this.notificationsService.create(
+          admin.id,
+          isResubmission ? 'kyc_resubmitted' : 'kyc_pending_review',
+          isResubmission ? 'KYC resubmitted for review' : 'KYC pending review',
+          `${profile.user.firstName} ${isResubmission ? 'resubmitted' : 'submitted'} KYC details awaiting manual review.`,
+          { hostProfileId: profile.id },
+        ),
+      ),
+    );
 
     return {
       panReferenceId: null,
