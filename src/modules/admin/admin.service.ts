@@ -40,6 +40,10 @@ import { UpdateAdminSponsorshipDto } from './dto/update-admin-sponsorship.dto';
 import { ListEligibleHostsQueryDto } from './dto/list-eligible-hosts-query.dto';
 import { CreateAdminCommunityProfileDto } from './dto/create-admin-community-profile.dto';
 import { UpdateAdminCommunityProfileDto } from './dto/update-admin-community-profile.dto';
+import { ListSpaceCommunityProfilesQueryDto } from './dto/list-space-community-profiles-query.dto';
+import { ListEligibleSpacePartnersQueryDto } from './dto/list-eligible-space-partners-query.dto';
+import { CreateAdminSpaceCommunityProfileDto } from './dto/create-admin-space-community-profile.dto';
+import { UpdateAdminSpaceCommunityProfileDto } from './dto/update-admin-space-community-profile.dto';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { UpdateGstRateDto } from './dto/update-gst-rate.dto';
 import { UpdatePlanFeeRateDto } from './dto/update-plan-fee-rate.dto';
@@ -924,9 +928,10 @@ export class AdminService {
     return categories;
   }
 
-  async listCategoriesAdmin() {
+  async listCategoriesAdmin(type?: 'EXPERIENCE' | 'SPACE') {
     return this.prisma.category.findMany({
-      select: { id: true, name: true, description: true, isActive: true, createdAt: true },
+      where: type ? { type } : undefined,
+      select: { id: true, name: true, description: true, isActive: true, type: true, createdAt: true },
       orderBy: { name: 'asc' },
     });
   }
@@ -2116,6 +2121,78 @@ export class AdminService {
     ]);
 
     return { profiles: profiles.map((p) => AdminService.flattenCommunityProfileCategories(p)), total, page, limit };
+  }
+
+  private static readonly SPACE_COMMUNITY_PROFILE_SELECT = {
+    id: true,
+    name: true,
+    about: true,
+    logoKey: true,
+    posterKey: true,
+    numberOfVenues: true,
+    venueCapacity: true,
+    communitySize: true,
+    experiencesPerYear: true,
+    activeLocations: true,
+    centreShowcaseImageKeys: true,
+    videoLink: true,
+    pastEvents: true,
+    brandsWorkedWith: true,
+    approvalStatus: true,
+    adminRejectionRemark: true,
+    reviewedAt: true,
+    pendingRevision: true,
+    isHidden: true,
+    createdAt: true,
+    updatedAt: true,
+    categories: { select: { category: { select: { id: true, name: true } } } },
+    spaceProfile: {
+      select: {
+        id: true,
+        businessName: true,
+        operatingCities: true,
+        socialLinks: true,
+        user: { select: { id: true, firstName: true, lastName: true, email: true } },
+      },
+    },
+  } as const;
+
+  async listPendingSpaceCommunityProfiles(page: number, limit: number) {
+    const where = { approvalStatus: 'PENDING' as const };
+
+    const [profiles, total] = await Promise.all([
+      this.prisma.spaceCommunityProfile.findMany({
+        where,
+        select: AdminService.SPACE_COMMUNITY_PROFILE_SELECT,
+        orderBy: { updatedAt: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.spaceCommunityProfile.count({ where }),
+    ]);
+
+    return { profiles: profiles.map((p) => AdminService.flattenSpaceCommunityProfileCategories(p)), total, page, limit };
+  }
+
+  async listAllSpaceCommunityProfiles(query: ListSpaceCommunityProfilesQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const where: Prisma.SpaceCommunityProfileWhereInput = {};
+    if (query.status) where.approvalStatus = query.status;
+
+    const [profiles, total] = await Promise.all([
+      this.prisma.spaceCommunityProfile.findMany({
+        where,
+        select: AdminService.SPACE_COMMUNITY_PROFILE_SELECT,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.spaceCommunityProfile.count({ where }),
+    ]);
+
+    return { profiles: profiles.map((p) => AdminService.flattenSpaceCommunityProfileCategories(p)), total, page, limit };
   }
 
   // Full KYC details for manual admin review — decrypts PAN and the full bank account number
@@ -3752,6 +3829,460 @@ export class AdminService {
         { hostCommunityProfileId: id },
       )
       .catch((err) => this.logger.error('Failed to create community_profile_changes_rejected notification', err));
+
+    return { message: 'Revision rejected' };
+  }
+
+  // ── Community Space profiles (Space Partner listings) ──────────────────────────
+
+  async getSpaceCommunityProfileDetail(id: string) {
+    const profile = await this.prisma.spaceCommunityProfile.findUnique({
+      where: { id },
+      select: AdminService.SPACE_COMMUNITY_PROFILE_SELECT,
+    });
+    if (!profile) throw new NotFoundException('Community space profile not found');
+
+    let pendingRevision = profile.pendingRevision as
+      | (Record<string, unknown> & {
+          logoKey?: string;
+          posterKey?: string;
+          pastEvents?: { name?: string; description?: string; imageKeys?: string[] }[];
+          brandsWorkedWith?: { brandName?: string; logoKey?: string; url?: string }[];
+        })
+      | null;
+    if (pendingRevision) {
+      const [revisionLogoUrl, revisionPosterUrl, revisionPastEvents, revisionBrandsWorkedWith] = await Promise.all([
+        pendingRevision.logoKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.logoKey) : undefined,
+        pendingRevision.posterKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.posterKey) : undefined,
+        this.withPastEventImageUrls(pendingRevision.pastEvents),
+        this.withBrandsWorkedWithLogoUrls(pendingRevision.brandsWorkedWith),
+      ]);
+      pendingRevision = {
+        ...pendingRevision,
+        logoUrl: revisionLogoUrl,
+        posterUrl: revisionPosterUrl,
+        pastEvents: revisionPastEvents,
+        brandsWorkedWith: revisionBrandsWorkedWith,
+      };
+    }
+
+    return {
+      ...AdminService.flattenSpaceCommunityProfileCategories(profile),
+      logoUrl: await this.storageService.getPresignedDownloadUrl(profile.logoKey),
+      posterUrl: profile.posterKey ? await this.storageService.getPresignedDownloadUrl(profile.posterKey) : null,
+      centreShowcaseUrls: await Promise.all(
+        (profile.centreShowcaseImageKeys ?? []).map((key) => this.storageService.getPresignedDownloadUrl(key)),
+      ),
+      pastEvents: await this.withPastEventImageUrls(profile.pastEvents as { name?: string; description?: string; imageKeys?: string[] }[] | null),
+      brandsWorkedWith: await this.withBrandsWorkedWithLogoUrls(profile.brandsWorkedWith as { brandName?: string; logoKey?: string; url?: string }[] | null),
+      pendingRevision,
+    };
+  }
+
+  // Space partners eligible to have a community space profile created for them by an admin —
+  // i.e. space partners that don't already have one (SpaceProfile.communityProfile is null).
+  async listSpacePartnersWithoutCommunityProfile(query: ListEligibleSpacePartnersQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const where: Prisma.SpaceProfileWhereInput = {
+      communityProfile: null,
+      ...(query.search && {
+        OR: [
+          { businessName: { contains: query.search, mode: 'insensitive' } },
+          { user: { email: { contains: query.search, mode: 'insensitive' } } },
+          { user: { firstName: { contains: query.search, mode: 'insensitive' } } },
+          { user: { lastName: { contains: query.search, mode: 'insensitive' } } },
+        ],
+      }),
+    };
+
+    const [spacePartners, total] = await Promise.all([
+      this.prisma.spaceProfile.findMany({
+        where,
+        select: {
+          id: true,
+          businessName: true,
+          operatingCities: true,
+          user: { select: { id: true, firstName: true, lastName: true, email: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.spaceProfile.count({ where }),
+    ]);
+
+    return { spacePartners, total, page, limit };
+  }
+
+  // Admin creates a community space profile already-approved for a space partner who doesn't
+  // have one yet, bypassing the normal PENDING → review flow. Notifies the partner once created.
+  async createSpaceCommunityProfileAsAdmin(adminId: string, dto: CreateAdminSpaceCommunityProfileDto) {
+    const spaceProfile = await this.prisma.spaceProfile.findUnique({
+      where: { id: dto.spaceProfileId },
+      include: { communityProfile: { select: { id: true } }, user: { select: { id: true } } },
+    });
+    if (!spaceProfile) throw new NotFoundException('Space profile not found');
+    if (spaceProfile.communityProfile) throw new ConflictException('This space partner already has a community profile');
+
+    const validCategories = await this.prisma.category.findMany({
+      where: { id: { in: dto.categoryIds }, type: 'SPACE' },
+      select: { id: true },
+    });
+    if (validCategories.length !== dto.categoryIds.length) {
+      throw new BadRequestException('One or more category IDs are invalid');
+    }
+
+    const communityProfile = await this.prisma.spaceCommunityProfile.create({
+      data: {
+        spaceProfileId: spaceProfile.id,
+        name: dto.name,
+        about: dto.about,
+        logoKey: dto.logoKey,
+        posterKey: dto.posterKey,
+        numberOfVenues: dto.numberOfVenues,
+        venueCapacity: dto.venueCapacity,
+        communitySize: dto.communitySize,
+        experiencesPerYear: dto.experiencesPerYear,
+        activeLocations: dto.activeLocations ?? [],
+        centreShowcaseImageKeys: dto.centreShowcaseImageKeys ?? [],
+        videoLink: dto.videoLink,
+        approvalStatus: 'APPROVED',
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+        categories: { create: dto.categoryIds.map((categoryId) => ({ categoryId })) },
+        pastEvents: dto.pastEvents ? (JSON.parse(JSON.stringify(dto.pastEvents)) as Prisma.InputJsonValue) : Prisma.JsonNull,
+        brandsWorkedWith: dto.brandsWorkedWith
+          ? (JSON.parse(JSON.stringify(dto.brandsWorkedWith)) as Prisma.InputJsonValue)
+          : Prisma.JsonNull,
+      },
+    });
+
+    // Guards against an empty/all-blank object wiping the partner's existing social links.
+    const hasSocialLinksUpdate = dto.socialLinks && Object.values(dto.socialLinks).some(Boolean);
+    if (hasSocialLinksUpdate || dto.operatingCities?.length) {
+      await this.prisma.spaceProfile.update({
+        where: { id: spaceProfile.id },
+        data: {
+          ...(hasSocialLinksUpdate && { socialLinks: JSON.parse(JSON.stringify(dto.socialLinks)) }),
+          ...(dto.operatingCities?.length && { operatingCities: dto.operatingCities }),
+        },
+      });
+    }
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'SPACE_PROFILE_APPROVED',
+      entityType: 'SPACE_COMMUNITY_PROFILE',
+      entityId: communityProfile.id,
+      metadata: { name: communityProfile.name, createdByAdmin: true },
+    });
+
+    void this.notificationsService
+      .create(
+        spaceProfile.user.id,
+        'space_profile_approved',
+        'Community Space Profile Activated',
+        `Your community space profile "${communityProfile.name}" has been activated and is now visible to brands and communities.`,
+        { spaceCommunityProfileId: communityProfile.id },
+      )
+      .catch((err) => this.logger.error('Failed to create space_profile_approved notification', err));
+
+    return this.getSpaceCommunityProfileDetail(communityProfile.id);
+  }
+
+  // Full admin edit of an existing community space profile, any approvalStatus — writes
+  // directly (no pendingRevision staging), unlike the space-partner-side edit flow.
+  async updateSpaceCommunityProfileAsAdmin(id: string, adminId: string, dto: UpdateAdminSpaceCommunityProfileDto) {
+    const existing = await this.prisma.spaceCommunityProfile.findUnique({
+      where: { id },
+      select: { id: true, spaceProfileId: true },
+    });
+    if (!existing) throw new NotFoundException('Community space profile not found');
+
+    if (dto.categoryIds) {
+      const validCategories = await this.prisma.category.findMany({
+        where: { id: { in: dto.categoryIds }, type: 'SPACE' },
+        select: { id: true },
+      });
+      if (validCategories.length !== dto.categoryIds.length) {
+        throw new BadRequestException('One or more category IDs are invalid');
+      }
+    }
+
+    await this.prisma.spaceCommunityProfile.update({
+      where: { id },
+      data: {
+        ...(dto.name !== undefined && { name: dto.name }),
+        ...(dto.about !== undefined && { about: dto.about }),
+        ...(dto.logoKey !== undefined && { logoKey: dto.logoKey }),
+        ...(dto.posterKey !== undefined && { posterKey: dto.posterKey || null }),
+        ...(dto.numberOfVenues !== undefined && { numberOfVenues: dto.numberOfVenues }),
+        ...(dto.venueCapacity !== undefined && { venueCapacity: dto.venueCapacity }),
+        ...(dto.communitySize !== undefined && { communitySize: dto.communitySize }),
+        ...(dto.experiencesPerYear !== undefined && { experiencesPerYear: dto.experiencesPerYear }),
+        ...(dto.activeLocations !== undefined && { activeLocations: dto.activeLocations }),
+        ...(dto.centreShowcaseImageKeys !== undefined && { centreShowcaseImageKeys: dto.centreShowcaseImageKeys }),
+        ...(dto.videoLink !== undefined && { videoLink: dto.videoLink }),
+        ...(dto.categoryIds !== undefined && {
+          categories: {
+            deleteMany: {},
+            create: dto.categoryIds.map((categoryId) => ({ categoryId })),
+          },
+        }),
+        ...(dto.pastEvents !== undefined && {
+          pastEvents: JSON.parse(JSON.stringify(dto.pastEvents)) as Prisma.InputJsonValue,
+        }),
+        ...(dto.brandsWorkedWith !== undefined && {
+          brandsWorkedWith: JSON.parse(JSON.stringify(dto.brandsWorkedWith)) as Prisma.InputJsonValue,
+        }),
+        ...(dto.isHidden !== undefined && { isHidden: dto.isHidden }),
+      },
+    });
+
+    const hasSocialLinksUpdate = dto.socialLinks && Object.values(dto.socialLinks).some(Boolean);
+    if (hasSocialLinksUpdate || dto.operatingCities?.length) {
+      await this.prisma.spaceProfile.update({
+        where: { id: existing.spaceProfileId },
+        data: {
+          ...(hasSocialLinksUpdate && { socialLinks: JSON.parse(JSON.stringify(dto.socialLinks)) }),
+          ...(dto.operatingCities?.length && { operatingCities: dto.operatingCities }),
+        },
+      });
+    }
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'SPACE_PROFILE_EDITED_BY_ADMIN',
+      entityType: 'SPACE_COMMUNITY_PROFILE',
+      entityId: id,
+      metadata: { name: dto.name },
+    });
+
+    return this.getSpaceCommunityProfileDetail(id);
+  }
+
+  // Quick one-click hide/unhide — doesn't touch the space partner's own access at all, only
+  // whether brands/communities can discover this space.
+  async setSpaceCommunityProfileVisibility(id: string, adminId: string, isHidden: boolean) {
+    const existing = await this.prisma.spaceCommunityProfile.findUnique({ where: { id }, select: { id: true, name: true } });
+    if (!existing) throw new NotFoundException('Community space profile not found');
+
+    await this.prisma.spaceCommunityProfile.update({ where: { id }, data: { isHidden } });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: isHidden ? 'SPACE_PROFILE_HIDDEN' : 'SPACE_PROFILE_UNHIDDEN',
+      entityType: 'SPACE_COMMUNITY_PROFILE',
+      entityId: id,
+      metadata: { name: existing.name },
+    });
+
+    return this.getSpaceCommunityProfileDetail(id);
+  }
+
+  // Prisma returns the categories relation nested as { category: { id, name } }[] — flatten it
+  // to { id, name }[] to match what the frontend renders.
+  private static flattenSpaceCommunityProfileCategories<
+    T extends { categories: { category: { id: string; name: string } }[] },
+  >(profile: T) {
+    return { ...profile, categories: profile.categories.map((c) => c.category) };
+  }
+
+  async approveSpaceCommunityProfile(id: string, adminId: string) {
+    const profile = await this.prisma.spaceCommunityProfile.findUnique({
+      where: { id },
+      include: { spaceProfile: { include: { user: { select: { id: true } } } } },
+    });
+    if (!profile) throw new NotFoundException('Community space profile not found');
+    if (profile.approvalStatus !== 'PENDING')
+      throw new BadRequestException('Only profiles in PENDING status can be approved');
+
+    await this.prisma.spaceCommunityProfile.update({
+      where: { id },
+      data: { approvalStatus: 'APPROVED', reviewedBy: adminId, reviewedAt: new Date() },
+    });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'SPACE_PROFILE_APPROVED',
+      entityType: 'SPACE_COMMUNITY_PROFILE',
+      entityId: id,
+      metadata: { name: profile.name },
+    });
+
+    void this.notificationsService
+      .create(
+        profile.spaceProfile.user.id,
+        'space_profile_approved',
+        'Community Space Profile Approved',
+        `Your community space profile "${profile.name}" has been approved and is now visible to brands and communities.`,
+        { spaceCommunityProfileId: id },
+      )
+      .catch((err) => this.logger.error('Failed to create space_profile_approved notification', err));
+
+    return { message: 'Community space profile approved successfully' };
+  }
+
+  async rejectSpaceCommunityProfile(id: string, adminId: string, dto: RejectEventDto) {
+    const profile = await this.prisma.spaceCommunityProfile.findUnique({
+      where: { id },
+      include: { spaceProfile: { include: { user: { select: { id: true } } } } },
+    });
+    if (!profile) throw new NotFoundException('Community space profile not found');
+    if (profile.approvalStatus !== 'PENDING')
+      throw new BadRequestException('Only profiles in PENDING status can be rejected');
+
+    await this.prisma.spaceCommunityProfile.update({
+      where: { id },
+      data: { approvalStatus: 'REJECTED', adminRejectionRemark: dto.remark, reviewedBy: adminId, reviewedAt: new Date() },
+    });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'SPACE_PROFILE_REJECTED',
+      entityType: 'SPACE_COMMUNITY_PROFILE',
+      entityId: id,
+      metadata: { name: profile.name, remark: dto.remark },
+    });
+
+    void this.notificationsService
+      .create(
+        profile.spaceProfile.user.id,
+        'space_profile_rejected',
+        'Community Space Profile Not Approved',
+        `Your community space profile "${profile.name}" was not approved. Remark: ${dto.remark}`,
+        { spaceCommunityProfileId: id },
+      )
+      .catch((err) => this.logger.error('Failed to create space_profile_rejected notification', err));
+
+    return { message: 'Community space profile rejected successfully' };
+  }
+
+  // ── Community space profile revisions (edits to an already-APPROVED profile) ───
+
+  async listPendingSpaceCommunityProfileRevisions(page: number, limit: number) {
+    const where = { pendingRevision: { not: Prisma.JsonNull } };
+
+    const [profiles, total] = await Promise.all([
+      this.prisma.spaceCommunityProfile.findMany({
+        where,
+        select: AdminService.SPACE_COMMUNITY_PROFILE_SELECT,
+        orderBy: { updatedAt: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.spaceCommunityProfile.count({ where }),
+    ]);
+
+    return { profiles: profiles.map((p) => AdminService.flattenSpaceCommunityProfileCategories(p)), total, page, limit };
+  }
+
+  async approveSpaceCommunityProfileRevision(id: string, adminId: string) {
+    const profile = await this.prisma.spaceCommunityProfile.findUnique({
+      where: { id },
+      include: { spaceProfile: { include: { user: { select: { id: true } } } } },
+    });
+    if (!profile) throw new NotFoundException('Community space profile not found');
+    if (!profile.pendingRevision) throw new NotFoundException('No pending revision for this profile');
+
+    const changes = profile.pendingRevision as Record<string, any>;
+    const { categoryIds, ...fieldChanges } = changes;
+
+    await this.prisma.$transaction([
+      this.prisma.spaceCommunityProfile.update({
+        where: { id },
+        data: {
+          ...(fieldChanges.name !== undefined && { name: fieldChanges.name }),
+          ...(fieldChanges.about !== undefined && { about: fieldChanges.about }),
+          ...(fieldChanges.logoKey !== undefined && { logoKey: fieldChanges.logoKey }),
+          ...(fieldChanges.posterKey !== undefined && { posterKey: fieldChanges.posterKey }),
+          ...(fieldChanges.numberOfVenues !== undefined && { numberOfVenues: fieldChanges.numberOfVenues }),
+          ...(fieldChanges.venueCapacity !== undefined && { venueCapacity: fieldChanges.venueCapacity }),
+          ...(fieldChanges.communitySize !== undefined && { communitySize: fieldChanges.communitySize }),
+          ...(fieldChanges.experiencesPerYear !== undefined && { experiencesPerYear: fieldChanges.experiencesPerYear }),
+          ...(fieldChanges.activeLocations !== undefined && { activeLocations: fieldChanges.activeLocations }),
+          ...(fieldChanges.centreShowcaseImageKeys !== undefined && { centreShowcaseImageKeys: fieldChanges.centreShowcaseImageKeys }),
+          ...(fieldChanges.videoLink !== undefined && { videoLink: fieldChanges.videoLink }),
+          ...(fieldChanges.pastEvents !== undefined && {
+            pastEvents: JSON.parse(JSON.stringify(fieldChanges.pastEvents)) as Prisma.InputJsonValue,
+          }),
+          ...(fieldChanges.brandsWorkedWith !== undefined && {
+            brandsWorkedWith: JSON.parse(JSON.stringify(fieldChanges.brandsWorkedWith)) as Prisma.InputJsonValue,
+          }),
+          pendingRevision: Prisma.JsonNull,
+          reviewedBy: adminId,
+          reviewedAt: new Date(),
+        },
+      }),
+      ...(Array.isArray(categoryIds)
+        ? [
+            this.prisma.spaceCommunityProfileCategory.deleteMany({ where: { spaceCommunityProfileId: id } }),
+            this.prisma.spaceCommunityProfileCategory.createMany({
+              data: (categoryIds as string[]).map((categoryId) => ({ spaceCommunityProfileId: id, categoryId })),
+            }),
+          ]
+        : []),
+    ]);
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'SPACE_PROFILE_REVISION_APPROVED',
+      entityType: 'SPACE_COMMUNITY_PROFILE',
+      entityId: id,
+    });
+
+    void this.notificationsService
+      .create(
+        profile.spaceProfile.user.id,
+        'space_profile_changes_approved',
+        'Your changes are live',
+        `Your updates to "${profile.name}" have been approved and are now live.`,
+        { spaceCommunityProfileId: id },
+      )
+      .catch((err) => this.logger.error('Failed to create space_profile_changes_approved notification', err));
+
+    return { message: 'Revision approved and applied' };
+  }
+
+  async rejectSpaceCommunityProfileRevision(id: string, adminId: string, dto: RejectEventDto) {
+    const profile = await this.prisma.spaceCommunityProfile.findUnique({
+      where: { id },
+      include: { spaceProfile: { include: { user: { select: { id: true } } } } },
+    });
+    if (!profile) throw new NotFoundException('Community space profile not found');
+    if (!profile.pendingRevision) throw new NotFoundException('No pending revision for this profile');
+
+    await this.prisma.spaceCommunityProfile.update({
+      where: { id },
+      data: { pendingRevision: Prisma.JsonNull, reviewedBy: adminId, reviewedAt: new Date() },
+    });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'SPACE_PROFILE_REVISION_REJECTED',
+      entityType: 'SPACE_COMMUNITY_PROFILE',
+      entityId: id,
+      metadata: { remark: dto.remark },
+    });
+
+    void this.notificationsService
+      .create(
+        profile.spaceProfile.user.id,
+        'space_profile_changes_rejected',
+        'Changes not approved',
+        `Your updates to "${profile.name}" were not approved. Remark: ${dto.remark}`,
+        { spaceCommunityProfileId: id },
+      )
+      .catch((err) => this.logger.error('Failed to create space_profile_changes_rejected notification', err));
 
     return { message: 'Revision rejected' };
   }

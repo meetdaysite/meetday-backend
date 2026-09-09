@@ -64,6 +64,11 @@ import { ListEligibleHostsQueryDto } from './dto/list-eligible-hosts-query.dto';
 import { CreateAdminCommunityProfileDto } from './dto/create-admin-community-profile.dto';
 import { UpdateAdminCommunityProfileDto } from './dto/update-admin-community-profile.dto';
 import { SetCommunityProfileVisibilityDto } from './dto/set-community-profile-visibility.dto';
+import { ListSpaceCommunityProfilesQueryDto } from './dto/list-space-community-profiles-query.dto';
+import { ListEligibleSpacePartnersQueryDto } from './dto/list-eligible-space-partners-query.dto';
+import { CreateAdminSpaceCommunityProfileDto } from './dto/create-admin-space-community-profile.dto';
+import { UpdateAdminSpaceCommunityProfileDto } from './dto/update-admin-space-community-profile.dto';
+import { SetSpaceCommunityProfileVisibilityDto } from './dto/set-space-community-profile-visibility.dto';
 import { UpdateGstRateDto } from './dto/update-gst-rate.dto';
 import { UpdatePlanFeeRateDto } from './dto/update-plan-fee-rate.dto';
 import { CreateHostFeePromoDto } from './dto/create-host-fee-promo.dto';
@@ -1023,8 +1028,8 @@ export class AdminController {
       },
     },
   })
-  listCategories() {
-    return this.adminService.listCategoriesAdmin();
+  listCategories(@Query('type') type?: 'EXPERIENCE' | 'SPACE') {
+    return this.adminService.listCategoriesAdmin(type);
   }
 
   // ─── Event review endpoints ───────────────────────────────────────────────────
@@ -1624,6 +1629,183 @@ export class AdminController {
   @ApiNotFoundResponse({ description: 'Community profile not found.' })
   getCommunityProfileMembers(@Param('id', ParseUUIDPipe) id: string) {
     return this.adminService.getCommunityProfileMembers(id);
+  }
+
+  // ─── Community Space profile review ────────────────────────────────────────
+
+  @Get('space-community-profiles/pending')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({
+    summary: 'List community space profiles pending admin review',
+    description: 'Returns profiles in PENDING status, oldest submission first (FIFO).',
+  })
+  @ApiOkResponse({ description: 'Paginated list of community space profiles pending review.' })
+  listPendingSpaceCommunityProfiles(@Query('page') page = 1, @Query('limit') limit = 20) {
+    return this.adminService.listPendingSpaceCommunityProfiles(Number(page), Number(limit));
+  }
+
+  @Get('space-community-profiles/eligible-space-partners')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({
+    summary: 'List space partners without a community space profile',
+    description: 'Space partners eligible to have a community space profile created for them directly by an admin.',
+  })
+  @ApiOkResponse({ description: 'Paginated list of space partners (name + email) without a community profile.' })
+  listSpacePartnersWithoutCommunityProfile(@Query() query: ListEligibleSpacePartnersQueryDto) {
+    return this.adminService.listSpacePartnersWithoutCommunityProfile(query);
+  }
+
+  @Post('space-community-profiles')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @ApiOperation({
+    summary: 'Create a community space profile directly for a space partner (admin)',
+    description:
+      'Creates a community space profile already in APPROVED status for a space partner who doesn\'t have one ' +
+      'yet, bypassing the normal PENDING → admin-review flow. Notifies the partner.',
+  })
+  @ApiCreatedResponse({ description: 'Community space profile created and activated.' })
+  @ApiNotFoundResponse({ description: 'Space profile not found.' })
+  @ApiConflictResponse({ description: 'Space partner already has a community profile.' })
+  createSpaceCommunityProfile(@Body() dto: CreateAdminSpaceCommunityProfileDto, @GetUser('id') adminId: string) {
+    return this.adminService.createSpaceCommunityProfileAsAdmin(adminId, dto);
+  }
+
+  @Get('space-community-profiles')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({
+    summary: 'List all community space profiles',
+    description: 'Returns every community space profile regardless of status. Filter by `status`.',
+  })
+  @ApiOkResponse({ description: 'Paginated list of community space profiles.' })
+  listAllSpaceCommunityProfiles(@Query() query: ListSpaceCommunityProfilesQueryDto) {
+    return this.adminService.listAllSpaceCommunityProfiles(query);
+  }
+
+  @Get('space-community-profiles/revisions/pending')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({
+    summary: 'List pending community space profile revisions',
+    description: 'Already-APPROVED profiles that have an edit awaiting review.',
+  })
+  @ApiOkResponse({ description: 'Paginated list of community space profiles with a pending revision.' })
+  listPendingSpaceCommunityProfileRevisions(@Query('page') page = 1, @Query('limit') limit = 20) {
+    return this.adminService.listPendingSpaceCommunityProfileRevisions(Number(page), Number(limit));
+  }
+
+  @Get('space-community-profiles/:id')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({ summary: 'Get full community space profile detail (admin view)' })
+  @ApiParam({ name: 'id', description: 'Community space profile UUID' })
+  @ApiOkResponse({ description: 'Full community space profile detail with presigned URLs.' })
+  @ApiNotFoundResponse({ description: 'Community space profile not found.' })
+  getSpaceCommunityProfileDetail(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.getSpaceCommunityProfileDetail(id);
+  }
+
+  @Patch('space-community-profiles/:id')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @ApiOperation({
+    summary: 'Edit a community space profile directly (admin)',
+    description:
+      'Updates any/all fields on a community space profile, regardless of who created it or its current ' +
+      'approvalStatus. Writes directly — no review/approval step, unlike the space-partner-side edit flow.',
+  })
+  @ApiParam({ name: 'id', description: 'Community space profile UUID' })
+  @ApiOkResponse({ description: 'Community space profile updated.' })
+  @ApiNotFoundResponse({ description: 'Community space profile not found.' })
+  updateSpaceCommunityProfile(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateAdminSpaceCommunityProfileDto,
+    @GetUser('id') adminId: string,
+  ) {
+    return this.adminService.updateSpaceCommunityProfileAsAdmin(id, adminId, dto);
+  }
+
+  @Patch('space-community-profiles/:id/visibility')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @ApiOperation({
+    summary: 'Hide or unhide a community space profile from brand/community browse/discovery',
+    description:
+      'Does not affect the space partner\'s own platform access — they keep full dashboard access regardless. ' +
+      'Only whether brands/communities can discover this space.',
+  })
+  @ApiParam({ name: 'id', description: 'Community space profile UUID' })
+  @ApiOkResponse({ description: 'Visibility updated.' })
+  @ApiNotFoundResponse({ description: 'Community space profile not found.' })
+  setSpaceCommunityProfileVisibility(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetSpaceCommunityProfileVisibilityDto,
+    @GetUser('id') adminId: string,
+  ) {
+    return this.adminService.setSpaceCommunityProfileVisibility(id, adminId, dto.isHidden);
+  }
+
+  @Post('space-community-profiles/:id/approve')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Approve a community space profile',
+    description: 'Approves a profile in PENDING status, making it visible to brands/communities. Notifies the partner.',
+  })
+  @ApiParam({ name: 'id', description: 'Community space profile UUID' })
+  @ApiOkResponse({ description: 'Community space profile approved.' })
+  @ApiNotFoundResponse({ description: 'Community space profile not found.' })
+  @ApiBadRequestResponse({ description: 'Community space profile is not in PENDING status.' })
+  approveSpaceCommunityProfile(@Param('id', ParseUUIDPipe) id: string, @GetUser('id') adminId: string) {
+    return this.adminService.approveSpaceCommunityProfile(id, adminId);
+  }
+
+  @Post('space-community-profiles/:id/reject')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reject a community space profile',
+    description: 'Rejects a profile in PENDING status. Partner can edit and resubmit. Notifies the partner with the remark.',
+  })
+  @ApiParam({ name: 'id', description: 'Community space profile UUID' })
+  @ApiBody({ type: RejectEventDto })
+  @ApiOkResponse({ description: 'Community space profile rejected.' })
+  @ApiNotFoundResponse({ description: 'Community space profile not found.' })
+  @ApiBadRequestResponse({ description: 'Community space profile is not in PENDING status.' })
+  rejectSpaceCommunityProfile(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') adminId: string,
+    @Body() dto: RejectEventDto,
+  ) {
+    return this.adminService.rejectSpaceCommunityProfile(id, adminId, dto);
+  }
+
+  @Post('space-community-profiles/:id/revision/approve')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Approve a community space profile revision',
+    description: 'Merges the pending revision into the profile. Notifies the partner.',
+  })
+  @ApiParam({ name: 'id', description: 'Community space profile UUID' })
+  @ApiOkResponse({ description: 'Revision approved and applied.' })
+  @ApiNotFoundResponse({ description: 'Community space profile not found, or no pending revision.' })
+  approveSpaceCommunityProfileRevision(@Param('id', ParseUUIDPipe) id: string, @GetUser('id') adminId: string) {
+    return this.adminService.approveSpaceCommunityProfileRevision(id, adminId);
+  }
+
+  @Post('space-community-profiles/:id/revision/reject')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reject a community space profile revision',
+    description: 'Discards the pending revision with an admin remark. Notifies the partner.',
+  })
+  @ApiParam({ name: 'id', description: 'Community space profile UUID' })
+  @ApiBody({ type: RejectEventDto })
+  @ApiOkResponse({ description: 'Revision rejected.' })
+  @ApiNotFoundResponse({ description: 'Community space profile not found, or no pending revision.' })
+  rejectSpaceCommunityProfileRevision(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') adminId: string,
+    @Body() dto: RejectEventDto,
+  ) {
+    return this.adminService.rejectSpaceCommunityProfileRevision(id, adminId, dto);
   }
 
   @Get('hosts/:id/kyc')
