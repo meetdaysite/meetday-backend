@@ -279,4 +279,57 @@ export class SpacesService {
 
     await this.prisma.spaceCommunityProfile.deleteMany({ where: { spaceProfileId: spaceProfile.id } });
   }
+
+  // Public-ish browse list for brands/communities — admin-approved and not admin-hidden spaces
+  // only, mirrors SponsorshipService.listApprovedCommunities' shape/pattern for host communities.
+  async listApprovedCommunities() {
+    const profiles = await this.prisma.spaceCommunityProfile.findMany({
+      where: { approvalStatus: 'APPROVED', isHidden: false },
+      select: {
+        id: true,
+        spaceProfileId: true,
+        name: true,
+        about: true,
+        logoKey: true,
+        posterKey: true,
+        numberOfVenues: true,
+        venueCapacity: true,
+        communitySize: true,
+        experiencesPerYear: true,
+        activeLocations: true,
+        centreShowcaseImageKeys: true,
+        videoLink: true,
+        pastEvents: true,
+        brandsWorkedWith: true,
+        categories: { select: { category: { select: { id: true, name: true } } } },
+        spaceProfile: {
+          select: {
+            businessName: true,
+            operatingCities: true,
+            socialLinks: true,
+          },
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    const spaces = await Promise.all(
+      profiles.map(async ({ logoKey, posterKey, centreShowcaseImageKeys, categories, spaceProfile, pastEvents, brandsWorkedWith, ...rest }) => ({
+        ...rest,
+        logoUrl: logoKey ? await this.storageService.getPresignedDownloadUrl(logoKey) : null,
+        posterUrl: posterKey ? await this.storageService.getPresignedDownloadUrl(posterKey) : null,
+        centreShowcaseUrls: await Promise.all(
+          (centreShowcaseImageKeys ?? []).map((key) => this.storageService.getPresignedDownloadUrl(key)),
+        ),
+        categories: categories.map((c) => c.category),
+        businessName: spaceProfile?.businessName ?? null,
+        operatingCities: spaceProfile?.operatingCities ?? [],
+        socialLinks: spaceProfile?.socialLinks ?? null,
+        pastEvents: await this.withPastEventImageUrls(pastEvents as PastEventLike[] | null),
+        brandsWorkedWith: await this.withBrandsWorkedWithLogoUrls(brandsWorkedWith as BrandWorkedWithLike[] | null),
+      })),
+    );
+
+    return { spaces, total: spaces.length };
+  }
 }

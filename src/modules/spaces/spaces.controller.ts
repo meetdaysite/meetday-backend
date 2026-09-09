@@ -54,4 +54,15 @@ export class SpacesController {
   deactivateCommunityProfile(@GetUser('id') userId: string) {
     return this.spacesService.deactivateCommunityProfile(userId);
   }
+
+  @Get('community/browse')
+  @Roles('BRAND', 'HOST')
+  @ApiOperation({
+    summary: 'List onboarded community spaces (brand/community view)',
+    description: 'Full info for admin-approved, non-hidden Community Space profiles — for brands and communities to discover.',
+  })
+  @ApiOkResponse({ description: 'List of onboarded community spaces.' })
+  browseCommunitySpaces() {
+    return this.spacesService.listApprovedCommunities();
+  }
 }
