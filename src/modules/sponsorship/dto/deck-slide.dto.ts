@@ -1,4 +1,4 @@
-import { IsArray, IsBoolean, IsIn, IsNotEmpty, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsNotEmpty, IsNumber, IsObject, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -61,6 +61,49 @@ export class PastSponsorDto {
   @IsString()
   @MaxLength(150)
   projectReference?: string;
+}
+
+// A per-element override for the post-generation slide editor — position/size are offsets from
+// the element's default template position (not absolute coordinates), so a slide with no
+// overrides at all renders identically to the original fixed template. Values are clamped
+// server-side in ProposalPdfGeneratorService regardless of what the client sends.
+export class DeckElementStyleDto {
+  @ApiPropertyOptional({ description: 'Horizontal offset in px from default position' })
+  @IsOptional()
+  @IsNumber()
+  x?: number;
+
+  @ApiPropertyOptional({ description: 'Vertical offset in px from default position' })
+  @IsOptional()
+  @IsNumber()
+  y?: number;
+
+  @ApiPropertyOptional({ description: 'Scale multiplier applied to the element\'s default size' })
+  @IsOptional()
+  @IsNumber()
+  scale?: number;
+
+  @ApiPropertyOptional({ description: 'Font size in px (text elements only)' })
+  @IsOptional()
+  @IsNumber()
+  fontSize?: number;
+
+  @ApiPropertyOptional({ example: 'serif' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  fontFamily?: string;
+
+  @ApiPropertyOptional({ example: '#111111' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(9)
+  color?: string;
+
+  @ApiPropertyOptional({ description: 'Font weight (text elements only)' })
+  @IsOptional()
+  @IsNumber()
+  fontWeight?: number;
 }
 
 // A single editable slide — the shape is a superset covering every layout; only the fields
@@ -142,4 +185,20 @@ export class DeckSlideDto {
   @IsOptional()
   @IsString()
   sponsorshipDeadline?: string;
+
+  // Post-generation editor state — keyed by a stable element "slot" id (e.g. "title", "body",
+  // "kicker", "hero", "gallery-0"). Only slots present in the current layout are meaningful;
+  // unknown/stale keys (e.g. left over from switching layouts) are silently ignored at render time.
+  @ApiPropertyOptional({ description: 'Per-element position/size/font overrides, keyed by element slot id' })
+  @IsOptional()
+  @IsObject()
+  elementStyles?: Record<string, DeckElementStyleDto>;
+
+  // Replacement image GCS keys per image slot id (e.g. "hero", "gallery-0", "gallery-1") — lets
+  // the user swap an AI/host-picked image after seeing the generated slide, without regenerating
+  // the whole deck. Resolved to a data URI the same way as the deck's other images.
+  @ApiPropertyOptional({ description: 'Replacement image keys per image slot id' })
+  @IsOptional()
+  @IsObject()
+  imageOverrides?: Record<string, string>;
 }

@@ -56,14 +56,16 @@ export class ProposalPdfGeneratorService {
     const aboutGalleryUris = resolvedGalleryUris.slice(1, 3);
     const whySponsorGalleryUris = resolvedGalleryUris.slice(3, 5);
 
-    // Past-sponsor logos need the same key -> data-URI treatment as the deck's own logos.
+    // Past-sponsor logos, and any per-slide image-slot replacements picked in the post-generation
+    // editor, need the same key -> data-URI treatment as the deck's own logos.
     const slidesWithResolvedLogos = await Promise.all(
       dto.slides.map(async (slide) => {
-        if (slide.layout !== 'PAST_SPONSORS' || !slide.pastSponsors?.length) return slide;
+        const imageOverrideUris = await this.resolveImageOverrides(slide);
+        if (slide.layout !== 'PAST_SPONSORS' || !slide.pastSponsors?.length) return { ...slide, imageOverrideUris };
         const resolved = await Promise.all(
           slide.pastSponsors.map(async (p) => ({ ...p, logoUri: await this.keyToDataUri(p.logoKey) })),
         );
-        return { ...slide, resolvedPastSponsors: resolved };
+        return { ...slide, resolvedPastSponsors: resolved, imageOverrideUris };
       }),
     );
 
@@ -94,6 +96,7 @@ export class ProposalPdfGeneratorService {
           // "About <Host>" (index 2) and "Why Sponsor This" (index 4) are fixed positions in
           // the 10-slide template — each gets up to 2 of the remaining brand images.
           galleryUris: index === 2 ? aboutGalleryUris : index === 4 ? whySponsorGalleryUris : [],
+          imageOverrideUris: slide.imageOverrideUris,
         });
       })
       .join('');
@@ -324,6 +327,36 @@ export class ProposalPdfGeneratorService {
     return this.rgbToHex(r + (tr - r) * ratio, g + (tg - g) * ratio, b + (tb - b) * ratio);
   }
 
+  // Turns a client-supplied per-element override into a safe inline `style="..."` attribute —
+  // clamps every numeric value regardless of what was sent, so the post-generation slide editor
+  // can't push an element off-slide or make text unusably huge/tiny. Returns '' when the slide
+  // has no override for this slot, so an untouched slide renders byte-identical to before.
+  private styleAttr(slide: DeckSlideDto, slotId: string): string {
+    const s = slide.elementStyles?.[slotId];
+    if (!s) return '';
+    const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+    const parts: string[] = [];
+    const x = typeof s.x === 'number' ? clamp(s.x, -400, 400) : 0;
+    const y = typeof s.y === 'number' ? clamp(s.y, -400, 400) : 0;
+    const scale = typeof s.scale === 'number' ? clamp(s.scale, 0.4, 3) : 1;
+    if (x !== 0 || y !== 0 || scale !== 1) parts.push(`transform: translate(${x}px, ${y}px) scale(${scale})`);
+    if (typeof s.fontSize === 'number') parts.push(`font-size: ${clamp(s.fontSize, 10, 140)}px`);
+    if (typeof s.fontWeight === 'number') parts.push(`font-weight: ${clamp(s.fontWeight, 100, 900)}`);
+    if (typeof s.fontFamily === 'string' && /^[a-zA-Z0-9 ,'-]{1,60}$/.test(s.fontFamily)) parts.push(`font-family: ${s.fontFamily}`);
+    if (typeof s.color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(s.color)) parts.push(`color: ${s.color}`);
+    return parts.length ? ` style="${parts.join('; ')}"` : '';
+  }
+
+  // Resolves per-slide image-slot overrides (e.g. a replacement hero/gallery image picked in the
+  // post-generation editor) into data URIs the same way as every other deck image.
+  private async resolveImageOverrides(slide: DeckSlideDto): Promise<Record<string, string | null>> {
+    if (!slide.imageOverrides) return {};
+    const entries = await Promise.all(
+      Object.entries(slide.imageOverrides).map(async ([slotId, key]) => [slotId, await this.keyToDataUri(key)] as const),
+    );
+    return Object.fromEntries(entries);
+  }
+
   private renderSlide(
     slide: DeckSlideDto & { resolvedPastSponsors?: Array<{ name: string; projectReference?: string; logoUri: string | null }> },
     opts: {
@@ -342,6 +375,7 @@ export class ProposalPdfGeneratorService {
       isLast: boolean;
       heroImageUri: string | null;
       galleryUris: string[];
+      imageOverrideUris: Record<string, string | null>;
     },
   ): string {
     const nl2p = (text?: string) =>
@@ -356,7 +390,7 @@ export class ProposalPdfGeneratorService {
     const logoBlock = opts.logoNeedsChip ? `<div class="logo-chip">${logoImg}</div>` : logoImg;
 
     const kicker = kickerFor(slide.layout, opts.index);
-    const kickerHtml = kicker ? `<span class="kicker">${kicker}</span>` : '';
+    const kickerHtml = kicker ? `<span class="kicker"${this.styleAttr(slide, 'kicker')}>${kicker}</span>` : '';
 
     let body = '';
     switch (slide.layout) {
@@ -365,14 +399,15 @@ export class ProposalPdfGeneratorService {
         const metaRow = metaParts.length
           ? `<div class="meta-row">${metaParts.map((m) => `<span class="meta-badge">${escapeHtml(m)}</span>`).join('')}</div>`
           : '';
-        const hasImage = !!opts.heroImageUri;
+        const heroUri = opts.imageOverrideUris['hero'] ?? opts.heroImageUri;
+        const hasImage = !!heroUri;
         const visual = hasImage
-          ? `<div class="visual-col"><div class="visual-frame hero-image-frame"><img src="${opts.heroImageUri}" alt="" /></div></div>`
+          ? `<div class="visual-col"><div class="visual-frame hero-image-frame"><img src="${heroUri}" alt="" /></div></div>`
           : `<div class="decor-shape"></div>`;
         body = `<div class="cover-grid${hasImage ? '' : ' no-image'}">
-            <div class="content-col">
-              <h1>${escapeHtml(slide.title)}</h1>
-              ${slide.subtitle ? `<p class="subtitle">${escapeHtml(slide.subtitle)}</p>` : ''}
+            <div class="content-col"${this.styleAttr(slide, 'body')}>
+              <h1${this.styleAttr(slide, 'title')}>${escapeHtml(slide.title)}</h1>
+              ${slide.subtitle ? `<p class="subtitle"${this.styleAttr(slide, 'subtitle')}>${escapeHtml(slide.subtitle)}</p>` : ''}
               ${metaRow}
             </div>
             ${visual}
@@ -380,14 +415,17 @@ export class ProposalPdfGeneratorService {
         break;
       }
       case 'VALUE_PROP': {
-        const hasGallery = opts.galleryUris.length > 0;
+        const galleryUris = [opts.imageOverrideUris['gallery-0'] ?? opts.galleryUris[0], opts.imageOverrideUris['gallery-1'] ?? opts.galleryUris[1]].filter(
+          (u): u is string => !!u,
+        );
+        const hasGallery = galleryUris.length > 0;
         const visual = hasGallery
-          ? `<div class="visual-col">${opts.galleryUris.map((u) => `<div class="visual-frame"><img src="${u}" alt="" /></div>`).join('')}</div>`
+          ? `<div class="visual-col">${galleryUris.map((u) => `<div class="visual-frame"><img src="${u}" alt="" /></div>`).join('')}</div>`
           : `<div class="decor-shape"></div>`;
         body = `<div class="content-grid${hasGallery ? '' : ' full'}">
-            <div class="content-col">
+            <div class="content-col"${this.styleAttr(slide, 'body')}>
               ${kickerHtml}
-              <h2>${escapeHtml(slide.title)}</h2>
+              <h2${this.styleAttr(slide, 'title')}>${escapeHtml(slide.title)}</h2>
               <div class="accent-rule"></div>
               ${nl2p(slide.body)}
             </div>
@@ -398,19 +436,19 @@ export class ProposalPdfGeneratorService {
       case 'STAT_HIGHLIGHT': {
         const stats = (slide.stats ?? [])
           .map(
-            (s) => `<div class="stat-card"><div class="stat-value">${escapeHtml(s.value)}</div><div class="stat-label">${escapeHtml(s.label)}</div></div>`,
+            (s, i) => `<div class="stat-card"${this.styleAttr(slide, `stat-${i}`)}><div class="stat-value">${escapeHtml(s.value)}</div><div class="stat-label">${escapeHtml(s.label)}</div></div>`,
           )
           .join('');
-        body = `<div class="content-grid full"><div class="content-col">
-            ${kickerHtml}<h2>${escapeHtml(slide.title)}</h2><div class="accent-rule"></div>
+        body = `<div class="content-grid full"><div class="content-col"${this.styleAttr(slide, 'body')}>
+            ${kickerHtml}<h2${this.styleAttr(slide, 'title')}>${escapeHtml(slide.title)}</h2><div class="accent-rule"></div>
             ${nl2p(slide.body)}<div class="stats-grid">${stats}</div>
           </div><div class="decor-shape"></div></div>`;
         break;
       }
       case 'BULLET_LIST': {
-        const items = (slide.bullets ?? []).map((b) => `<li>${escapeHtml(b)}</li>`).join('');
-        body = `<div class="content-grid full"><div class="content-col">
-            ${kickerHtml}<h2>${escapeHtml(slide.title)}</h2><div class="accent-rule"></div>
+        const items = (slide.bullets ?? []).map((b, i) => `<li${this.styleAttr(slide, `bullet-${i}`)}>${escapeHtml(b)}</li>`).join('');
+        body = `<div class="content-grid full"><div class="content-col"${this.styleAttr(slide, 'body')}>
+            ${kickerHtml}<h2${this.styleAttr(slide, 'title')}>${escapeHtml(slide.title)}</h2><div class="accent-rule"></div>
             <ul class="bullet-list">${items}</ul>
           </div><div class="decor-shape"></div></div>`;
         break;
@@ -419,15 +457,15 @@ export class ProposalPdfGeneratorService {
         const sponsors = slide.resolvedPastSponsors ?? [];
         const cards = sponsors
           .map(
-            (s) => `<div class="sponsor-card">
+            (s, i) => `<div class="sponsor-card"${this.styleAttr(slide, `sponsor-${i}`)}>
               ${s.logoUri ? `<img class="sponsor-logo" src="${s.logoUri}" alt="${escapeHtml(s.name)}" />` : `<span class="sponsor-name">${escapeHtml(s.name)}</span>`}
               ${s.logoUri ? `<span class="sponsor-name">${escapeHtml(s.name)}</span>` : ''}
               ${s.projectReference ? `<span class="sponsor-ref">${escapeHtml(s.projectReference)}</span>` : ''}
             </div>`,
           )
           .join('');
-        body = `<div class="content-grid full"><div class="content-col">
-            ${kickerHtml}<h2>${escapeHtml(slide.title)}</h2><div class="accent-rule"></div>
+        body = `<div class="content-grid full"><div class="content-col"${this.styleAttr(slide, 'body')}>
+            ${kickerHtml}<h2${this.styleAttr(slide, 'title')}>${escapeHtml(slide.title)}</h2><div class="accent-rule"></div>
             ${sponsors.length ? `<div class="sponsors-grid">${cards}</div>` : `<div class="empty-state">${nl2p(slide.body)}</div>`}
           </div><div class="decor-shape"></div></div>`;
         break;
@@ -435,13 +473,13 @@ export class ProposalPdfGeneratorService {
       case 'PRICING_COMPARISON': {
         const tiers = (slide.pricingTiers ?? [])
           .map(
-            (t) => `<div class="tier"><span class="tier-name">${escapeHtml(t.name)}</span><span class="tier-price">${escapeHtml(this.formatTierPrice(t.price))}</span></div>`,
+            (t, i) => `<div class="tier"${this.styleAttr(slide, `tier-${i}`)}><span class="tier-name">${escapeHtml(t.name)}</span><span class="tier-price">${escapeHtml(this.formatTierPrice(t.price))}</span></div>`,
           )
           .join('');
         const barter = slide.openToBarter ? `<span class="barter-badge">Open to Barter</span>` : '';
         const deadline = slide.sponsorshipDeadline ? `<p class="deadline-note">Sponsorship deadline: ${escapeHtml(slide.sponsorshipDeadline)}</p>` : '';
-        body = `<div class="content-grid full"><div class="content-col">
-            ${kickerHtml}<h2>${escapeHtml(slide.title)}</h2><div class="accent-rule"></div>
+        body = `<div class="content-grid full"><div class="content-col"${this.styleAttr(slide, 'body')}>
+            ${kickerHtml}<h2${this.styleAttr(slide, 'title')}>${escapeHtml(slide.title)}</h2><div class="accent-rule"></div>
             <div class="tiers">${tiers}</div>${barter}${deadline}${nl2p(slide.body)}
           </div><div class="decor-shape"></div></div>`;
         break;
@@ -454,8 +492,8 @@ export class ProposalPdfGeneratorService {
               ${slide.contactPhone ? `<p><span class="contact-label">Phone:</span> ${escapeHtml(slide.contactPhone)}</p>` : ''}
             </div>`
           : '';
-        body = `<div class="content-grid full"><div class="content-col">
-            ${kickerHtml}<h2>${escapeHtml(slide.title)}</h2><div class="accent-rule"></div>
+        body = `<div class="content-grid full"><div class="content-col"${this.styleAttr(slide, 'body')}>
+            ${kickerHtml}<h2${this.styleAttr(slide, 'title')}>${escapeHtml(slide.title)}</h2><div class="accent-rule"></div>
             ${nl2p(slide.body)}${contact}
           </div><div class="decor-shape"></div></div>`;
         break;
