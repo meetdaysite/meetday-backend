@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { CategoryType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../common/redis/redis.service';
 
@@ -12,21 +13,25 @@ export class CategoriesService {
     private readonly redis: RedisService,
   ) {}
 
-  async listPublic() {
-    const cached = await this.redis.get<{ id: string; name: string; description: string | null }[]>(CATEGORIES_KEY);
+  // Defaults to EXPERIENCE so every existing caller (host/community/event category pickers)
+  // keeps seeing exactly what it saw before this param existed — SPACE is opt-in.
+  async listPublic(type: CategoryType = 'EXPERIENCE') {
+    const cacheKey = `${CATEGORIES_KEY}:${type}`;
+    const cached = await this.redis.get<{ id: string; name: string; description: string | null }[]>(cacheKey);
     if (cached) return cached;
 
     const categories = await this.prisma.category.findMany({
-      where: { isActive: true } as any,
+      where: { isActive: true, type },
       select: { id: true, name: true, description: true },
       orderBy: { name: 'asc' },
     });
 
-    await this.redis.set(CATEGORIES_KEY, categories, CATEGORIES_TTL);
+    await this.redis.set(cacheKey, categories, CATEGORIES_TTL);
     return categories;
   }
 
   async invalidateCache() {
-    await this.redis.del(CATEGORIES_KEY);
+    await this.redis.del(`${CATEGORIES_KEY}:EXPERIENCE`);
+    await this.redis.del(`${CATEGORIES_KEY}:SPACE`);
   }
 }

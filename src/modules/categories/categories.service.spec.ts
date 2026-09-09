@@ -67,7 +67,7 @@ describe('CategoriesService', () => {
 
       const result = await service.listPublic();
       expect(prisma.category.findMany).toHaveBeenCalledTimes(1);
-      expect(redis.set).toHaveBeenCalledWith('categories:public', dbCategories, 300);
+      expect(redis.set).toHaveBeenCalledWith('categories:public:EXPERIENCE', dbCategories, 300);
       expect(result).toEqual(dbCategories);
     });
   });
@@ -75,10 +75,11 @@ describe('CategoriesService', () => {
   // ── invalidateCache ───────────────────────────────────────────────────────
 
   describe('invalidateCache()', () => {
-    it('deletes the categories cache key', async () => {
+    it('deletes both the EXPERIENCE and SPACE categories cache keys', async () => {
       redis.del.mockResolvedValue(undefined);
       await service.invalidateCache();
-      expect(redis.del).toHaveBeenCalledWith('categories:public');
+      expect(redis.del).toHaveBeenCalledWith('categories:public:EXPERIENCE');
+      expect(redis.del).toHaveBeenCalledWith('categories:public:SPACE');
     });
   });
 });

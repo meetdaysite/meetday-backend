@@ -1,5 +1,6 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
-import { ApiExcludeEndpoint, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { ApiExcludeEndpoint, ApiOkResponse, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { CategoryType } from '@prisma/client';
 import { CategoriesService } from './categories.service';
 import { Public } from '../../common/decorators/public.decorator';
 import { InternalApiKeyGuard } from '../../common/guards/internal-api-key.guard';
@@ -12,11 +13,12 @@ export class CategoriesController {
   @Get()
   @Public()
   @ApiOperation({
-    summary: 'List active experience categories',
+    summary: 'List active categories',
     description:
-      'Returns all active experience categories. No authentication required. ' +
-      'Used to populate category selection during host registration or profile update.',
+      'Returns all active categories of the given type (defaults to EXPERIENCE). No authentication required. ' +
+      'Used to populate category selection during host/space registration or profile update.',
   })
+  @ApiQuery({ name: 'type', enum: ['EXPERIENCE', 'SPACE'], required: false })
   @ApiOkResponse({
     description: 'List of active categories.',
     schema: {
@@ -30,8 +32,8 @@ export class CategoriesController {
       },
     },
   })
-  list() {
-    return this.categoriesService.listPublic();
+  list(@Query('type') type?: CategoryType) {
+    return this.categoriesService.listPublic(type);
   }
 
   @Get('internal')
