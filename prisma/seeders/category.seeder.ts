@@ -25,6 +25,18 @@ const categories = [
   { name: 'Jamming Sessions', description: 'Informal music jams where musicians of all levels play and collaborate together' },
 ];
 
+// Community Space categories — a separate discriminated set (type: SPACE) describing what kind
+// of physical space is being listed, distinct from the EXPERIENCE categories above.
+const spaceCategories = [
+  { name: 'Co-working', description: 'Shared/flexible workspaces for individuals and teams', type: 'SPACE' as const },
+  { name: 'Gym', description: 'Fitness centres and gyms', type: 'SPACE' as const },
+  { name: 'Wellness Centre', description: 'Spaces focused on wellness, spa, and holistic health', type: 'SPACE' as const },
+  { name: 'Sports Centre', description: 'Facilities for sports and athletic activities', type: 'SPACE' as const },
+  { name: 'Community Centre', description: 'General-purpose community gathering spaces', type: 'SPACE' as const },
+  { name: 'Social Club', description: 'Members clubs and social spaces', type: 'SPACE' as const },
+  { name: 'Others', description: 'Other kinds of community spaces', type: 'SPACE' as const },
+];
+
 export async function seedCategories(prisma: PrismaClient): Promise<void> {
   console.log('\n[Categories]');
 
@@ -34,7 +46,7 @@ export async function seedCategories(prisma: PrismaClient): Promise<void> {
   let created = 0;
   let skipped = 0;
 
-  for (const category of categories) {
+  for (const category of [...categories, ...spaceCategories]) {
     if (existingNames.has(category.name)) {
       console.log(`  SKIP    ${category.name}`);
       skipped++;

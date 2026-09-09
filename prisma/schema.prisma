@@ -16,8 +16,8 @@ model Role {
   name        String  @unique
   description String?
 
-  users        User[]
-  adminOfUsers User[] @relation("UserAdminRole")
+  users               User[]
+  adminOfUsers        User[] @relation("UserAdminRole")
   pendingAdminOfUsers User[] @relation("UserPendingAdminRole")
 
   createdAt DateTime @default(now())
@@ -82,10 +82,11 @@ model User {
   createdCoupons    Coupon[]           @relation("CouponCreatedBy")
   couponRedemptions CouponRedemption[] @relation("CouponRedemptions")
 
-  reviewedEvents               Event[]                @relation("EventReviewedBy")
-  reviewedRevisions            EventRevision[]        @relation("EventRevisionReviewedBy")
-  reviewedSponsorshipProposals SponsorshipProposal[]  @relation("SponsorshipProposalReviewedBy")
-  reviewedCommunityProfiles    HostCommunityProfile[] @relation("CommunityProfileReviewedBy")
+  reviewedEvents                 Event[]                 @relation("EventReviewedBy")
+  reviewedRevisions              EventRevision[]         @relation("EventRevisionReviewedBy")
+  reviewedSponsorshipProposals   SponsorshipProposal[]   @relation("SponsorshipProposalReviewedBy")
+  reviewedCommunityProfiles      HostCommunityProfile[]  @relation("CommunityProfileReviewedBy")
+  reviewedSpaceCommunityProfiles SpaceCommunityProfile[] @relation("SpaceCommunityProfileReviewedBy")
 
   notifications Notification[]
 
@@ -310,10 +311,13 @@ model UserInterestAffinity {
 }
 
 model Category {
-  id          String  @id @default(uuid())
-  name        String  @unique
+  id          String       @id @default(uuid())
+  name        String       @unique
   description String?
-  isActive    Boolean @default(true)
+  isActive    Boolean      @default(true)
+  // EXPERIENCE = event/host categories (existing default). SPACE = community-space categories
+  // (Co-working, Gym, etc.) — same model, discriminated by type instead of a separate table.
+  type        CategoryType @default(EXPERIENCE)
 
   interestMappings          InterestCategory[]
   hostExperienceCategories  HostExperienceCategory[]
@@ -322,11 +326,17 @@ model Category {
   highlights                CategoryHighlight[]
   communities               Community[]
   hostCommunityProfiles     HostCommunityProfileCategory[]
+  spaceCommunityProfiles    SpaceCommunityProfileCategory[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("categories")
+}
+
+enum CategoryType {
+  EXPERIENCE
+  SPACE
 }
 
 model CategoryHighlight {
@@ -454,9 +464,9 @@ model BrandProfile {
   aboutCompany String?      @db.Text
   industry     String? // preset dropdown value or free text ("Custom")
 
-  categories BrandExperienceCategory[]
-  interests  SponsorshipInterest[]
-  campaigns  Campaign[]
+  categories  BrandExperienceCategory[]
+  interests   SponsorshipInterest[]
+  campaigns   Campaign[]
   teamMembers BrandTeamMember[]
 
   approvalStatus HostApprovalStatus @default(PENDING)
@@ -487,7 +497,7 @@ model Campaign {
   status               SponsorshipStatus @default(DRAFT)
   adminRejectionRemark String?           @db.Text
 
-  interests            SponsorshipInterest[]
+  interests SponsorshipInterest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -500,18 +510,84 @@ model Campaign {
 // Profile for SPACE_PARTNER accounts — venue & space partners list their spaces,
 // locations, and audience capacity.
 model SpaceProfile {
-  id              String   @id @default(uuid())
-  userId          String   @unique
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   businessName    String
   operatingCities String[] @default([])
   phone           String?
+  socialLinks     Json? // { instagram, linkedin, youtube, website }
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  communityProfile SpaceCommunityProfile?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("space_profiles")
+}
+
+// "Community Space Profile" — the public-facing listing a space partner activates, shown to
+// brands/communities once approved. Mirrors HostCommunityProfile's shape/workflow exactly
+// (same approval lifecycle, revision-staging pattern, past events/brands showcase JSON shapes).
+model SpaceCommunityProfile {
+  id             String       @id @default(uuid())
+  spaceProfileId String       @unique
+  spaceProfile   SpaceProfile @relation(fields: [spaceProfileId], references: [id], onDelete: Cascade)
+
+  name                    String
+  about                   String   @db.Text
+  logoKey                 String // 1:1 asset
+  posterKey               String? // "Highlight Poster" — optional 4:5 asset
+  numberOfVenues          String // Number of venues / event spaces at the location
+  venueCapacity           String // Max capacity per venue
+  communitySize           String // Number of active members in the space
+  experiencesPerYear      String
+  activeLocations         String[] @default([])
+  centreShowcaseImageKeys String[] @default([]) // Photographs of the centre
+  videoLink               String?
+
+  // Optional showcase of past events — array of { name?, description?, imageKeys: string[] }
+  // (max 2 imageKeys each), same shape as HostCommunityProfile.pastEvents.
+  pastEvents Json?
+
+  // Optional showcase of past brand partners — array of { brandName?, logoKey?, url? },
+  // same shape as HostCommunityProfile.brandsWorkedWith.
+  brandsWorkedWith Json?
+
+  categories SpaceCommunityProfileCategory[]
+
+  // Edits to an already-APPROVED profile are staged here instead of overwriting the live
+  // fields — same pattern as HostCommunityProfile.pendingRevision.
+  pendingRevision Json?
+
+  approvalStatus       HostApprovalStatus @default(PENDING)
+  adminRejectionRemark String?
+  reviewedBy           String?
+  reviewedByUser       User?              @relation("SpaceCommunityProfileReviewedBy", fields: [reviewedBy], references: [id])
+  reviewedAt           DateTime?
+
+  // Admin-only kill switch — hides the space from brands'/communities' browse view.
+  isHidden Boolean @default(false)
+
+  activatedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([approvalStatus])
+  @@map("space_community_profiles")
+}
+
+model SpaceCommunityProfileCategory {
+  spaceCommunityProfileId String
+  categoryId              String
+
+  spaceCommunityProfile SpaceCommunityProfile @relation(fields: [spaceCommunityProfileId], references: [id], onDelete: Cascade)
+  category              Category              @relation(fields: [categoryId], references: [id])
+
+  @@id([spaceCommunityProfileId, categoryId])
+  @@index([categoryId])
+  @@map("space_community_profile_categories")
 }
 
 enum CompanyType {
@@ -1440,14 +1516,14 @@ model BrandTeamMember {
   userId String?
   user   User?   @relation("BrandTeamMemberUser", fields: [userId], references: [id], onDelete: Cascade)
 
-  status    TeamMemberStatus @default(PENDING)
-  invitedBy String
-  inviter   User             @relation("BrandTeamMemberInvitedBy", fields: [invitedBy], references: [id])
-  joinedAt  DateTime?
+  status           TeamMemberStatus @default(PENDING)
+  invitedBy        String
+  inviter          User             @relation("BrandTeamMemberInvitedBy", fields: [invitedBy], references: [id])
+  joinedAt         DateTime?
   // Whether this member can invite/remove other members (owner always can, regardless of this
   // flag) — defaults to true so "everybody can add members" is the out-of-the-box behavior;
   // the owner can revoke it per member, WhatsApp-group-admin style.
-  canManageMembers Boolean @default(true)
+  canManageMembers Boolean          @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1469,12 +1545,12 @@ model HostTeamMember {
   userId String?
   user   User?   @relation("HostTeamMemberUser", fields: [userId], references: [id], onDelete: Cascade)
 
-  status    TeamMemberStatus @default(PENDING)
-  invitedBy String
-  inviter   User             @relation("HostTeamMemberInvitedBy", fields: [invitedBy], references: [id])
-  joinedAt  DateTime?
+  status           TeamMemberStatus @default(PENDING)
+  invitedBy        String
+  inviter          User             @relation("HostTeamMemberInvitedBy", fields: [invitedBy], references: [id])
+  joinedAt         DateTime?
   // See BrandTeamMember.canManageMembers.
-  canManageMembers Boolean @default(true)
+  canManageMembers Boolean          @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
