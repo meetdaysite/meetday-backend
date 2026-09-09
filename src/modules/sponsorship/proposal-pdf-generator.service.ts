@@ -81,6 +81,9 @@ export class ProposalPdfGeneratorService {
           bgColor: bg === 'dark' ? this.mix(bgAccent, [0, 0, 0], 0.82) : this.mix(bgAccent, [255, 255, 255], 0.94),
           primaryColor: rotatingPrimary,
           accentColor: rotatingAccent,
+          primaryTextColor: this.legibleTextColor(rotatingPrimary, bg),
+          accentTextColor: this.legibleTextColor(rotatingAccent, bg),
+          badgeTextColor: this.contrastOn(rotatingPrimary),
           logo,
           logoNeedsChip: usingFallbackLogo && !!logo,
           logoLarge: isBookend,
@@ -120,7 +123,7 @@ export class ProposalPdfGeneratorService {
   .logo-large { height: 90px; max-width: 320px; }
   .slide-label { font-size: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: ${minimalist ? '0.16em' : '0.08em'}; opacity: 0.6; }
   .slide-body { flex: 1; display: flex; flex-direction: column; position: relative; z-index: 1; min-height: 0; }
-  .kicker { display: inline-block; font-size: 14px; font-weight: 900; letter-spacing: 0.14em; color: var(--accent); margin-bottom: 10px; }
+  .kicker { display: inline-block; font-size: 14px; font-weight: 900; letter-spacing: 0.14em; color: var(--accent-text); margin-bottom: 10px; }
   .slide-body h1 { font-family: ${fonts.heading}; font-size: 56px; font-weight: ${minimalist ? 300 : 900}; letter-spacing: -0.01em; margin: 0 0 14px; line-height: 1.08; }
   .slide-body h2 { font-family: ${fonts.heading}; font-size: 36px; font-weight: ${minimalist ? 300 : 900}; letter-spacing: -0.01em; margin: 0 0 8px; line-height: 1.12; }
   .accent-rule { width: 64px; height: 5px; border-radius: 3px; background: var(--accent); margin: 0 0 22px; }
@@ -138,7 +141,8 @@ export class ProposalPdfGeneratorService {
   .cover-grid .content-col, .content-grid .content-col { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
   .visual-col { position: relative; height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 16px; }
   .visual-frame { flex: 1; border-radius: 24px; display: flex; align-items: center; justify-content: center; overflow: hidden;
-    background: color-mix(in srgb, var(--primary) 12%, transparent); border: 2px solid color-mix(in srgb, var(--primary) 30%, transparent); padding: 14px; min-height: 0; }
+    background: color-mix(in srgb, var(--primary) 12%, transparent); border: 2px solid color-mix(in srgb, var(--primary) 30%, transparent); padding: 14px; min-height: 0;
+    box-shadow: 0 18px 36px -18px color-mix(in srgb, var(--primary) 55%, transparent); }
   .visual-frame img { max-width: 100%; max-height: 100%; object-fit: contain; }
   .hero-image-frame { height: 100%; }
 
@@ -146,33 +150,38 @@ export class ProposalPdfGeneratorService {
      Uses the accent color (usually the more vibrant of the two rotating palettes) rather than
      primary, since primary is sometimes a deliberately dark/near-black brand color that would
      otherwise look like a muddy gray wash instead of a colorful flourish. */
-  .decor-shape { position: absolute; top: -20%; right: -14%; width: 34%; height: 75%; border-radius: 50%;
+  .decor-shape { position: absolute; top: -20%; right: -14%; width: 34%; height: 75%; border-radius: 50%; filter: blur(2px);
     background: color-mix(in srgb, var(--accent) 9%, transparent); z-index: -1; pointer-events: none; }
   .decor-shape::after { content: ''; position: absolute; bottom: -8%; left: 6%; width: 30%; height: 30%; border-radius: 50%;
     background: color-mix(in srgb, var(--primary) 8%, transparent); }
 
-  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 20px; margin-top: 20px; }
-  .stat-card { border: 2px solid var(--primary); border-radius: 18px; padding: 24px 26px; background: color-mix(in srgb, var(--primary) 6%, transparent); }
-  .stat-value { font-size: 42px; font-weight: 900; color: var(--primary); }
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 300px)); gap: 20px; margin-top: 20px; }
+  .stat-card { border: 2px solid var(--primary); border-radius: 18px; padding: 24px 26px; background: color-mix(in srgb, var(--primary) 6%, transparent);
+    box-shadow: 0 10px 24px -12px color-mix(in srgb, var(--primary) 45%, transparent); }
+  .stat-value { font-size: 42px; font-weight: 900; color: var(--primary-text); }
   .stat-label { font-size: 14px; font-weight: 700; opacity: 0.65; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 6px; }
-  .bullet-list { list-style: none; margin: 20px 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px 32px; }
+  .bullet-list { list-style: none; margin: 20px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 480px)); gap: 18px 32px; }
   .bullet-list li { font-size: 22px; padding: 16px 20px 16px 44px; position: relative; opacity: 0.95; border-radius: 14px;
-    background: color-mix(in srgb, var(--primary) 6%, transparent); }
+    background: color-mix(in srgb, var(--primary) 6%, transparent); box-shadow: 0 10px 24px -14px color-mix(in srgb, var(--primary) 40%, transparent); }
   .bullet-list li::before { content: ''; position: absolute; left: 18px; top: 24px; width: 12px; height: 12px; border-radius: 50%; background: var(--primary); }
-  .tiers { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; margin-top: 20px; }
+  .tiers { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 340px)); gap: 18px; margin-top: 20px; }
   .tier { display: flex; flex-direction: column; gap: 6px; border: 2px solid var(--primary); border-radius: 18px; padding: 20px 24px;
-    background: color-mix(in srgb, var(--primary) 6%, transparent); }
+    background: color-mix(in srgb, var(--primary) 6%, transparent); box-shadow: 0 10px 24px -12px color-mix(in srgb, var(--primary) 45%, transparent); }
   .tier-name { font-weight: 700; font-size: 19px; opacity: 0.75; }
-  .tier-price { font-weight: 900; font-size: 28px; color: var(--primary); }
+  .tier-price { font-weight: 900; font-size: 28px; color: var(--primary-text); }
   .contact-block p { margin: 0 0 8px; font-size: 22px; }
   .contact-block .contact-label { opacity: 0.6; font-weight: 600; }
-  .sponsors-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 20px; margin-top: 20px; }
+  .sponsors-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 260px)); gap: 20px; margin-top: 20px; }
   .sponsor-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; border: 2px solid var(--primary);
-    border-radius: 18px; padding: 24px; min-height: 120px; background: color-mix(in srgb, var(--primary) 6%, transparent); }
+    border-radius: 18px; padding: 24px; min-height: 120px; background: color-mix(in srgb, var(--primary) 6%, transparent);
+    box-shadow: 0 10px 24px -12px color-mix(in srgb, var(--primary) 45%, transparent); }
   .sponsor-logo { height: 44px; max-width: 130px; object-fit: contain; }
   .sponsor-name { font-weight: 700; font-size: 17px; }
   .sponsor-ref { font-size: 13px; opacity: 0.6; }
-  .barter-badge { display: inline-block; margin-top: 16px; padding: 8px 18px; border-radius: 999px; font-size: 14px; font-weight: 700; background: var(--primary); color: #fff; }
+  .empty-state { flex: 1; display: flex; align-items: center; justify-content: center; margin-top: 20px; border-radius: 20px;
+    border: 2px dashed color-mix(in srgb, var(--primary) 40%, transparent); padding: 48px; text-align: center; }
+  .empty-state p { font-size: 20px; font-style: italic; opacity: 0.6; margin: 0; max-width: 480px; }
+  .barter-badge { display: inline-block; margin-top: 16px; padding: 8px 18px; border-radius: 999px; font-size: 14px; font-weight: 700; background: var(--primary); color: var(--badge-text); }
   .deadline-note { font-size: 16px; opacity: 0.7; margin-top: 12px; }
   .slide-footer { display: flex; align-items: center; justify-content: space-between; padding-top: 14px; margin-top: 20px;
     border-top: 1px solid currentColor; opacity: 0.55; font-size: 11px; position: relative; z-index: 1; }
@@ -196,7 +205,7 @@ export class ProposalPdfGeneratorService {
   body.style-executive .stats-grid { counter-reset: stat-badge; }
   body.style-executive .stat-card { counter-increment: stat-badge; position: relative; padding-left: 30px; }
   body.style-executive .stat-card::before { content: counter(stat-badge); position: absolute; top: -12px; left: -12px; width: 28px; height: 28px;
-    border-radius: 50%; background: var(--primary); color: #fff; font-size: 13px; font-weight: 900; display: flex; align-items: center; justify-content: center; }
+    border-radius: 50%; background: var(--primary); color: var(--badge-text); font-size: 13px; font-weight: 900; display: flex; align-items: center; justify-content: center; }
   body.style-executive .decor-shape { border-radius: 4px; transform: rotate(8deg); background: color-mix(in srgb, var(--accent) 7%, transparent); }
   body.style-executive .decor-shape::after { border-radius: 4px; }
   body.style-executive .progress-dots span { border-radius: 2px; }
@@ -270,6 +279,42 @@ export class ProposalPdfGeneratorService {
     );
   }
 
+  // WCAG relative luminance — used to detect brand colors too pale/light (or too dark) to read
+  // as TEXT against a given slide background, since the same raw color can look fine on a dark
+  // slide but become nearly invisible on a light one (and vice versa).
+  private relativeLuminance(hex: string): number {
+    const [r, g, b] = this.hexToRgb(hex).map((v) => v / 255);
+    const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  }
+
+  // Guarantees a brand color stays legible as TEXT on the given slide background — darkens a
+  // too-light color for a light slide, lightens a too-dark color for a dark slide. Leaves
+  // already-legible colors untouched so real brand hues still show through.
+  private legibleTextColor(hex: string, bg: SlideBg): string {
+    const lum = this.relativeLuminance(hex);
+    if (bg === 'light' && lum > 0.55) return this.mix(hex, [0, 0, 0], 0.6);
+    if (bg === 'dark' && lum < 0.45) return this.mix(hex, [255, 255, 255], 0.6);
+    return hex;
+  }
+
+  // Black or white — whichever reads better as text/icon color drawn directly on top of this
+  // brand color (e.g. a solid-fill badge), independent of the slide's own background.
+  private contrastOn(hex: string): string {
+    return this.relativeLuminance(hex) > 0.55 ? '#000000' : '#ffffff';
+  }
+
+  // Formats a tier price for display — adds the ₹ symbol and Indian-style digit grouping when
+  // the price is a plain number (e.g. "650000" -> "₹6,50,000"); leaves any already-formatted or
+  // non-numeric price string (e.g. "Custom", "$500") untouched aside from the ₹ prefix.
+  private formatTierPrice(price: string): string {
+    const trimmed = price.trim();
+    if (/^\d+$/.test(trimmed)) {
+      return `\u20b9${Number(trimmed).toLocaleString('en-IN')}`;
+    }
+    return trimmed.startsWith('\u20b9') ? trimmed : `\u20b9${trimmed}`;
+  }
+
   // Blends a brand color toward a target (black for dark slides, white for light slides) instead
   // of using a fixed background — so a dark-themed slide is a tinted dark shade of the host's own
   // color palette, never plain black, and a light-themed slide gets a subtle brand-colored tint.
@@ -286,6 +331,9 @@ export class ProposalPdfGeneratorService {
       bgColor: string;
       primaryColor: string;
       accentColor: string;
+      primaryTextColor: string;
+      accentTextColor: string;
+      badgeTextColor: string;
       logo: string | null;
       logoNeedsChip: boolean;
       logoLarge: boolean;
@@ -380,14 +428,14 @@ export class ProposalPdfGeneratorService {
           .join('');
         body = `<div class="content-grid full"><div class="content-col">
             ${kickerHtml}<h2>${escapeHtml(slide.title)}</h2><div class="accent-rule"></div>
-            ${sponsors.length ? `<div class="sponsors-grid">${cards}</div>` : nl2p(slide.body)}
+            ${sponsors.length ? `<div class="sponsors-grid">${cards}</div>` : `<div class="empty-state">${nl2p(slide.body)}</div>`}
           </div><div class="decor-shape"></div></div>`;
         break;
       }
       case 'PRICING_COMPARISON': {
         const tiers = (slide.pricingTiers ?? [])
           .map(
-            (t) => `<div class="tier"><span class="tier-name">${escapeHtml(t.name)}</span><span class="tier-price">${escapeHtml(t.price.startsWith('₹') ? t.price : `₹${t.price}`)}</span></div>`,
+            (t) => `<div class="tier"><span class="tier-name">${escapeHtml(t.name)}</span><span class="tier-price">${escapeHtml(this.formatTierPrice(t.price))}</span></div>`,
           )
           .join('');
         const barter = slide.openToBarter ? `<span class="barter-badge">Open to Barter</span>` : '';
@@ -417,7 +465,7 @@ export class ProposalPdfGeneratorService {
     const dots = Array.from({ length: opts.total }, (_, i) => `<span class="${i === opts.index ? 'active' : ''}"></span>`).join('');
 
     return `
-      <section class="slide bg-${opts.bg}${opts.isLast ? ' slide-last' : ''}" style="background:${opts.bgColor}; --primary:${opts.primaryColor}; --accent:${opts.accentColor};">
+      <section class="slide bg-${opts.bg}${opts.isLast ? ' slide-last' : ''}" style="background:${opts.bgColor}; --primary:${opts.primaryColor}; --accent:${opts.accentColor}; --primary-text:${opts.primaryTextColor}; --accent-text:${opts.accentTextColor}; --badge-text:${opts.badgeTextColor};">
         <div class="slide-header">
           <div class="slide-header-inner">${logoBlock}</div>
         </div>

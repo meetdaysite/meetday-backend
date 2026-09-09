@@ -14,11 +14,35 @@ type AiDeckPlanResponse = {
   closing_message: string;
 };
 
-// Splits a free-text deliverables blurb into short bullet lines — hosts write these as either
-// comma-separated or newline-separated; either way we want a clean bullet list on the slide.
+// Splits a free-text deliverables blurb into short bullet lines. Hosts/AI write these as either
+// newline-separated items, a genuine comma-separated list of short phrases, or full prose
+// sentences (which happen to contain grammatical commas). Blindly splitting on every comma broke
+// real sentences mid-clause (e.g. "...event signage, backdrops, and interactive styling stations."
+// became 3 disjointed fragments including a lone orphaned word) — so commas are only treated as a
+// delimiter when the text has no sentence-ending punctuation to split on instead.
 function toBullets(text: string): string[] {
-  return text
-    .split(/\n+|,\s*/)
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+
+  // Respect explicit line breaks first — the most reliable signal of intentional list items.
+  const lines = trimmed
+    .split(/\n+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (lines.length > 1) return lines;
+
+  // Single block of text that reads as prose (has sentence-ending punctuation) — split into
+  // whole sentences instead of on every comma, so no bullet breaks mid-clause.
+  if (/[.!?]\s+\S/.test(trimmed)) {
+    return trimmed
+      .split(/(?<=[.!?])\s+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
+  // No sentence punctuation at all — this is a genuine comma-separated list of short phrases.
+  return trimmed
+    .split(/,\s*/)
     .map((s) => s.trim())
     .filter(Boolean);
 }
