@@ -108,6 +108,8 @@ model User {
   sponsorshipDealsCreated         SponsorshipDeal[]        @relation("SponsorshipDealCreatedBy")
   sponsorshipDealReportsSubmitted SponsorshipDealReport[]  @relation("SponsorshipDealReportSubmittedBy")
 
+  spaceChatMessages SpaceChatMessage[] @relation("SpaceChatMessageSender")
+
   meetdayChatThread   MeetdayChatThread?   @relation("MeetdayChatThreadUser")
   meetdayChatMessages MeetdayChatMessage[] @relation("MeetdayChatMessageSender")
 
@@ -434,6 +436,7 @@ model HostProfile {
   sponsorshipProposals SponsorshipProposal[]
   communityProfile     HostCommunityProfile?
   campaignInterests    SponsorshipInterest[]
+  spaceInterests       SpaceInterest[]
   teamMembers          HostTeamMember[]
 
   createdAt DateTime @default(now())
@@ -464,10 +467,11 @@ model BrandProfile {
   aboutCompany String?      @db.Text
   industry     String? // preset dropdown value or free text ("Custom")
 
-  categories  BrandExperienceCategory[]
-  interests   SponsorshipInterest[]
-  campaigns   Campaign[]
-  teamMembers BrandTeamMember[]
+  categories     BrandExperienceCategory[]
+  interests      SponsorshipInterest[]
+  spaceInterests SpaceInterest[]
+  campaigns      Campaign[]
+  teamMembers    BrandTeamMember[]
 
   approvalStatus HostApprovalStatus @default(PENDING)
 
@@ -556,6 +560,7 @@ model SpaceCommunityProfile {
   brandsWorkedWith Json?
 
   categories SpaceCommunityProfileCategory[]
+  interests  SpaceInterest[]
 
   // Edits to an already-APPROVED profile are staged here instead of overwriting the live
   // fields — same pattern as HostCommunityProfile.pendingRevision.
@@ -588,6 +593,76 @@ model SpaceCommunityProfileCategory {
   @@id([spaceCommunityProfileId, categoryId])
   @@index([categoryId])
   @@map("space_community_profile_categories")
+}
+
+enum SpaceInterestRequesterType {
+  BRAND
+  COMMUNITY
+}
+
+enum SpaceChatStatus {
+  REQUESTED
+  ACCEPTED
+  DECLINED
+}
+
+enum SpaceChatSenderType {
+  SPACE
+  BRAND
+  COMMUNITY
+}
+
+// Brand or Community expressing interest in a Community Space — same request/accept/chat shape
+// as SponsorshipInterest, but simpler (no deal/payment lifecycle, just interest -> chat).
+model SpaceInterest {
+  id                      String                @id @default(uuid())
+  spaceCommunityProfileId String
+  spaceCommunityProfile   SpaceCommunityProfile @relation(fields: [spaceCommunityProfileId], references: [id], onDelete: Cascade)
+
+  requesterType  SpaceInterestRequesterType
+  brandProfileId String?
+  brandProfile   BrandProfile?              @relation(fields: [brandProfileId], references: [id], onDelete: Cascade)
+  hostProfileId  String?
+  hostProfile    HostProfile?               @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
+
+  message String? @db.Text // optional note sent along with the interest request
+
+  chatStatus     SpaceChatStatus @default(REQUESTED)
+  chatAcceptedAt DateTime?
+  lastMessageAt  DateTime?
+
+  requesterLastReadAt DateTime?
+  spaceLastReadAt     DateTime?
+
+  chatMessages SpaceChatMessage[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([spaceCommunityProfileId, brandProfileId])
+  @@unique([spaceCommunityProfileId, hostProfileId])
+  @@index([spaceCommunityProfileId])
+  @@index([chatStatus])
+  @@map("space_interests")
+}
+
+model SpaceChatMessage {
+  id              String        @id @default(uuid())
+  spaceInterestId String
+  spaceInterest   SpaceInterest @relation(fields: [spaceInterestId], references: [id], onDelete: Cascade)
+
+  senderType SpaceChatSenderType
+  senderId   String
+  sender     User                @relation("SpaceChatMessageSender", fields: [senderId], references: [id])
+
+  content  String  @db.Text
+  mediaKey String?
+
+  deletedAt DateTime? // soft delete — placeholder shown to both sides
+
+  createdAt DateTime @default(now())
+
+  @@index([spaceInterestId, createdAt])
+  @@map("space_chat_messages")
 }
 
 enum CompanyType {

@@ -1,14 +1,19 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
-import { Prisma } from '@prisma/client';
+import { Prisma, SpaceChatSenderType, SpaceInterestRequesterType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { TeamAccessService } from '../../common/team-access/team-access.service';
 import { ADMIN_ALERT_EMAILS } from '../../common/mail/admin-recipients.constant';
+import { redactPersonalInfo } from '../../common/utils/redact-personal-info.util';
 import { UpdateSpaceProfileDto } from './dto/update-space-profile.dto';
 import { ActivateSpaceCommunityDto } from './dto/activate-space-community.dto';
+import { CreateSpaceInterestDto } from './dto/create-space-interest.dto';
+import { ListSpaceChatsQueryDto } from './dto/list-space-chats-query.dto';
+import { SendSpaceChatMessageDto } from './dto/send-space-chat-message.dto';
 
 type PastEventLike = { name?: string; description?: string; imageKeys?: string[] };
 type BrandWorkedWithLike = { brandName?: string; logoKey?: string; url?: string };
@@ -21,6 +26,7 @@ export class SpacesService {
     @InjectQueue('mail') private readonly mailQueue: Queue,
     private readonly notificationsService: NotificationsService,
     private readonly auditLogService: AuditLogService,
+    private readonly teamAccessService: TeamAccessService,
   ) {}
 
   async getMe(userId: string) {
@@ -331,5 +337,306 @@ export class SpacesService {
     );
 
     return { spaces, total: spaces.length };
+  }
+
+  // ── Community Space interest + chat (Brand/Community ↔ Space Partner) ──────────────────
+  // Simpler cousin of SponsorshipService's TriChat: request -> accept/decline -> chat. No
+  // deal/payment lifecycle — spaces are booked/negotiated entirely within the chat itself.
+
+  private async getOwnSpaceRelatedProfiles(userId: string) {
+    const [hostProfileIds, brandProfileIds, spaceProfile] = await Promise.all([
+      this.teamAccessService.getHostProfileIds(userId),
+      this.teamAccessService.getBrandProfileIds(userId),
+      this.prisma.spaceProfile.findUnique({ where: { userId }, select: { id: true } }),
+    ]);
+    return {
+      hostProfileId: hostProfileIds[0] ?? null,
+      brandProfileId: brandProfileIds[0] ?? null,
+      spaceProfileId: spaceProfile?.id ?? null,
+    };
+  }
+
+  // Brand or Community expresses interest in a Community Space — idempotent, notifies the
+  // space partner (who decides whether to accept) and confirms back to the requester.
+  async markSpaceInterest(userId: string, spaceCommunityProfileId: string, dto: CreateSpaceInterestDto) {
+    const space = await this.prisma.spaceCommunityProfile.findUnique({
+      where: { id: spaceCommunityProfileId },
+      select: { id: true, name: true, approvalStatus: true, isHidden: true, spaceProfile: { select: { userId: true } } },
+    });
+    if (!space || space.approvalStatus !== 'APPROVED' || space.isHidden) {
+      throw new NotFoundException('Community Space not found');
+    }
+
+    const { hostProfileId, brandProfileId } = await this.getOwnSpaceRelatedProfiles(userId);
+    if (!hostProfileId && !brandProfileId) {
+      throw new BadRequestException('Only brand or community accounts can express interest in a Community Space');
+    }
+    // A user with both a brand and a community profile (rare) defaults to brand — same
+    // HOST-first-style tie-break convention used elsewhere in this codebase.
+    const requesterType: SpaceInterestRequesterType = brandProfileId ? 'BRAND' : 'COMMUNITY';
+
+    const existing = await this.prisma.spaceInterest.findUnique({
+      where:
+        requesterType === 'BRAND'
+          ? { spaceCommunityProfileId_brandProfileId: { spaceCommunityProfileId, brandProfileId: brandProfileId! } }
+          : { spaceCommunityProfileId_hostProfileId: { spaceCommunityProfileId, hostProfileId: hostProfileId! } },
+    });
+    if (existing) {
+      return { message: 'Already interested', alreadyInterested: true, interestId: existing.id, chatStatus: existing.chatStatus };
+    }
+
+    const interest = await this.prisma.spaceInterest.create({
+      data: {
+        spaceCommunityProfileId,
+        requesterType,
+        brandProfileId: requesterType === 'BRAND' ? brandProfileId : null,
+        hostProfileId: requesterType === 'COMMUNITY' ? hostProfileId : null,
+        message: dto.message?.trim() || null,
+      },
+    });
+
+    void this.notificationsService
+      .create(
+        space.spaceProfile.userId,
+        'space_interest_requested',
+        'New interest in your Community Space',
+        `A ${requesterType === 'BRAND' ? 'brand' : 'community'} is interested — check your Chats to respond.`,
+        { spaceInterestId: interest.id, spaceCommunityProfileId },
+      )
+      .catch(() => undefined);
+
+    void this.notificationsService
+      .create(userId, 'space_interest_confirmed', 'Interest sent!', `${space.name} has been notified of your interest.`, {
+        spaceInterestId: interest.id,
+      })
+      .catch(() => undefined);
+
+    return { message: 'Interest recorded', alreadyInterested: false, interestId: interest.id, chatStatus: interest.chatStatus };
+  }
+
+  async listMySpaceChats(userId: string, query: ListSpaceChatsQueryDto) {
+    const { hostProfileId, brandProfileId, spaceProfileId } = await this.getOwnSpaceRelatedProfiles(userId);
+    const role = query.role ?? (spaceProfileId ? 'SPACE' : brandProfileId ? 'BRAND' : hostProfileId ? 'COMMUNITY' : null);
+    if (!role) throw new NotFoundException('No brand, community, or space profile found for this account');
+
+    const where: Prisma.SpaceInterestWhereInput = {
+      ...(query.status && { chatStatus: query.status }),
+      ...(role === 'SPACE'
+        ? { spaceCommunityProfile: { spaceProfileId: spaceProfileId! } }
+        : role === 'BRAND'
+          ? { brandProfileId: brandProfileId! }
+          : { hostProfileId: hostProfileId! }),
+    };
+
+    const interests = await this.prisma.spaceInterest.findMany({
+      where,
+      include: {
+        spaceCommunityProfile: { select: { id: true, name: true, logoKey: true } },
+        brandProfile: { select: { id: true, brandName: true, logoKey: true } },
+        hostProfile: { select: { id: true, displayName: true, communityProfile: { select: { name: true, logoKey: true } } } },
+        chatMessages: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { content: true, mediaKey: true, senderType: true, createdAt: true },
+        },
+      },
+      orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    const mySenderType: SpaceChatSenderType = role === 'SPACE' ? 'SPACE' : role === 'BRAND' ? 'BRAND' : 'COMMUNITY';
+
+    const threads = await Promise.all(
+      interests.map(async (i) => {
+        const lastReadAt = role === 'SPACE' ? i.spaceLastReadAt : i.requesterLastReadAt;
+        const unreadCount = await this.prisma.spaceChatMessage.count({
+          where: {
+            spaceInterestId: i.id,
+            senderType: { not: mySenderType },
+            deletedAt: null,
+            ...(lastReadAt && { createdAt: { gt: lastReadAt } }),
+          },
+        });
+
+        let counterpartName: string;
+        let counterpartLogoKey: string | null;
+        if (role === 'SPACE') {
+          counterpartName = i.requesterType === 'BRAND' ? (i.brandProfile?.brandName ?? 'Brand') : (i.hostProfile?.communityProfile?.name ?? i.hostProfile?.displayName ?? 'Community');
+          counterpartLogoKey = i.requesterType === 'BRAND' ? (i.brandProfile?.logoKey ?? null) : (i.hostProfile?.communityProfile?.logoKey ?? null);
+        } else {
+          counterpartName = i.spaceCommunityProfile.name;
+          counterpartLogoKey = i.spaceCommunityProfile.logoKey;
+        }
+
+        const lastMsg = i.chatMessages[0];
+        return {
+          id: i.id,
+          spaceCommunityProfileId: i.spaceCommunityProfileId,
+          requesterType: i.requesterType,
+          chatStatus: i.chatStatus,
+          createdAt: i.createdAt,
+          chatAcceptedAt: i.chatAcceptedAt,
+          lastMessageAt: i.lastMessageAt,
+          lastMessagePreview: lastMsg ? (lastMsg.content || (lastMsg.mediaKey ? '📷 Photo' : '')).slice(0, 120) : (i.message ?? null),
+          unreadCount,
+          counterpartName,
+          counterpartAvatarUrl: counterpartLogoKey ? await this.storageService.getPresignedDownloadUrl(counterpartLogoKey) : null,
+        };
+      }),
+    );
+
+    return threads;
+  }
+
+  // Verifies the caller is a participant (the space, or the requesting brand/community) and
+  // returns which "hat" they're wearing — mirrors SponsorshipService.getInterestForParticipant.
+  private async getSpaceInterestForParticipant(userId: string, interestId: string, preferredRole?: 'BRAND' | 'COMMUNITY' | 'SPACE') {
+    const interest = await this.prisma.spaceInterest.findUnique({
+      where: { id: interestId },
+      include: {
+        spaceCommunityProfile: {
+          select: { id: true, name: true, logoKey: true, spaceProfileId: true, spaceProfile: { select: { userId: true } } },
+        },
+        brandProfile: { select: { id: true, userId: true, brandName: true } },
+        hostProfile: { select: { id: true, userId: true, displayName: true, communityProfile: { select: { name: true } } } },
+      },
+    });
+    if (!interest) throw new NotFoundException('Chat thread not found');
+
+    let isSpace = interest.spaceCommunityProfile.spaceProfile.userId === userId;
+    let isBrand = interest.brandProfile?.userId === userId;
+    let isHost = interest.hostProfile?.userId === userId;
+    if (!isSpace && !isBrand && !isHost) {
+      const [hostProfileIds, brandProfileIds] = await Promise.all([
+        this.teamAccessService.getHostProfileIds(userId),
+        this.teamAccessService.getBrandProfileIds(userId),
+      ]);
+      isBrand = !!interest.brandProfileId && brandProfileIds.includes(interest.brandProfileId);
+      isHost = !!interest.hostProfileId && hostProfileIds.includes(interest.hostProfileId);
+    }
+    if (!isSpace && !isBrand && !isHost) throw new ForbiddenException('You do not have access to this chat');
+
+    const senderType: SpaceChatSenderType = preferredRole
+      ? SpaceChatSenderType[preferredRole]
+      : isSpace
+        ? SpaceChatSenderType.SPACE
+        : isBrand
+          ? SpaceChatSenderType.BRAND
+          : SpaceChatSenderType.COMMUNITY;
+
+    return { interest, isSpace, isBrand, isHost, senderType };
+  }
+
+  async listSpaceChatMessages(userId: string, interestId: string, preferredRole?: 'BRAND' | 'COMMUNITY' | 'SPACE') {
+    const { interest, senderType } = await this.getSpaceInterestForParticipant(userId, interestId, preferredRole);
+
+    const messages = await this.prisma.spaceChatMessage.findMany({
+      where: { spaceInterestId: interest.id },
+      orderBy: { createdAt: 'asc' },
+      take: 200,
+      select: { id: true, senderType: true, senderId: true, content: true, mediaKey: true, deletedAt: true, createdAt: true },
+    });
+
+    const withMediaUrls = await Promise.all(
+      messages.map(async ({ mediaKey, deletedAt, ...m }) => {
+        if (deletedAt) return { ...m, content: '', mediaUrl: null, deletedAt };
+        return { ...m, deletedAt: null, mediaUrl: mediaKey ? await this.storageService.getPresignedDownloadUrl(mediaKey) : null };
+      }),
+    );
+
+    void this.prisma.spaceInterest
+      .update({
+        where: { id: interest.id },
+        data: senderType === SpaceChatSenderType.SPACE ? { spaceLastReadAt: new Date() } : { requesterLastReadAt: new Date() },
+      })
+      .catch(() => undefined);
+
+    return { messages: withMediaUrls, chatStatus: interest.chatStatus };
+  }
+
+  async sendSpaceChatMessage(userId: string, interestId: string, dto: SendSpaceChatMessageDto) {
+    const { interest, senderType } = await this.getSpaceInterestForParticipant(userId, interestId);
+    if (interest.chatStatus !== 'ACCEPTED') {
+      throw new BadRequestException('The space must accept this request before you can chat.');
+    }
+    if (!dto.content?.trim() && !dto.mediaKey) {
+      throw new BadRequestException('Message must have text or an image');
+    }
+
+    // Contact info must stay off-platform — same redaction rule as sponsorship chat.
+    const { content, wasRedacted } = dto.content ? redactPersonalInfo(dto.content) : { content: '', wasRedacted: false };
+
+    const message = await this.prisma.spaceChatMessage.create({
+      data: { spaceInterestId: interest.id, senderType, senderId: userId, content, mediaKey: dto.mediaKey },
+    });
+    await this.prisma.spaceInterest.update({
+      where: { id: interest.id },
+      data: {
+        lastMessageAt: message.createdAt,
+        ...(senderType === SpaceChatSenderType.SPACE ? { spaceLastReadAt: message.createdAt } : { requesterLastReadAt: message.createdAt }),
+      },
+    });
+
+    const recipientUserId =
+      senderType === SpaceChatSenderType.SPACE
+        ? interest.requesterType === 'BRAND'
+          ? interest.brandProfile?.userId
+          : interest.hostProfile?.userId
+        : interest.spaceCommunityProfile.spaceProfile.userId;
+
+    const senderName =
+      senderType === SpaceChatSenderType.SPACE
+        ? interest.spaceCommunityProfile.name
+        : senderType === SpaceChatSenderType.BRAND
+          ? (interest.brandProfile?.brandName ?? 'A brand')
+          : (interest.hostProfile?.communityProfile?.name ?? interest.hostProfile?.displayName ?? 'A community');
+
+    const preview = content.trim() ? content.slice(0, 80) : '📷 Sent a photo';
+    if (recipientUserId && recipientUserId !== userId) {
+      void this.notificationsService
+        .create(recipientUserId, 'space_chat_message', senderName, preview, { spaceInterestId: interest.id })
+        .catch(() => undefined);
+    }
+
+    const mediaUrl = dto.mediaKey ? await this.storageService.getPresignedDownloadUrl(dto.mediaKey) : null;
+    return { ...message, mediaUrl, wasRedacted };
+  }
+
+  // Space partner accepts a pending request — opens the chat both sides ("Requests" → "Chats").
+  async acceptSpaceInterest(userId: string, interestId: string) {
+    const { interest, isSpace } = await this.getSpaceInterestForParticipant(userId, interestId);
+    if (!isSpace) throw new ForbiddenException('Only the space can accept this request');
+    if (interest.chatStatus === 'ACCEPTED') return { message: 'Already accepted', chatStatus: interest.chatStatus };
+
+    const updated = await this.prisma.spaceInterest.update({
+      where: { id: interestId },
+      data: { chatStatus: 'ACCEPTED', chatAcceptedAt: new Date() },
+    });
+
+    const recipientUserId = interest.requesterType === 'BRAND' ? interest.brandProfile?.userId : interest.hostProfile?.userId;
+    if (recipientUserId) {
+      void this.notificationsService
+        .create(
+          recipientUserId,
+          'space_interest_accepted',
+          'Request accepted!',
+          `${interest.spaceCommunityProfile.name} accepted your interest — you can now chat with them.`,
+          { spaceInterestId: interestId },
+        )
+        .catch(() => undefined);
+    }
+
+    return { message: 'Request accepted', chatStatus: updated.chatStatus };
+  }
+
+  // Space partner declines a pending request — terminal state, no further chat.
+  async declineSpaceInterest(userId: string, interestId: string) {
+    const { interest, isSpace } = await this.getSpaceInterestForParticipant(userId, interestId);
+    if (!isSpace) throw new ForbiddenException('Only the space can decline this request');
+    if (interest.chatStatus !== 'REQUESTED') {
+      throw new BadRequestException('Only a pending request can be declined');
+    }
+
+    const updated = await this.prisma.spaceInterest.update({ where: { id: interestId }, data: { chatStatus: 'DECLINED' } });
+    return { message: 'Request declined', chatStatus: updated.chatStatus };
   }
 }
