@@ -58,6 +58,7 @@ const CONTEXT_CONTENT_TYPES: Record<UploadContext, readonly string[]> = {
   [UploadContext.SPONSORSHIP_MEDIA]: LOGO_IMAGE_TYPES,
   [UploadContext.SPONSORSHIP_DOCUMENT]: PITCH_DOC_TYPES,
   [UploadContext.SPONSORSHIP_CHAT_MEDIA]: [...IMAGE_TYPES, 'application/pdf'],
+  [UploadContext.SPACE_CHAT_MEDIA]: [...IMAGE_TYPES, 'application/pdf'],
   [UploadContext.MEETDAY_CHAT_MEDIA]: IMAGE_TYPES,
   [UploadContext.COMMUNITY_PAST_EVENT_MEDIA]: IMAGE_TYPES,
   [UploadContext.SPONSORSHIP_DEAL_REPORT_MEDIA]: IMAGE_TYPES,
@@ -411,6 +412,38 @@ export class StorageService {
           throw new ForbiddenException('This chat has not been accepted yet');
         }
         key = `sponsorship-chats/${dto.resourceId}/${randomUUID()}.${ext}`;
+        break;
+      }
+
+      case UploadContext.SPACE_CHAT_MEDIA: {
+        // Community Space chat image. resourceId is the space interest id; only the space
+        // partner or the requesting brand/community on an ACCEPTED thread may attach images.
+        if (!dto.resourceId) {
+          throw new BadRequestException('resourceId (space interest UUID) is required for SPACE_CHAT_MEDIA');
+        }
+        const spaceInterest = await this.prisma.spaceInterest.findUnique({
+          where: { id: dto.resourceId },
+          select: {
+            chatStatus: true,
+            brandProfileId: true,
+            hostProfileId: true,
+            spaceCommunityProfile: { select: { spaceProfile: { select: { userId: true } } } },
+          },
+        });
+        if (!spaceInterest) throw new NotFoundException('Chat thread not found');
+        const [spaceHostProfileIds, spaceBrandProfileIds] = await Promise.all([
+          this.teamAccessService.getHostProfileIds(userId),
+          this.teamAccessService.getBrandProfileIds(userId),
+        ]);
+        const isSpaceChatParticipant =
+          spaceInterest.spaceCommunityProfile.spaceProfile.userId === userId ||
+          (!!spaceInterest.hostProfileId && spaceHostProfileIds.includes(spaceInterest.hostProfileId)) ||
+          (!!spaceInterest.brandProfileId && spaceBrandProfileIds.includes(spaceInterest.brandProfileId));
+        if (!isSpaceChatParticipant) throw new ForbiddenException('You do not have access to this chat');
+        if (spaceInterest.chatStatus !== 'ACCEPTED') {
+          throw new ForbiddenException('This chat has not been accepted yet');
+        }
+        key = `space-chats/${dto.resourceId}/${randomUUID()}.${ext}`;
         break;
       }
 
