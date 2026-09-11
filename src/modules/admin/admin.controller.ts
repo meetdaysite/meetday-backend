@@ -77,6 +77,8 @@ import { UpdateAdminProfileDto } from './dto/update-admin-profile.dto';
 import { SendAnnouncementDto } from './dto/send-announcement.dto';
 import { ListAnnouncementsQueryDto } from './dto/list-announcements-query.dto';
 import { ListSponsorshipChatsQueryDto } from '../sponsorship/dto/list-sponsorship-chats-query.dto';
+import { ListSpaceChatsQueryDto } from '../spaces/dto/list-space-chats-query.dto';
+import { SendSpaceChatMessageDto } from '../spaces/dto/send-space-chat-message.dto';
 import { SendChatMessageDto } from '../sponsorship/dto/send-chat-message.dto';
 import { UpdateChatMessageDto } from '../sponsorship/dto/update-chat-message.dto';
 import { ListSponsorshipDealsQueryDto } from '../sponsorship/dto/list-sponsorship-deals-query.dto';
@@ -2011,6 +2013,66 @@ export class AdminController {
     return this.adminService.deleteSponsorshipChatMessage(interestId, adminId, messageId);
   }
 
+  // ─── Community Space chats (admin oversight) ────────────────────────────
+
+  @Get('space-chats')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({
+    summary: 'List every Space ↔ Brand/Community chat thread',
+    description: 'Admin "Ongoing Chats" view for Community Spaces — every space interest across all spaces, newest activity first.',
+  })
+  @ApiOkResponse({ description: 'List of chat threads.' })
+  listSpaceChats(@Query() query: ListSpaceChatsQueryDto) {
+    return this.adminService.listSpaceChats(query);
+  }
+
+  @Get('space-chats/pending-count')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({ summary: 'Count of space chat requests not yet accepted by the space partner', description: 'Backs the sidebar badge.' })
+  @ApiOkResponse({ description: 'Pending count.' })
+  countPendingSpaceChats() {
+    return this.adminService.countPendingSpaceChats();
+  }
+
+  @Get('space-chats/:interestId/messages')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({ summary: 'List messages in a Space chat thread' })
+  @ApiOkResponse({ description: 'Messages, oldest first.' })
+  @ApiNotFoundResponse({ description: 'Chat thread not found.' })
+  getSpaceChatMessages(@Param('interestId', ParseUUIDPipe) interestId: string) {
+    return this.adminService.getSpaceChatMessages(interestId);
+  }
+
+  @Post('space-chats/:interestId/messages')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Send a message into a Space chat thread as Meetday',
+    description: 'Posted as "Meetday" to both the space partner and the requester — usable any time, regardless of accept status.',
+  })
+  @ApiOkResponse({ description: 'Message sent.' })
+  @ApiNotFoundResponse({ description: 'Chat thread not found.' })
+  sendSpaceChatMessage(
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Body() dto: SendSpaceChatMessageDto,
+    @GetUser('id') adminId: string,
+  ) {
+    return this.adminService.sendSpaceChatMessage(interestId, adminId, dto);
+  }
+
+  @Delete('space-chats/:interestId/messages/:messageId')
+  @Roles('SUPER_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({ summary: 'Delete a message in a space chat thread' })
+  @ApiOkResponse({ description: 'Message deleted.' })
+  @ApiNotFoundResponse({ description: 'Message not found.' })
+  deleteSpaceChatMessage(
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Param('messageId', ParseUUIDPipe) messageId: string,
+    @GetUser('id') adminId: string,
+  ) {
+    return this.adminService.deleteSpaceChatMessage(interestId, adminId, messageId);
+  }
+
   @Get('sponsorship-chats/:interestId/deal')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
   @ApiOperation({ summary: 'Get deal details for a sponsorship chat thread' })
@@ -2018,7 +2080,6 @@ export class AdminController {
   getSponsorshipDeal(@Param('interestId', ParseUUIDPipe) interestId: string) {
     return this.adminService.getSponsorshipDeal(interestId);
   }
-
   @Get('sponsorship-chats/:interestId/deal/report')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
   @ApiOperation({ summary: 'Get deliverables report for a sponsorship chat thread' })

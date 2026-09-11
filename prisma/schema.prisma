@@ -611,6 +611,7 @@ enum SpaceChatSenderType {
   SPACE
   BRAND
   COMMUNITY
+  ADMIN
 }
 
 // Brand or Community expressing interest in a Community Space — same request/accept/chat shape
@@ -634,6 +635,7 @@ model SpaceInterest {
 
   requesterLastReadAt DateTime?
   spaceLastReadAt     DateTime?
+  adminLastReadAt     DateTime?
 
   chatMessages SpaceChatMessage[]
   deal         SpaceDeal?

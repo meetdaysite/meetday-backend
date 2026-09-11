@@ -438,7 +438,8 @@ export class StorageService {
         const isSpaceChatParticipant =
           spaceInterest.spaceCommunityProfile.spaceProfile.userId === userId ||
           (!!spaceInterest.hostProfileId && spaceHostProfileIds.includes(spaceInterest.hostProfileId)) ||
-          (!!spaceInterest.brandProfileId && spaceBrandProfileIds.includes(spaceInterest.brandProfileId));
+          (!!spaceInterest.brandProfileId && spaceBrandProfileIds.includes(spaceInterest.brandProfileId)) ||
+          SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '');
         if (!isSpaceChatParticipant) throw new ForbiddenException('You do not have access to this chat');
         if (spaceInterest.chatStatus !== 'ACCEPTED') {
           throw new ForbiddenException('This chat has not been accepted yet');
