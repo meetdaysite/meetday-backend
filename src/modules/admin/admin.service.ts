@@ -3088,6 +3088,59 @@ export class AdminService {
     return { message: 'Message deleted', deleted: true };
   }
 
+  // ── Community Space Deals: admin oversight of negotiated & locked space deals ──
+
+  async listSpaceDeals(status?: 'PENDING_APPROVAL' | 'CHANGES_REQUESTED' | 'APPROVED') {
+    const deals = await this.prisma.spaceDeal.findMany({
+      where: { ...(status && { status }) },
+      include: {
+        spaceInterest: {
+          select: {
+            id: true,
+            requesterType: true,
+            spaceCommunityProfile: { select: { id: true, name: true } },
+            brandProfile: { select: { id: true, brandName: true } },
+            hostProfile: { select: { id: true, displayName: true, communityProfile: { select: { name: true } } } },
+          },
+        },
+      },
+      orderBy: [{ approvedAt: 'desc' }, { updatedAt: 'desc' }],
+    });
+
+    return deals.map((d) => {
+      const requesterName =
+        d.spaceInterest.requesterType === 'BRAND'
+          ? (d.spaceInterest.brandProfile?.brandName ?? 'Brand')
+          : (d.spaceInterest.hostProfile?.communityProfile?.name ?? d.spaceInterest.hostProfile?.displayName ?? 'Community');
+
+      return {
+        id: d.id,
+        spaceInterestId: d.spaceInterest.id,
+        spaceCommunityProfileId: d.spaceInterest.spaceCommunityProfile.id,
+        spaceName: d.spaceInterest.spaceCommunityProfile.name,
+        requesterType: d.spaceInterest.requesterType,
+        requesterName,
+        projectName: d.projectName,
+        goals: d.goals,
+        venue: d.venue,
+        time: d.time,
+        targetAudience: d.targetAudience,
+        startDate: d.startDate,
+        endDate: d.endDate,
+        sponsorshipAmount: d.sponsorshipAmount,
+        barterElements: d.barterElements,
+        deliverables: d.deliverables,
+        otherTerms: d.otherTerms,
+        additionalNotes: d.additionalNotes,
+        status: d.status,
+        changeRequestNote: d.changeRequestNote,
+        approvedAt: d.approvedAt,
+        createdAt: d.createdAt,
+        updatedAt: d.updatedAt,
+      };
+    });
+  }
+
   // ── Deal Lock: admin oversight of negotiated & locked sponsorship deals ────────
 
   async listSponsorshipDeals(status?: 'PENDING_APPROVAL' | 'CHANGES_REQUESTED' | 'APPROVED') {

@@ -79,6 +79,7 @@ import { ListAnnouncementsQueryDto } from './dto/list-announcements-query.dto';
 import { ListSponsorshipChatsQueryDto } from '../sponsorship/dto/list-sponsorship-chats-query.dto';
 import { ListSpaceChatsQueryDto } from '../spaces/dto/list-space-chats-query.dto';
 import { SendSpaceChatMessageDto } from '../spaces/dto/send-space-chat-message.dto';
+import { ListSpaceDealsQueryDto } from '../spaces/dto/list-space-deals-query.dto';
 import { SendChatMessageDto } from '../sponsorship/dto/send-chat-message.dto';
 import { UpdateChatMessageDto } from '../sponsorship/dto/update-chat-message.dto';
 import { ListSponsorshipDealsQueryDto } from '../sponsorship/dto/list-sponsorship-deals-query.dto';
@@ -2071,6 +2072,17 @@ export class AdminController {
     @GetUser('id') adminId: string,
   ) {
     return this.adminService.deleteSpaceChatMessage(interestId, adminId, messageId);
+  }
+
+  @Get('space-deals')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({
+    summary: 'List negotiated/locked Community Space deals',
+    description: 'Filter by `status` (PENDING_APPROVAL, CHANGES_REQUESTED, APPROVED) to see e.g. only locked deals. Omit for all.',
+  })
+  @ApiOkResponse({ description: 'List of space deals.' })
+  listSpaceDeals(@Query() query: ListSpaceDealsQueryDto) {
+    return this.adminService.listSpaceDeals(query.status);
   }
 
   @Get('sponsorship-chats/:interestId/deal')
