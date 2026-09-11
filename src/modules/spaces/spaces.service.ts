@@ -371,9 +371,18 @@ export class SpacesService {
     if (!hostProfileId && !brandProfileId) {
       throw new BadRequestException('Only brand or community accounts can express interest in a Community Space');
     }
-    // A user with both a brand and a community profile (rare) defaults to brand — same
-    // HOST-first-style tie-break convention used elsewhere in this codebase.
-    const requesterType: SpaceInterestRequesterType = brandProfileId ? 'BRAND' : 'COMMUNITY';
+    // An account with BOTH a brand and a community profile (rare, but real — e.g. a test
+    // account) is otherwise ambiguous: `dto.asRole` tells us which dashboard the click actually
+    // came from, so it isn't silently misfiled as the other type. Falls back to brand-first only
+    // when the caller didn't say (older clients / genuinely single-profile accounts).
+    const requesterType: SpaceInterestRequesterType =
+      dto.asRole === 'COMMUNITY' && hostProfileId
+        ? 'COMMUNITY'
+        : dto.asRole === 'BRAND' && brandProfileId
+          ? 'BRAND'
+          : brandProfileId
+            ? 'BRAND'
+            : 'COMMUNITY';
 
     const existing = await this.prisma.spaceInterest.findUnique({
       where:
@@ -418,6 +427,12 @@ export class SpacesService {
     const { hostProfileId, brandProfileId, spaceProfileId } = await this.getOwnSpaceRelatedProfiles(userId);
     const role = query.role ?? (spaceProfileId ? 'SPACE' : brandProfileId ? 'BRAND' : hostProfileId ? 'COMMUNITY' : null);
     if (!role) throw new NotFoundException('No brand, community, or space profile found for this account');
+    // Guard against a null profile id silently matching Prisma's "is null" semantics and
+    // returning someone ELSE's rows (e.g. every brand-side interest has hostProfileId=null) —
+    // fail loudly instead of leaking/hiding data when the caller lacks the profile for `role`.
+    if (role === 'SPACE' && !spaceProfileId) throw new NotFoundException("You don't have a Space Partner profile on this account");
+    if (role === 'BRAND' && !brandProfileId) throw new NotFoundException("You don't have a Brand profile on this account");
+    if (role === 'COMMUNITY' && !hostProfileId) throw new NotFoundException("You don't have a Community profile on this account");
 
     const where: Prisma.SpaceInterestWhereInput = {
       ...(query.status && { chatStatus: query.status }),
