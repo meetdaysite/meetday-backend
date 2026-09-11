@@ -16,6 +16,11 @@ export class SendSpaceChatMessageDto {
   @MaxLength(500)
   mediaKey?: string;
 
+  @ApiPropertyOptional({ description: 'UUID of a message in the same thread being replied to.' })
+  @IsOptional()
+  @IsUUID()
+  replyToId?: string;
+
   @ApiPropertyOptional({
     enum: ['BRAND', 'COMMUNITY', 'SPACE'],
     description:

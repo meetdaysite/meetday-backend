@@ -554,13 +554,27 @@ export class SpacesService {
       where: { spaceInterestId: interest.id },
       orderBy: { createdAt: 'asc' },
       take: 200,
-      select: { id: true, senderType: true, senderId: true, content: true, mediaKey: true, deletedAt: true, createdAt: true },
+      select: {
+        id: true,
+        senderType: true,
+        senderId: true,
+        content: true,
+        mediaKey: true,
+        deletedAt: true,
+        createdAt: true,
+        replyTo: { select: { id: true, senderType: true, content: true, mediaKey: true, deletedAt: true } },
+      },
     });
 
     const withMediaUrls = await Promise.all(
-      messages.map(async ({ mediaKey, deletedAt, ...m }) => {
-        if (deletedAt) return { ...m, content: '', mediaUrl: null, deletedAt };
-        return { ...m, deletedAt: null, mediaUrl: mediaKey ? await this.storageService.getPresignedDownloadUrl(mediaKey) : null };
+      messages.map(async ({ mediaKey, deletedAt, replyTo, ...m }) => {
+        if (deletedAt) return { ...m, content: '', mediaUrl: null, deletedAt, replyTo: this.replyToPreview(replyTo) };
+        return {
+          ...m,
+          deletedAt: null,
+          mediaUrl: mediaKey ? await this.storageService.getPresignedDownloadUrl(mediaKey) : null,
+          replyTo: this.replyToPreview(replyTo),
+        };
       }),
     );
 
@@ -574,6 +588,18 @@ export class SpacesService {
     return { messages: withMediaUrls, chatStatus: interest.chatStatus };
   }
 
+  // Shapes a replied-to message into the small quoted preview returned alongside a reply — shows
+  // a placeholder instead of the real content if the original was since deleted.
+  private replyToPreview(
+    replyTo: { id: string; senderType: SpaceChatSenderType; content: string; mediaKey: string | null; deletedAt: Date | null } | null,
+  ) {
+    if (!replyTo) return null;
+    if (replyTo.deletedAt) {
+      return { id: replyTo.id, senderType: replyTo.senderType, content: 'This message was deleted', hasMedia: false };
+    }
+    return { id: replyTo.id, senderType: replyTo.senderType, content: replyTo.content, hasMedia: !!replyTo.mediaKey };
+  }
+
   async sendSpaceChatMessage(userId: string, interestId: string, dto: SendSpaceChatMessageDto) {
     const { interest, senderType } = await this.getSpaceInterestForParticipant(userId, interestId, dto.asRole);
     if (interest.chatStatus !== 'ACCEPTED') {
@@ -583,11 +609,23 @@ export class SpacesService {
       throw new BadRequestException('Message must have text or an image');
     }
 
+    let replyToRow: { id: string; senderType: SpaceChatSenderType; content: string; mediaKey: string | null; deletedAt: Date | null } | null = null;
+    if (dto.replyToId) {
+      const original = await this.prisma.spaceChatMessage.findUnique({
+        where: { id: dto.replyToId },
+        select: { id: true, senderType: true, content: true, mediaKey: true, deletedAt: true, spaceInterestId: true },
+      });
+      if (!original || original.spaceInterestId !== interest.id) {
+        throw new BadRequestException('You can only reply to a message in this chat');
+      }
+      replyToRow = original;
+    }
+
     // Contact info must stay off-platform — same redaction rule as sponsorship chat.
     const { content, wasRedacted } = dto.content ? redactPersonalInfo(dto.content) : { content: '', wasRedacted: false };
 
     const message = await this.prisma.spaceChatMessage.create({
-      data: { spaceInterestId: interest.id, senderType, senderId: userId, content, mediaKey: dto.mediaKey },
+      data: { spaceInterestId: interest.id, senderType, senderId: userId, content, mediaKey: dto.mediaKey, replyToId: dto.replyToId },
     });
     await this.prisma.spaceInterest.update({
       where: { id: interest.id },
@@ -619,7 +657,7 @@ export class SpacesService {
     }
 
     const mediaUrl = dto.mediaKey ? await this.storageService.getPresignedDownloadUrl(dto.mediaKey) : null;
-    return { ...message, mediaUrl, wasRedacted };
+    return { ...message, mediaUrl, wasRedacted, replyTo: this.replyToPreview(replyToRow) };
   }
 
   // Space partner accepts a pending request — opens the chat both sides ("Requests" → "Chats").

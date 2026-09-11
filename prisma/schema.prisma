@@ -659,6 +659,10 @@ model SpaceChatMessage {
   content  String  @db.Text
   mediaKey String?
 
+  replyToId String?
+  replyTo   SpaceChatMessage?  @relation("SpaceMessageReplyTo", fields: [replyToId], references: [id])
+  replies   SpaceChatMessage[] @relation("SpaceMessageReplyTo")
+
   deletedAt DateTime? // soft delete — placeholder shown to both sides
 
   createdAt DateTime @default(now())
