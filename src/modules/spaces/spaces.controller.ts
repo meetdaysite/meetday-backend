@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -9,6 +9,8 @@ import { ActivateSpaceCommunityDto } from './dto/activate-space-community.dto';
 import { CreateSpaceInterestDto } from './dto/create-space-interest.dto';
 import { ListSpaceChatsQueryDto } from './dto/list-space-chats-query.dto';
 import { SendSpaceChatMessageDto } from './dto/send-space-chat-message.dto';
+import { UpsertSpaceDealDto } from './dto/upsert-space-deal.dto';
+import { RequestSpaceDealChangesDto } from './dto/request-space-deal-changes.dto';
 
 @ApiTags('Spaces')
 @ApiBearerAuth('firebase-token')
@@ -132,5 +134,54 @@ export class SpacesController {
   @ApiOkResponse({ description: 'Request declined.' })
   declineChatRequest(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string) {
     return this.spacesService.declineSpaceInterest(userId, interestId);
+  }
+
+  // ── Deal Lock: space fills in terms, counterpart (brand/community) approves ─────────────
+
+  @Get('chats/:interestId/deal')
+  @Roles('BRAND', 'HOST', 'SPACE_PARTNER')
+  @ApiOperation({ summary: 'Get the negotiated deal for this chat, if any' })
+  @ApiOkResponse({ description: 'The deal, or null.' })
+  getDeal(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string) {
+    return this.spacesService.getSpaceDeal(userId, interestId);
+  }
+
+  @Post('chats/:interestId/deal')
+  @Roles('SPACE_PARTNER')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Lock in deal terms', description: 'Only the space can create the deal; chat must already be accepted.' })
+  @ApiOkResponse({ description: 'Deal created.' })
+  createDeal(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string, @Body() dto: UpsertSpaceDealDto) {
+    return this.spacesService.createSpaceDeal(userId, interestId, dto);
+  }
+
+  @Put('chats/:interestId/deal')
+  @Roles('SPACE_PARTNER')
+  @ApiOperation({ summary: 'Edit deal terms', description: 'Only the space can edit; resets status to PENDING_APPROVAL.' })
+  @ApiOkResponse({ description: 'Deal updated.' })
+  updateDeal(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string, @Body() dto: UpsertSpaceDealDto) {
+    return this.spacesService.updateSpaceDeal(userId, interestId, dto);
+  }
+
+  @Post('chats/:interestId/deal/approve')
+  @Roles('BRAND', 'HOST')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Approve and lock the deal', description: 'Only the counterpart (brand/community) can approve.' })
+  @ApiOkResponse({ description: 'Deal approved.' })
+  approveDeal(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string) {
+    return this.spacesService.approveSpaceDeal(userId, interestId);
+  }
+
+  @Post('chats/:interestId/deal/request-changes')
+  @Roles('BRAND', 'HOST')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Request changes to the deal', description: 'Only the counterpart (brand/community) can request changes.' })
+  @ApiOkResponse({ description: 'Deal marked as needing changes.' })
+  requestDealChanges(
+    @GetUser('id') userId: string,
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Body() dto: RequestSpaceDealChangesDto,
+  ) {
+    return this.spacesService.requestSpaceDealChanges(userId, interestId, dto);
   }
 }

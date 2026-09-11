@@ -14,6 +14,8 @@ import { ActivateSpaceCommunityDto } from './dto/activate-space-community.dto';
 import { CreateSpaceInterestDto } from './dto/create-space-interest.dto';
 import { ListSpaceChatsQueryDto } from './dto/list-space-chats-query.dto';
 import { SendSpaceChatMessageDto } from './dto/send-space-chat-message.dto';
+import { UpsertSpaceDealDto } from './dto/upsert-space-deal.dto';
+import { RequestSpaceDealChangesDto } from './dto/request-space-deal-changes.dto';
 
 type PastEventLike = { name?: string; description?: string; imageKeys?: string[] };
 type BrandWorkedWithLike = { brandName?: string; logoKey?: string; url?: string };
@@ -653,5 +655,147 @@ export class SpacesService {
 
     const updated = await this.prisma.spaceInterest.update({ where: { id: interestId }, data: { chatStatus: 'DECLINED' } });
     return { message: 'Request declined', chatStatus: updated.chatStatus };
+  }
+
+  // ── Deal Lock: negotiated final terms, space fills in, counterpart (brand/community) approves ──
+  // Mirrors SponsorshipDeal's request/edit/approve shape, minus payment/report (spaces are
+  // booked/paid for entirely outside the platform for now).
+
+  async getSpaceDeal(userId: string, interestId: string) {
+    const { interest } = await this.getSpaceInterestForParticipant(userId, interestId);
+    return this.prisma.spaceDeal.findUnique({ where: { spaceInterestId: interest.id } });
+  }
+
+  private recipientForCounterpart(interest: { requesterType: string; brandProfile: { userId: string } | null; hostProfile: { userId: string } | null }) {
+    return interest.requesterType === 'BRAND' ? interest.brandProfile?.userId : interest.hostProfile?.userId;
+  }
+
+  async createSpaceDeal(userId: string, interestId: string, dto: UpsertSpaceDealDto) {
+    const { interest, isSpace } = await this.getSpaceInterestForParticipant(userId, interestId);
+    if (!isSpace) throw new ForbiddenException('Only the space can lock in deal terms');
+    if (interest.chatStatus !== 'ACCEPTED') throw new BadRequestException('The chat must be accepted before locking a deal');
+
+    const existing = await this.prisma.spaceDeal.findUnique({ where: { spaceInterestId: interest.id } });
+    if (existing) throw new BadRequestException('A deal already exists for this chat — edit it instead');
+
+    const deal = await this.prisma.spaceDeal.create({
+      data: {
+        spaceInterestId: interest.id,
+        projectName: dto.projectName,
+        goals: dto.goals ?? Prisma.JsonNull,
+        venue: dto.venue,
+        time: dto.time,
+        targetAudience: dto.targetAudience ?? Prisma.JsonNull,
+        startDate: new Date(dto.startDate),
+        endDate: dto.endDate ? new Date(dto.endDate) : null,
+        sponsorshipAmount: dto.sponsorshipAmount,
+        barterElements: dto.barterElements,
+        deliverables: dto.deliverables,
+        otherTerms: dto.otherTerms,
+        additionalNotes: dto.additionalNotes,
+        createdById: userId,
+      },
+    });
+
+    const recipientUserId = this.recipientForCounterpart(interest);
+    if (recipientUserId) {
+      void this.notificationsService
+        .create(recipientUserId, 'space_deal_locked', 'Deal terms submitted', `${interest.spaceCommunityProfile.name} submitted deal terms for your review.`, {
+          spaceInterestId: interest.id,
+        })
+        .catch(() => undefined);
+    }
+
+    return deal;
+  }
+
+  async updateSpaceDeal(userId: string, interestId: string, dto: UpsertSpaceDealDto) {
+    const { interest, isSpace } = await this.getSpaceInterestForParticipant(userId, interestId);
+    if (!isSpace) throw new ForbiddenException('Only the space can edit deal terms');
+
+    const existing = await this.prisma.spaceDeal.findUnique({ where: { spaceInterestId: interest.id } });
+    if (!existing) throw new NotFoundException('No deal exists for this chat yet');
+    if (existing.status === 'APPROVED') throw new BadRequestException('An approved deal cannot be edited');
+
+    const updated = await this.prisma.spaceDeal.update({
+      where: { spaceInterestId: interest.id },
+      data: {
+        projectName: dto.projectName,
+        goals: dto.goals ?? Prisma.JsonNull,
+        venue: dto.venue,
+        time: dto.time,
+        targetAudience: dto.targetAudience ?? Prisma.JsonNull,
+        startDate: new Date(dto.startDate),
+        endDate: dto.endDate ? new Date(dto.endDate) : null,
+        sponsorshipAmount: dto.sponsorshipAmount,
+        barterElements: dto.barterElements,
+        deliverables: dto.deliverables,
+        otherTerms: dto.otherTerms,
+        additionalNotes: dto.additionalNotes,
+        status: 'PENDING_APPROVAL',
+        changeRequestNote: null,
+      },
+    });
+
+    const recipientUserId = this.recipientForCounterpart(interest);
+    if (recipientUserId) {
+      void this.notificationsService
+        .create(recipientUserId, 'space_deal_updated', 'Deal terms updated', `${interest.spaceCommunityProfile.name} updated the deal terms — please review again.`, {
+          spaceInterestId: interest.id,
+        })
+        .catch(() => undefined);
+    }
+
+    return updated;
+  }
+
+  async approveSpaceDeal(userId: string, interestId: string) {
+    const { interest, isSpace } = await this.getSpaceInterestForParticipant(userId, interestId);
+    if (isSpace) throw new ForbiddenException('Only the counterpart can approve the deal');
+
+    const existing = await this.prisma.spaceDeal.findUnique({ where: { spaceInterestId: interest.id } });
+    if (!existing) throw new NotFoundException('No deal exists for this chat yet');
+
+    const updated = await this.prisma.spaceDeal.update({
+      where: { spaceInterestId: interest.id },
+      data: { status: 'APPROVED', approvedAt: new Date(), changeRequestNote: null },
+    });
+
+    void this.notificationsService
+      .create(
+        interest.spaceCommunityProfile.spaceProfile.userId,
+        'space_deal_approved',
+        'Deal approved!',
+        'The counterpart approved the deal — it is now locked.',
+        { spaceInterestId: interest.id },
+      )
+      .catch(() => undefined);
+
+    return updated;
+  }
+
+  async requestSpaceDealChanges(userId: string, interestId: string, dto: RequestSpaceDealChangesDto) {
+    const { interest, isSpace } = await this.getSpaceInterestForParticipant(userId, interestId);
+    if (isSpace) throw new ForbiddenException('Only the counterpart can request changes to the deal');
+
+    const existing = await this.prisma.spaceDeal.findUnique({ where: { spaceInterestId: interest.id } });
+    if (!existing) throw new NotFoundException('No deal exists for this chat yet');
+
+    const updated = await this.prisma.spaceDeal.update({
+      where: { spaceInterestId: interest.id },
+      data: { status: 'CHANGES_REQUESTED', changeRequestNote: dto.note ?? null },
+    });
+
+    void this.notificationsService
+      .create(
+        interest.spaceCommunityProfile.spaceProfile.userId,
+        'space_deal_changes_requested',
+        'Changes requested on the deal',
+        dto.note || 'The counterpart requested changes to the deal terms.',
+        { spaceInterestId: interest.id },
+      )
+      .catch(() => undefined);
+
+    return updated;
   }
 }

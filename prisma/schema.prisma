@@ -109,6 +109,7 @@ model User {
   sponsorshipDealReportsSubmitted SponsorshipDealReport[]  @relation("SponsorshipDealReportSubmittedBy")
 
   spaceChatMessages SpaceChatMessage[] @relation("SpaceChatMessageSender")
+  spaceDealsCreated SpaceDeal[]        @relation("SpaceDealCreatedBy")
 
   meetdayChatThread   MeetdayChatThread?   @relation("MeetdayChatThreadUser")
   meetdayChatMessages MeetdayChatMessage[] @relation("MeetdayChatMessageSender")
@@ -613,7 +614,7 @@ enum SpaceChatSenderType {
 }
 
 // Brand or Community expressing interest in a Community Space — same request/accept/chat shape
-// as SponsorshipInterest, but simpler (no deal/payment lifecycle, just interest -> chat).
+// as SponsorshipInterest. A SpaceDeal can be locked in once chat negotiation is done.
 model SpaceInterest {
   id                      String                @id @default(uuid())
   spaceCommunityProfileId String
@@ -635,6 +636,7 @@ model SpaceInterest {
   spaceLastReadAt     DateTime?
 
   chatMessages SpaceChatMessage[]
+  deal         SpaceDeal?
 
   createdAt DateTime @default(now())
 
@@ -663,6 +665,48 @@ model SpaceChatMessage {
 
   @@index([spaceInterestId, createdAt])
   @@map("space_chat_messages")
+}
+
+enum SpaceDealStatus {
+  PENDING_APPROVAL // space submitted/edited, awaiting the counterpart's review
+  CHANGES_REQUESTED // counterpart asked for changes, space needs to edit
+  APPROVED // counterpart approved — deal is locked, preserved as the final record
+}
+
+// Negotiated final terms for a Community Space booking — filled in by the space partner once
+// chat negotiation is done ("Lock the Deal"), reviewed/approved by the brand or community that
+// requested the space. Same request/edit/approve shape as SponsorshipDeal, minus payment/report
+// (spaces are booked/paid for entirely outside the platform for now).
+model SpaceDeal {
+  id              String        @id @default(uuid())
+  spaceInterestId String        @unique
+  spaceInterest   SpaceInterest @relation(fields: [spaceInterestId], references: [id], onDelete: Cascade)
+
+  projectName       String
+  goals             Json? // string[] or string, free-form from the form
+  venue             String
+  time              String?
+  targetAudience    Json? // string[] or string
+  startDate         DateTime
+  endDate           DateTime?
+  sponsorshipAmount Decimal
+  barterElements    String?   @db.Text
+  deliverables      String    @db.Text
+  otherTerms        String?   @db.Text
+  additionalNotes   String?   @db.Text
+
+  status            SpaceDealStatus @default(PENDING_APPROVAL)
+  changeRequestNote String?         @db.Text
+  approvedAt        DateTime?
+
+  createdById String
+  createdBy   User   @relation("SpaceDealCreatedBy", fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@map("space_deals")
 }
 
 enum CompanyType {
