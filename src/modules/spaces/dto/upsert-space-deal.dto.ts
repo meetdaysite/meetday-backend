@@ -1,4 +1,4 @@
-import { IsISO8601, IsNumber, IsOptional, IsString, Min, MaxLength } from 'class-validator';
+import { IsISO8601, IsEnum, IsNumber, IsOptional, IsString, Min, MaxLength } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -64,4 +64,12 @@ export class UpsertSpaceDealDto {
   @IsString()
   @MaxLength(4000)
   additionalNotes?: string;
+
+  @ApiPropertyOptional({
+    enum: ['BRAND', 'COMMUNITY', 'SPACE'],
+    description: 'Which dashboard this was submitted from — only needed for accounts that own both the space and requester profile.',
+  })
+  @IsOptional()
+  @IsEnum(['BRAND', 'COMMUNITY', 'SPACE'])
+  asRole?: 'BRAND' | 'COMMUNITY' | 'SPACE';
 }

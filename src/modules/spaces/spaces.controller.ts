@@ -123,8 +123,12 @@ export class SpacesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Accept an interest request and open the chat' })
   @ApiOkResponse({ description: 'Request accepted.' })
-  acceptChatRequest(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string) {
-    return this.spacesService.acceptSpaceInterest(userId, interestId);
+  acceptChatRequest(
+    @GetUser('id') userId: string,
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Query('role') role?: 'BRAND' | 'COMMUNITY' | 'SPACE',
+  ) {
+    return this.spacesService.acceptSpaceInterest(userId, interestId, role);
   }
 
   @Post('chats/:interestId/decline')
@@ -132,8 +136,12 @@ export class SpacesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Decline an interest request' })
   @ApiOkResponse({ description: 'Request declined.' })
-  declineChatRequest(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string) {
-    return this.spacesService.declineSpaceInterest(userId, interestId);
+  declineChatRequest(
+    @GetUser('id') userId: string,
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Query('role') role?: 'BRAND' | 'COMMUNITY' | 'SPACE',
+  ) {
+    return this.spacesService.declineSpaceInterest(userId, interestId, role);
   }
 
   // ── Deal Lock: space fills in terms, counterpart (brand/community) approves ─────────────
@@ -168,8 +176,12 @@ export class SpacesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Approve and lock the deal', description: 'Only the counterpart (brand/community) can approve.' })
   @ApiOkResponse({ description: 'Deal approved.' })
-  approveDeal(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string) {
-    return this.spacesService.approveSpaceDeal(userId, interestId);
+  approveDeal(
+    @GetUser('id') userId: string,
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Query('role') role?: 'BRAND' | 'COMMUNITY' | 'SPACE',
+  ) {
+    return this.spacesService.approveSpaceDeal(userId, interestId, role);
   }
 
   @Post('chats/:interestId/deal/request-changes')

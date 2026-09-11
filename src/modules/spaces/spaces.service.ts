@@ -532,15 +532,19 @@ export class SpacesService {
     }
     if (!isSpace && !isBrand && !isHost) throw new ForbiddenException('You do not have access to this chat');
 
-    const senderType: SpaceChatSenderType = preferredRole
-      ? SpaceChatSenderType[preferredRole]
-      : isSpace
-        ? SpaceChatSenderType.SPACE
-        : isBrand
-          ? SpaceChatSenderType.BRAND
-          : SpaceChatSenderType.COMMUNITY;
+    // Which "hat" is in effect for THIS call. A single account can plausibly own both the space
+    // AND the requesting brand/community profile (self-testing, or a real dual-role account) —
+    // in that case isSpace/isBrand/isHost can ALL be true at once, so the caller's own stated
+    // intent (which dashboard they're acting from) must win over any fixed priority order.
+    let effectiveRole: SpaceChatSenderType;
+    if (preferredRole === 'SPACE' && isSpace) effectiveRole = SpaceChatSenderType.SPACE;
+    else if (preferredRole === 'BRAND' && isBrand) effectiveRole = SpaceChatSenderType.BRAND;
+    else if (preferredRole === 'COMMUNITY' && isHost) effectiveRole = SpaceChatSenderType.COMMUNITY;
+    else if (isSpace) effectiveRole = SpaceChatSenderType.SPACE;
+    else if (isBrand) effectiveRole = SpaceChatSenderType.BRAND;
+    else effectiveRole = SpaceChatSenderType.COMMUNITY;
 
-    return { interest, isSpace, isBrand, isHost, senderType };
+    return { interest, isSpace, isBrand, isHost, senderType: effectiveRole, effectiveRole };
   }
 
   async listSpaceChatMessages(userId: string, interestId: string, preferredRole?: 'BRAND' | 'COMMUNITY' | 'SPACE') {
@@ -571,7 +575,7 @@ export class SpacesService {
   }
 
   async sendSpaceChatMessage(userId: string, interestId: string, dto: SendSpaceChatMessageDto) {
-    const { interest, senderType } = await this.getSpaceInterestForParticipant(userId, interestId);
+    const { interest, senderType } = await this.getSpaceInterestForParticipant(userId, interestId, dto.asRole);
     if (interest.chatStatus !== 'ACCEPTED') {
       throw new BadRequestException('The space must accept this request before you can chat.');
     }
@@ -619,9 +623,9 @@ export class SpacesService {
   }
 
   // Space partner accepts a pending request — opens the chat both sides ("Requests" → "Chats").
-  async acceptSpaceInterest(userId: string, interestId: string) {
-    const { interest, isSpace } = await this.getSpaceInterestForParticipant(userId, interestId);
-    if (!isSpace) throw new ForbiddenException('Only the space can accept this request');
+  async acceptSpaceInterest(userId: string, interestId: string, preferredRole?: 'BRAND' | 'COMMUNITY' | 'SPACE') {
+    const { interest, effectiveRole } = await this.getSpaceInterestForParticipant(userId, interestId, preferredRole);
+    if (effectiveRole !== 'SPACE') throw new ForbiddenException('Only the space can accept this request');
     if (interest.chatStatus === 'ACCEPTED') return { message: 'Already accepted', chatStatus: interest.chatStatus };
 
     const updated = await this.prisma.spaceInterest.update({
@@ -646,9 +650,9 @@ export class SpacesService {
   }
 
   // Space partner declines a pending request — terminal state, no further chat.
-  async declineSpaceInterest(userId: string, interestId: string) {
-    const { interest, isSpace } = await this.getSpaceInterestForParticipant(userId, interestId);
-    if (!isSpace) throw new ForbiddenException('Only the space can decline this request');
+  async declineSpaceInterest(userId: string, interestId: string, preferredRole?: 'BRAND' | 'COMMUNITY' | 'SPACE') {
+    const { interest, effectiveRole } = await this.getSpaceInterestForParticipant(userId, interestId, preferredRole);
+    if (effectiveRole !== 'SPACE') throw new ForbiddenException('Only the space can decline this request');
     if (interest.chatStatus !== 'REQUESTED') {
       throw new BadRequestException('Only a pending request can be declined');
     }
@@ -671,8 +675,8 @@ export class SpacesService {
   }
 
   async createSpaceDeal(userId: string, interestId: string, dto: UpsertSpaceDealDto) {
-    const { interest, isSpace } = await this.getSpaceInterestForParticipant(userId, interestId);
-    if (!isSpace) throw new ForbiddenException('Only the space can lock in deal terms');
+    const { interest, effectiveRole } = await this.getSpaceInterestForParticipant(userId, interestId, dto.asRole);
+    if (effectiveRole !== 'SPACE') throw new ForbiddenException('Only the space can lock in deal terms');
     if (interest.chatStatus !== 'ACCEPTED') throw new BadRequestException('The chat must be accepted before locking a deal');
 
     const existing = await this.prisma.spaceDeal.findUnique({ where: { spaceInterestId: interest.id } });
@@ -710,8 +714,8 @@ export class SpacesService {
   }
 
   async updateSpaceDeal(userId: string, interestId: string, dto: UpsertSpaceDealDto) {
-    const { interest, isSpace } = await this.getSpaceInterestForParticipant(userId, interestId);
-    if (!isSpace) throw new ForbiddenException('Only the space can edit deal terms');
+    const { interest, effectiveRole } = await this.getSpaceInterestForParticipant(userId, interestId, dto.asRole);
+    if (effectiveRole !== 'SPACE') throw new ForbiddenException('Only the space can edit deal terms');
 
     const existing = await this.prisma.spaceDeal.findUnique({ where: { spaceInterestId: interest.id } });
     if (!existing) throw new NotFoundException('No deal exists for this chat yet');
@@ -749,9 +753,9 @@ export class SpacesService {
     return updated;
   }
 
-  async approveSpaceDeal(userId: string, interestId: string) {
-    const { interest, isSpace } = await this.getSpaceInterestForParticipant(userId, interestId);
-    if (isSpace) throw new ForbiddenException('Only the counterpart can approve the deal');
+  async approveSpaceDeal(userId: string, interestId: string, preferredRole?: 'BRAND' | 'COMMUNITY' | 'SPACE') {
+    const { interest, effectiveRole } = await this.getSpaceInterestForParticipant(userId, interestId, preferredRole);
+    if (effectiveRole === 'SPACE') throw new ForbiddenException('Only the counterpart can approve the deal');
 
     const existing = await this.prisma.spaceDeal.findUnique({ where: { spaceInterestId: interest.id } });
     if (!existing) throw new NotFoundException('No deal exists for this chat yet');
@@ -775,8 +779,8 @@ export class SpacesService {
   }
 
   async requestSpaceDealChanges(userId: string, interestId: string, dto: RequestSpaceDealChangesDto) {
-    const { interest, isSpace } = await this.getSpaceInterestForParticipant(userId, interestId);
-    if (isSpace) throw new ForbiddenException('Only the counterpart can request changes to the deal');
+    const { interest, effectiveRole } = await this.getSpaceInterestForParticipant(userId, interestId, dto.asRole);
+    if (effectiveRole === 'SPACE') throw new ForbiddenException('Only the counterpart can request changes to the deal');
 
     const existing = await this.prisma.spaceDeal.findUnique({ where: { spaceInterestId: interest.id } });
     if (!existing) throw new NotFoundException('No deal exists for this chat yet');
