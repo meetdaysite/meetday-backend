@@ -113,4 +113,24 @@ export class CreateProposalDto {
   @IsOptional()
   @IsString()
   sponsorshipType?: string;
+
+  @ApiPropertyOptional({ description: 'Space Partner only — number of days for a Pop-up activation slot' })
+  @IsOptional()
+  @IsString()
+  popupDays?: string;
+
+  @ApiPropertyOptional({ description: 'Space Partner only — price for a Pop-up activation slot' })
+  @IsOptional()
+  @IsString()
+  popupPrice?: string;
+
+  @ApiPropertyOptional({ description: 'Space Partner only — number of days for a Branding slot' })
+  @IsOptional()
+  @IsString()
+  brandingDays?: string;
+
+  @ApiPropertyOptional({ description: 'Space Partner only — price for a Branding slot' })
+  @IsOptional()
+  @IsString()
+  brandingPrice?: string;
 }

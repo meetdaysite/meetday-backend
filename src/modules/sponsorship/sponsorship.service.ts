@@ -83,7 +83,7 @@ export class SponsorshipService {
   }
 
   private async withSignedUrls<
-    T extends { imageKey: string; docKey: string; pendingRevision: Prisma.JsonValue | null },
+    T extends { imageKey: string; docKey: string | null; pendingRevision: Prisma.JsonValue | null },
   >(proposal: T) {
     const [imageUrl, docUrl] = await Promise.all([
       proposal.imageKey ? this.storageService.getPresignedDownloadUrl(proposal.imageKey) : null,
@@ -141,9 +141,17 @@ export class SponsorshipService {
   private async getOwnedProposal(userId: string, id: string) {
     const proposal = await this.prisma.sponsorshipProposal.findUnique({
       where: { id },
-      include: { hostProfile: { select: { userId: true } } },
+      include: {
+        hostProfile: { select: { userId: true } },
+        spaceProfile: { select: { userId: true } },
+      },
     });
     if (!proposal) throw new NotFoundException('Sponsorship proposal not found');
+    if (proposal.spaceProfile) {
+      if (proposal.spaceProfile.userId !== userId) throw new ForbiddenException('You do not own this proposal');
+      return proposal;
+    }
+    if (!proposal.hostProfile) throw new NotFoundException('Sponsorship proposal not found');
     if (proposal.hostProfile.userId !== userId) {
       const hostProfileIds = await this.teamAccessService.getHostProfileIds(userId);
       if (!hostProfileIds.includes(proposal.hostProfileId))
@@ -152,10 +160,64 @@ export class SponsorshipService {
     return proposal;
   }
 
-  async createProposal(userId: string, dto: CreateProposalDto) {
+  // Resolves which kind of profile (Host or Space Partner) is creating/owning a proposal, based
+  // on the caller's account role — mirrors the pattern used for Meetday support chat threads.
+  private async resolveProposalOwner(userId: string): Promise<
+    { type: 'SPACE'; spaceProfileId: string } | { type: 'HOST'; hostProfileId: string }
+  > {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: { select: { name: true } } } });
+    if (user?.role?.name === 'SPACE_PARTNER') {
+      const spaceProfile = await this.prisma.spaceProfile.findUnique({ where: { userId }, select: { id: true } });
+      if (!spaceProfile) throw new NotFoundException('Space profile not found');
+      return { type: 'SPACE', spaceProfileId: spaceProfile.id };
+    }
     const hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
+    return { type: 'HOST', hostProfileId };
+  }
+
+  async createProposal(userId: string, dto: CreateProposalDto) {
+    const owner = await this.resolveProposalOwner(userId);
+
+    if (owner.type === 'SPACE') {
+      const proposal = await this.prisma.sponsorshipProposal.create({
+        data: {
+          spaceProfileId: owner.spaceProfileId,
+          name: dto.name ?? '',
+          about: dto.about ?? '',
+          imageKey: dto.imageKey ?? '',
+          eventDate: dto.eventDate ? new Date(dto.eventDate) : new Date(0),
+          eventEndDate: dto.eventEndDate ? new Date(dto.eventEndDate) : null,
+          venue: dto.venues?.[0] ?? '',
+          venues: dto.venues ?? [],
+          city: dto.venueCities?.[0] ?? '',
+          venueCities: dto.venueCities ?? [],
+          audienceProfile: dto.audienceProfile ?? [],
+          ageGroup: dto.ageGroup ?? '',
+          guestCount: dto.guestCount ?? '',
+          videoUrl: dto.videoUrl ?? null,
+          sponsorshipType: dto.sponsorshipType || 'CASH',
+          sponsorTiers: (dto.sponsorshipType === 'BARTER' ? [] : (dto.sponsorTiers ?? [])) as unknown as Prisma.InputJsonValue,
+          popupDays: dto.popupDays ?? null,
+          popupPrice: dto.popupPrice ?? null,
+          brandingDays: dto.brandingDays ?? null,
+          brandingPrice: dto.brandingPrice ?? null,
+          status: SponsorshipStatus.DRAFT,
+        },
+      });
+
+      this.auditLogService.log({
+        actorId: userId,
+        actorRole: 'SPACE_PARTNER',
+        action: 'SPONSORSHIP_PROPOSAL_CREATED',
+        entityType: 'SPONSORSHIP_PROPOSAL',
+        entityId: proposal.id,
+      });
+
+      return this.withSignedUrls(proposal);
+    }
+
     const hostProfile = await this.prisma.hostProfile.findUnique({
-      where: { id: hostProfileId },
+      where: { id: owner.hostProfileId },
       select: { id: true, approvalStatus: true },
     });
     if (!hostProfile) throw new NotFoundException('Host profile not found');
@@ -245,6 +307,10 @@ export class SponsorshipService {
             ...(dto.sponsorTiers !== undefined && {
               sponsorTiers: (dto.sponsorshipType === 'BARTER' ? [] : dto.sponsorTiers) as unknown as Prisma.InputJsonValue,
             }),
+            ...(dto.popupDays !== undefined && { popupDays: dto.popupDays }),
+            ...(dto.popupPrice !== undefined && { popupPrice: dto.popupPrice }),
+            ...(dto.brandingDays !== undefined && { brandingDays: dto.brandingDays }),
+            ...(dto.brandingPrice !== undefined && { brandingPrice: dto.brandingPrice }),
           },
         }),
       );
@@ -261,7 +327,7 @@ export class SponsorshipService {
 
     this.auditLogService.log({
       actorId: userId,
-      actorRole: 'HOST',
+      actorRole: proposal.spaceProfileId ? 'SPACE_PARTNER' : 'HOST',
       action: 'SPONSORSHIP_PROPOSAL_REVISION_SUBMITTED',
       entityType: 'SPONSORSHIP_PROPOSAL',
       entityId: id,
@@ -287,12 +353,13 @@ export class SponsorshipService {
   }
 
   async getMyProposals(userId: string, query: ListProposalsQueryDto) {
-    const id = await this.teamAccessService.resolveHostProfileId(userId);
-    const hostProfile = await this.prisma.hostProfile.findUnique({ where: { id }, select: { id: true } });
-    if (!hostProfile) throw new NotFoundException('Host profile not found');
+    const owner = await this.resolveProposalOwner(userId);
 
     const proposals = await this.prisma.sponsorshipProposal.findMany({
-      where: { hostProfileId: hostProfile.id, ...(query.status && { status: query.status }) },
+      where: {
+        ...(owner.type === 'SPACE' ? { spaceProfileId: owner.spaceProfileId } : { hostProfileId: owner.hostProfileId }),
+        ...(query.status && { status: query.status }),
+      },
       orderBy: { updatedAt: 'desc' },
     });
 
@@ -300,13 +367,27 @@ export class SponsorshipService {
     return { proposals: withSignedUrls, total: withSignedUrls.length, page: 1, limit: withSignedUrls.length };
   }
 
-  // Flattens a host's community profile categories onto the proposal for brand-side filtering.
-  // Only an APPROVED community profile counts — pending/rejected ones are treated as uncategorized.
+  // Flattens the owner's (host OR space) community profile categories onto the proposal for
+  // brand-side filtering. Only an APPROVED community profile counts — pending/rejected ones are
+  // treated as uncategorized.
   private static readonly PUBLISHED_INCLUDE = {
     hostProfile: {
       select: {
         id: true,
         displayName: true,
+        user: { select: { firstName: true, lastName: true } },
+        communityProfile: {
+          select: {
+            approvalStatus: true,
+            categories: { select: { category: { select: { id: true, name: true } } } },
+          },
+        },
+      },
+    },
+    spaceProfile: {
+      select: {
+        id: true,
+        businessName: true,
         user: { select: { firstName: true, lastName: true } },
         communityProfile: {
           select: {
@@ -325,20 +406,36 @@ export class SponsorshipService {
           approvalStatus: string;
           categories: { category: { id: string; name: string } }[];
         } | null;
-      };
+      } | null;
+      spaceProfile: {
+        communityProfile: {
+          approvalStatus: string;
+          categories: { category: { id: string; name: string } }[];
+        } | null;
+      } | null;
     },
   >(proposal: T) {
-    const { hostProfile, ...rest } = proposal;
+    const { hostProfile, spaceProfile, ...rest } = proposal;
+    if (spaceProfile) {
+      const { communityProfile, ...spaceRest } = spaceProfile;
+      const categories =
+        communityProfile?.approvalStatus === 'APPROVED'
+          ? communityProfile.categories.map((c) => c.category)
+          : [];
+      return { ...rest, ownerType: 'SPACE' as const, spaceProfile: { ...spaceRest, categories }, hostProfile: null };
+    }
+    if (!hostProfile) throw new NotFoundException('Sponsorship proposal not found');
     const { communityProfile, ...hostRest } = hostProfile;
     const categories =
       communityProfile?.approvalStatus === 'APPROVED'
         ? communityProfile.categories.map((c) => c.category)
         : [];
-    return { ...rest, hostProfile: { ...hostRest, categories } };
+    return { ...rest, ownerType: 'HOST' as const, hostProfile: { ...hostRest, categories }, spaceProfile: null };
   }
 
-  // Brand-facing: every published proposal across all hosts, newest first. Optionally filtered by
-  // category, matched against the host's APPROVED community profile categories.
+  // Brand-facing: every published proposal across all hosts AND Space Partners, newest first.
+  // Optionally filtered by category, matched against the owner's APPROVED community profile
+  // categories (either HostCommunityProfile or SpaceCommunityProfile, whichever applies).
   // Filters out proposals whose event has already ended (eventEndDate or eventDate < start of today).
   async getAllPublishedProposals(query: ListPublishedQueryDto) {
     const startOfToday = new Date();
@@ -346,21 +443,48 @@ export class SponsorshipService {
 
     const proposals = await this.prisma.sponsorshipProposal.findMany({
       where: {
-        status: SponsorshipStatus.PUBLISHED,
-        // A community an admin has hidden must not surface in brand browse/discovery at all.
-        NOT: { hostProfile: { communityProfile: { isHidden: true } } },
-        OR: [
-          { eventEndDate: { gte: startOfToday } },
-          { eventEndDate: null, eventDate: { gte: startOfToday } },
-        ],
-        ...(query.categoryId && {
-          hostProfile: {
-            communityProfile: {
-              approvalStatus: 'APPROVED',
-              categories: { some: { categoryId: query.categoryId } },
+        AND: [
+          { status: SponsorshipStatus.PUBLISHED },
+          // A community/space an admin has hidden must not surface in brand browse/discovery at all.
+          {
+            NOT: {
+              OR: [
+                { hostProfile: { communityProfile: { isHidden: true } } },
+                { spaceProfile: { communityProfile: { isHidden: true } } },
+              ],
             },
           },
-        }),
+          {
+            OR: [
+              { eventEndDate: { gte: startOfToday } },
+              { eventEndDate: null, eventDate: { gte: startOfToday } },
+            ],
+          },
+          ...(query.categoryId
+            ? [
+                {
+                  OR: [
+                    {
+                      hostProfile: {
+                        communityProfile: {
+                          approvalStatus: 'APPROVED' as const,
+                          categories: { some: { categoryId: query.categoryId } },
+                        },
+                      },
+                    },
+                    {
+                      spaceProfile: {
+                        communityProfile: {
+                          approvalStatus: 'APPROVED' as const,
+                          categories: { some: { categoryId: query.categoryId } },
+                        },
+                      },
+                    },
+                  ],
+                },
+              ]
+            : []),
+        ],
       },
       include: SponsorshipService.PUBLISHED_INCLUDE,
       orderBy: { updatedAt: 'desc' },
@@ -369,13 +493,13 @@ export class SponsorshipService {
     const withSignedUrls = await Promise.all(
       proposals.map(async (p) => this.flattenCategories(await this.withSignedUrls(p))),
     );
-    // Brands must never see a host's not-yet-approved pending edits.
+    // Brands must never see a host's/space's not-yet-approved pending edits.
     const withoutPendingRevision = withSignedUrls.map(({ pendingRevision: _pendingRevision, ...p }) => p);
     return { proposals: withoutPendingRevision, total: withoutPendingRevision.length };
   }
 
-  // Brand-facing: full detail of one published proposal, including the host's community profile
-  // (if approved) for the "data room" view.
+  // Brand-facing: full detail of one published proposal, including the owner's (host OR space)
+  // community profile (if approved) for the "data room" view.
   async getPublishedProposalDetail(id: string, userId?: string) {
     const proposal = await this.prisma.sponsorshipProposal.findUnique({
       where: { id },
@@ -392,12 +516,27 @@ export class SponsorshipService {
             },
           },
         },
+        spaceProfile: {
+          select: {
+            id: true,
+            businessName: true,
+            operatingCities: true,
+            socialLinks: true,
+            user: { select: { firstName: true, lastName: true } },
+            communityProfile: {
+              include: { categories: { include: { category: true } } },
+            },
+          },
+        },
       },
     });
     if (!proposal || proposal.status !== SponsorshipStatus.PUBLISHED)
       throw new NotFoundException('Sponsorship proposal not found');
-    // A hidden community's proposals are treated as not found for brands, same as unpublished.
-    if (proposal.hostProfile.communityProfile?.isHidden) throw new NotFoundException('Sponsorship proposal not found');
+    const isSpace = !!proposal.spaceProfile;
+    // A hidden community/space's proposals are treated as not found for brands, same as unpublished.
+    if (isSpace ? proposal.spaceProfile!.communityProfile?.isHidden : proposal.hostProfile?.communityProfile?.isHidden) {
+      throw new NotFoundException('Sponsorship proposal not found');
+    }
 
     let alreadyInterested = false;
     if (userId) {
@@ -427,43 +566,80 @@ export class SponsorshipService {
     const isPastEndDate = effectiveEndDate ? effectiveEndDate < startOfToday : false;
 
     if (isPastEndDate && !alreadyInterested) {
-      let isHostMember = false;
+      let isOwnerMember = false;
       if (userId) {
-        const hostProfileIds = await this.teamAccessService.getHostProfileIds(userId);
-        isHostMember = hostProfileIds.includes(proposal.hostProfile.id);
+        if (isSpace) {
+          const spaceProfile = await this.prisma.spaceProfile.findUnique({ where: { userId }, select: { id: true } });
+          isOwnerMember = spaceProfile?.id === proposal.spaceProfile!.id;
+        } else {
+          const hostProfileIds = await this.teamAccessService.getHostProfileIds(userId);
+          isOwnerMember = hostProfileIds.includes(proposal.hostProfile!.id);
+        }
       }
-      if (!isHostMember) {
+      if (!isOwnerMember) {
         throw new NotFoundException('Sponsorship proposal not found');
       }
     }
 
     const withUrls = await this.withSignedUrls(proposal);
-    const { hostProfile, ...rest } = withUrls;
-    const { communityProfile, ...hostRest } = hostProfile;
+    const { hostProfile, spaceProfile, ...rest } = withUrls;
 
     let community: Record<string, unknown> | null = null;
-    if (communityProfile && communityProfile.approvalStatus === 'APPROVED') {
-      const { categories, logoKey, secondaryImageKey, pastEvents, brandsWorkedWith, ...communityRest } = communityProfile;
-      const [logoUrl, secondaryImageUrl, pastEventsWithUrls, brandsWorkedWithWithUrls] = await Promise.all([
-        logoKey ? this.storageService.getPresignedDownloadUrl(logoKey) : null,
-        secondaryImageKey ? this.storageService.getPresignedDownloadUrl(secondaryImageKey) : null,
-        this.withPastEventImageUrls(pastEvents as PastEventLike[] | null),
-        this.withBrandsWorkedWithLogoUrls(brandsWorkedWith as BrandWorkedWithLike[] | null),
-      ]);
-      community = {
-        ...communityRest,
-        logoUrl,
-        secondaryImageUrl,
-        pastEvents: pastEventsWithUrls,
-        brandsWorkedWith: brandsWorkedWithWithUrls,
-        categories: categories.map((c) => c.category),
-      };
+    let ownerProfile: Record<string, unknown> | null = null;
+
+    if (isSpace) {
+      const { communityProfile, ...spaceRest } = spaceProfile!;
+      ownerProfile = spaceRest;
+      if (communityProfile && communityProfile.approvalStatus === 'APPROVED') {
+        const { categories, logoKey, posterKey, pastEvents, brandsWorkedWith, ...communityRest } = communityProfile;
+        const [logoUrl, posterUrl, pastEventsWithUrls, brandsWorkedWithWithUrls] = await Promise.all([
+          logoKey ? this.storageService.getPresignedDownloadUrl(logoKey) : null,
+          posterKey ? this.storageService.getPresignedDownloadUrl(posterKey) : null,
+          this.withPastEventImageUrls(pastEvents as PastEventLike[] | null),
+          this.withBrandsWorkedWithLogoUrls(brandsWorkedWith as BrandWorkedWithLike[] | null),
+        ]);
+        community = {
+          ...communityRest,
+          logoUrl,
+          posterUrl,
+          pastEvents: pastEventsWithUrls,
+          brandsWorkedWith: brandsWorkedWithWithUrls,
+          categories: categories.map((c) => c.category),
+        };
+      }
+    } else {
+      const { communityProfile, ...hostRest } = hostProfile!;
+      ownerProfile = hostRest;
+      if (communityProfile && communityProfile.approvalStatus === 'APPROVED') {
+        const { categories, logoKey, secondaryImageKey, pastEvents, brandsWorkedWith, ...communityRest } = communityProfile;
+        const [logoUrl, secondaryImageUrl, pastEventsWithUrls, brandsWorkedWithWithUrls] = await Promise.all([
+          logoKey ? this.storageService.getPresignedDownloadUrl(logoKey) : null,
+          secondaryImageKey ? this.storageService.getPresignedDownloadUrl(secondaryImageKey) : null,
+          this.withPastEventImageUrls(pastEvents as PastEventLike[] | null),
+          this.withBrandsWorkedWithLogoUrls(brandsWorkedWith as BrandWorkedWithLike[] | null),
+        ]);
+        community = {
+          ...communityRest,
+          logoUrl,
+          secondaryImageUrl,
+          pastEvents: pastEventsWithUrls,
+          brandsWorkedWith: brandsWorkedWithWithUrls,
+          categories: categories.map((c) => c.category),
+        };
+      }
     }
 
-    // Brands must never see the host's not-yet-approved pending edits.
+    // Brands must never see the owner's not-yet-approved pending edits.
     const { pendingRevision: _pendingRevision, ...restWithoutPendingRevision } = rest;
 
-    return { ...restWithoutPendingRevision, hostProfile: hostRest, community, alreadyInterested };
+    return {
+      ...restWithoutPendingRevision,
+      ownerType: isSpace ? ('SPACE' as const) : ('HOST' as const),
+      hostProfile: isSpace ? null : ownerProfile,
+      spaceProfile: isSpace ? ownerProfile : null,
+      community,
+      alreadyInterested,
+    };
   }
 
   // Brand marks interest in a published proposal — notifies admins (full brand details) and the
@@ -511,6 +687,12 @@ export class SponsorshipService {
     });
     if (!proposal || proposal.status !== SponsorshipStatus.PUBLISHED)
       throw new NotFoundException('Sponsorship proposal not found');
+    // Space Partner-owned proposals route interest through the existing Community Space
+    // interest/chat pipeline (spaces.service.ts markSpaceInterest) instead — the frontend calls
+    // that endpoint directly for these, so reaching here for one is a client bug, not a valid path.
+    if (proposal.spaceProfileId) {
+      throw new BadRequestException('Use the Community Space interest endpoint for this proposal');
+    }
 
     const effectiveEndDate = proposal.eventEndDate ?? proposal.eventDate;
     const startOfToday = new Date();
@@ -638,15 +820,29 @@ export class SponsorshipService {
     if (proposal.status !== SponsorshipStatus.DRAFT && proposal.status !== SponsorshipStatus.REJECTED)
       throw new ForbiddenException('Only DRAFT or REJECTED proposals can be submitted for review');
 
-    const hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
-    const hostProfile = await this.prisma.hostProfile.findUnique({
-      where: { id: hostProfileId },
-      select: { communityProfile: { select: { approvalStatus: true } } },
-    });
-    if (hostProfile?.communityProfile?.approvalStatus !== 'APPROVED') {
-      throw new BadRequestException(
-        'Your community profile must be activated and approved by an admin before you can submit a sponsorship proposal for review.',
-      );
+    const isSpace = !!proposal.spaceProfileId;
+
+    if (isSpace) {
+      const spaceProfile = await this.prisma.spaceProfile.findUnique({
+        where: { id: proposal.spaceProfileId! },
+        select: { communityProfile: { select: { approvalStatus: true } } },
+      });
+      if (spaceProfile?.communityProfile?.approvalStatus !== 'APPROVED') {
+        throw new BadRequestException(
+          'Your Community Space profile must be activated and approved by an admin before you can submit a proposal for review.',
+        );
+      }
+    } else {
+      const hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
+      const hostProfile = await this.prisma.hostProfile.findUnique({
+        where: { id: hostProfileId },
+        select: { communityProfile: { select: { approvalStatus: true } } },
+      });
+      if (hostProfile?.communityProfile?.approvalStatus !== 'APPROVED') {
+        throw new BadRequestException(
+          'Your community profile must be activated and approved by an admin before you can submit a sponsorship proposal for review.',
+        );
+      }
     }
 
     const missing: string[] = [];
@@ -659,10 +855,16 @@ export class SponsorshipService {
     if (!(proposal.audienceProfile as string[])?.length) missing.push('audienceProfile');
     if (!proposal.ageGroup) missing.push('ageGroup');
     if (!proposal.guestCount) missing.push('guestCount');
-    if (!proposal.docKey) missing.push('docKey');
     const sponsorshipType = proposal.sponsorshipType || 'CASH';
-    if (sponsorshipType !== 'BARTER' && !(proposal.sponsorTiers as unknown[])?.length) {
-      missing.push('sponsorTiers');
+    if (isSpace) {
+      const hasPopup = !!proposal.popupDays && !!proposal.popupPrice;
+      const hasBranding = !!proposal.brandingDays && !!proposal.brandingPrice;
+      if (!hasPopup && !hasBranding) missing.push('popup/branding pricing');
+    } else {
+      if (!proposal.docKey) missing.push('docKey');
+      if (sponsorshipType !== 'BARTER' && !(proposal.sponsorTiers as unknown[])?.length) {
+        missing.push('sponsorTiers');
+      }
     }
 
     if (missing.length) throw new BadRequestException(`Proposal is incomplete. Missing: ${missing.join(', ')}`);
@@ -678,7 +880,7 @@ export class SponsorshipService {
 
     this.auditLogService.log({
       actorId: userId,
-      actorRole: 'HOST',
+      actorRole: isSpace ? 'SPACE_PARTNER' : 'HOST',
       action: 'SPONSORSHIP_PROPOSAL_SUBMITTED',
       entityType: 'SPONSORSHIP_PROPOSAL',
       entityId: id,
@@ -733,7 +935,7 @@ export class SponsorshipService {
 
     this.auditLogService.log({
       actorId: userId,
-      actorRole: 'HOST',
+      actorRole: proposal.spaceProfileId ? 'SPACE_PARTNER' : 'HOST',
       action: 'SPONSORSHIP_PROPOSAL_DELETED',
       entityType: 'SPONSORSHIP_PROPOSAL',
       entityId: id,

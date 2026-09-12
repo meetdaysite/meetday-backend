@@ -271,19 +271,24 @@ export class StorageService {
 
       case UploadContext.SPONSORSHIP_MEDIA:
       case UploadContext.SPONSORSHIP_DOCUMENT: {
-        const [hostProfileId] = await this.teamAccessService.getHostProfileIds(userId);
-        let sponsorshipHostProfileId: string;
-        if (hostProfileId) {
-          sponsorshipHostProfileId = hostProfileId;
-        } else if (SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '')) {
-          // Admin creating a sponsorship proposal directly — files are scoped to the system host.
-          sponsorshipHostProfileId = await this.getOrCreateOfficialHostProfileId();
-        } else {
-          throw new NotFoundException('Host profile not found');
-        }
         const folder = dto.context === UploadContext.SPONSORSHIP_MEDIA ? 'media' : 'documents';
-        key = `hosts/${sponsorshipHostProfileId}/sponsorship-proposals/${folder}/${randomUUID()}.${ext}`;
-        break;
+        const [hostProfileId] = await this.teamAccessService.getHostProfileIds(userId);
+        if (hostProfileId) {
+          key = `hosts/${hostProfileId}/sponsorship-proposals/${folder}/${randomUUID()}.${ext}`;
+          break;
+        }
+        const spaceProfile = await this.prisma.spaceProfile.findUnique({ where: { userId }, select: { id: true } });
+        if (spaceProfile) {
+          key = `spaces/${spaceProfile.id}/sponsorship-proposals/${folder}/${randomUUID()}.${ext}`;
+          break;
+        }
+        if (SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '')) {
+          // Admin creating a sponsorship proposal directly — files are scoped to the system host.
+          const sponsorshipHostProfileId = await this.getOrCreateOfficialHostProfileId();
+          key = `hosts/${sponsorshipHostProfileId}/sponsorship-proposals/${folder}/${randomUUID()}.${ext}`;
+          break;
+        }
+        throw new NotFoundException('Host profile not found');
       }
 
       case UploadContext.INTEREST_IMAGE: {

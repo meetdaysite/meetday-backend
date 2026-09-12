@@ -526,6 +526,7 @@ model SpaceProfile {
   socialLinks     Json? // { instagram, linkedin, youtube, website }
 
   communityProfile SpaceCommunityProfile?
+  sponsorshipProposals SponsorshipProposal[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1294,13 +1295,17 @@ enum SocialStyle {
 }
 
 // ─── Sponsorship Proposals ─────────────────────────────────────────────────────
-// Hosts pitch sponsorship-seeking proposals for their planned experiences; admins review and
-// publish them so brands can discover and fund them. Mirrors the Event draft/review lifecycle
-// (DRAFT → UNDER_REVIEW → PUBLISHED/REJECTED) but as a single flat row (no ticket/media sub-tables).
+// Hosts (or Space Partners) pitch sponsorship-seeking proposals for their planned experiences
+// (or venue/space offerings); admins review and publish them so brands can discover and fund
+// them. Mirrors the Event draft/review lifecycle (DRAFT → UNDER_REVIEW → PUBLISHED/REJECTED)
+// but as a single flat row (no ticket/media sub-tables). Exactly one of hostProfileId/
+// spaceProfileId is set per row — enforced in application code (SponsorshipService), not a DB
+// constraint — to distinguish who owns/authored the proposal.
 
 model SponsorshipProposal {
-  id            String @id @default(uuid())
-  hostProfileId String
+  id             String  @id @default(uuid())
+  hostProfileId  String?
+  spaceProfileId String?
 
   name            String
   about           String    @db.Text
@@ -1316,13 +1321,23 @@ model SponsorshipProposal {
   guestCount      String
   videoUrl        String?
 
-  docKey  String // GCS object key for the pitch document (pdf/doc/ppt)
-  docName String
-  docType String
-  docSize Int
+  // Pitch document (pdf/doc/ppt) — only applicable to Host-authored proposals; Space Partner
+  // proposals never collect a document (form omits the upload entirely), so these stay unset.
+  docKey  String?
+  docName String?
+  docType String?
+  docSize Int?
 
   sponsorTiers    Json // [{ name, price }]
   sponsorshipType String @default("CASH") // "CASH" | "BARTER" | "BOTH"
+
+  // Space Partner-only sponsorship offerings — a brand can sponsor a "Pop-up" activation and/or
+  // "Branding" (signage etc.) inside the space for a given number of days at a given price.
+  // Left null for Host-authored proposals.
+  popupDays      String?
+  popupPrice     String?
+  brandingDays   String?
+  brandingPrice  String?
 
   status SponsorshipStatus @default(DRAFT)
 
@@ -1339,10 +1354,12 @@ model SponsorshipProposal {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  hostProfile HostProfile           @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
-  interests   SponsorshipInterest[]
+  hostProfile  HostProfile?          @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
+  spaceProfile SpaceProfile?         @relation(fields: [spaceProfileId], references: [id], onDelete: Cascade)
+  interests    SponsorshipInterest[]
 
   @@index([hostProfileId])
+  @@index([spaceProfileId])
   @@index([status])
   @@map("sponsorship_proposals")
 }

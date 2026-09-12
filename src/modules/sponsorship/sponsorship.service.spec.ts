@@ -655,10 +655,14 @@ describe('SponsorshipService — TriChat', () => {
       expect(prisma.sponsorshipProposal.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            status: 'PUBLISHED',
-            OR: expect.arrayContaining([
-              expect.objectContaining({ eventEndDate: expect.objectContaining({ gte: expect.any(Date) }) }),
-              expect.objectContaining({ eventEndDate: null, eventDate: expect.objectContaining({ gte: expect.any(Date) }) }),
+            AND: expect.arrayContaining([
+              expect.objectContaining({ status: 'PUBLISHED' }),
+              expect.objectContaining({
+                OR: expect.arrayContaining([
+                  expect.objectContaining({ eventEndDate: expect.objectContaining({ gte: expect.any(Date) }) }),
+                  expect.objectContaining({ eventEndDate: null, eventDate: expect.objectContaining({ gte: expect.any(Date) }) }),
+                ]),
+              }),
             ]),
           }),
         }),
