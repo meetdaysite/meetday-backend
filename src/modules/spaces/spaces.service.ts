@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
-import { Prisma, SpaceChatSenderType, SpaceInterestRequesterType } from '@prisma/client';
+import { Prisma, SpaceChatSenderType, SpaceInterestRequesterType, ChatMessageType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../common/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -16,6 +16,7 @@ import { ListSpaceChatsQueryDto } from './dto/list-space-chats-query.dto';
 import { SendSpaceChatMessageDto } from './dto/send-space-chat-message.dto';
 import { UpsertSpaceDealDto } from './dto/upsert-space-deal.dto';
 import { RequestSpaceDealChangesDto } from './dto/request-space-deal-changes.dto';
+import { UpsertSpaceDealReportDto } from './dto/upsert-space-deal-report.dto';
 
 type PastEventLike = { name?: string; description?: string; imageKeys?: string[] };
 type BrandWorkedWithLike = { brandName?: string; logoKey?: string; url?: string };
@@ -845,5 +846,167 @@ export class SpacesService {
     }
 
     return updated;
+  }
+
+  // Posts an automated narrative message about the deal/report lifecycle — mirrors
+  // SponsorshipService.postDealSystemMessage, rendered distinctly (centered/muted) by clients.
+  private async postSpaceDealSystemMessage(interestId: string, senderType: SpaceChatSenderType, senderId: string, content: string) {
+    const message = await this.prisma.spaceChatMessage.create({
+      data: { spaceInterestId: interestId, senderType, senderId, content, messageType: ChatMessageType.SYSTEM },
+    });
+    await this.prisma.spaceInterest
+      .update({
+        where: { id: interestId },
+        data: {
+          lastMessageAt: message.createdAt,
+          ...(senderType === SpaceChatSenderType.SPACE ? { spaceLastReadAt: message.createdAt } : { requesterLastReadAt: message.createdAt }),
+        },
+      })
+      .catch(() => undefined);
+    return message;
+  }
+
+  // ── Submit Report: space reports on completed deliverables once the deal is locked ──────
+
+  async getSpaceDealReport(userId: string, interestId: string, preferredRole?: 'BRAND' | 'COMMUNITY' | 'SPACE') {
+    const { interest } = await this.getSpaceInterestForParticipant(userId, interestId, preferredRole);
+    const deal = await this.prisma.spaceDeal.findUnique({ where: { spaceInterestId: interest.id } });
+    if (!deal) throw new NotFoundException('No deal found for this chat');
+
+    const report = await this.prisma.spaceDealReport.findUnique({ where: { spaceDealId: deal.id } });
+    if (!report) return null;
+
+    const proofUrls = await Promise.all(
+      (report.proofKeys ?? []).filter(Boolean).map(async (key) => {
+        try {
+          return await this.storageService.getPresignedDownloadUrl(key);
+        } catch {
+          return '';
+        }
+      }),
+    );
+    return { ...report, proofUrls };
+  }
+
+  async upsertSpaceDealReport(userId: string, interestId: string, dto: UpsertSpaceDealReportDto) {
+    const { interest, effectiveRole } = await this.getSpaceInterestForParticipant(userId, interestId, dto.asRole);
+
+    const deal = await this.prisma.spaceDeal.findUnique({ where: { spaceInterestId: interest.id } });
+    if (!deal) throw new NotFoundException('No deal found for this chat');
+    if (deal.status !== 'APPROVED') {
+      throw new BadRequestException('The deal must be locked and approved before submitting a report');
+    }
+
+    const existingReport = await this.prisma.spaceDealReport.findUnique({ where: { spaceDealId: deal.id } });
+    const isSpace = effectiveRole === SpaceChatSenderType.SPACE;
+    // Counterpart can only approve/request-revision on an already-submitted report, not create one.
+    if (!isSpace && !existingReport) {
+      throw new ForbiddenException('Only the space can submit the deliverables report');
+    }
+
+    let parsedSummaryStatus: string | undefined;
+    if (dto.summary) {
+      try {
+        parsedSummaryStatus = JSON.parse(dto.summary)?.status;
+      } catch {
+        /* not JSON — fall back to dto.status */
+      }
+    }
+
+    const explicitStatus = dto.status || parsedSummaryStatus;
+    const isCounterpartReviewAction = explicitStatus === 'APPROVED' || explicitStatus === 'REVISION_REQUESTED';
+
+    const finalStatus = isCounterpartReviewAction && !isSpace ? explicitStatus : (explicitStatus ?? 'PENDING');
+    const finalRevisionNote = finalStatus === 'REVISION_REQUESTED' ? (dto.revisionNote ?? dto.notes ?? null) : null;
+
+    const report = await this.prisma.spaceDealReport.upsert({
+      where: { spaceDealId: deal.id },
+      create: {
+        spaceDealId: deal.id,
+        projectName: dto.projectName ?? 'Project',
+        eventDate: dto.eventDate ?? '',
+        venue: dto.venue ?? '',
+        time: dto.time,
+        guestCount: dto.guestCount,
+        ageRange: dto.ageRange,
+        deliverables: dto.deliverables ?? [],
+        videoLinks: dto.videoLinks ?? [],
+        socialLinks: dto.socialLinks ?? [],
+        status: finalStatus,
+        revisionNote: finalRevisionNote,
+        summary: dto.summary,
+        proofKeys: dto.proofKeys ?? [],
+        notes: dto.notes,
+        submittedById: userId,
+      },
+      update: {
+        projectName: dto.projectName ?? 'Project',
+        eventDate: dto.eventDate ?? '',
+        venue: dto.venue ?? '',
+        time: dto.time,
+        guestCount: dto.guestCount,
+        ageRange: dto.ageRange,
+        deliverables: dto.deliverables ?? [],
+        videoLinks: dto.videoLinks ?? [],
+        socialLinks: dto.socialLinks ?? [],
+        status: finalStatus,
+        revisionNote: finalRevisionNote,
+        summary: dto.summary,
+        proofKeys: dto.proofKeys ?? [],
+        notes: dto.notes,
+        submittedById: userId,
+      },
+    });
+
+    const requesterUserId = interest.requesterType === 'BRAND' ? interest.brandProfile?.userId : interest.hostProfile?.userId;
+    const spaceUserId = interest.spaceCommunityProfile.spaceProfile.userId;
+    const spaceName = interest.spaceCommunityProfile.name;
+    const requesterName =
+      interest.requesterType === 'BRAND'
+        ? (interest.brandProfile?.brandName ?? 'The brand')
+        : (interest.hostProfile?.communityProfile?.name ?? interest.hostProfile?.displayName ?? 'The community');
+
+    if (finalStatus === 'PENDING') {
+      await this.postSpaceDealSystemMessage(interest.id, SpaceChatSenderType.SPACE, userId, `${spaceName} submitted the deliverables report.`);
+
+      if (requesterUserId && requesterUserId !== userId) {
+        void this.notificationsService
+          .create(requesterUserId, 'space_deal_report_submitted', spaceName, 'Submitted the deliverables report for your locked deal', {
+            spaceInterestId: interest.id,
+          })
+          .catch(() => undefined);
+      }
+    } else {
+      const counterpartStatus = finalStatus === 'APPROVED' ? 'approved' : 'requested changes to';
+      await this.postSpaceDealSystemMessage(
+        interest.id,
+        interest.requesterType === 'BRAND' ? SpaceChatSenderType.BRAND : SpaceChatSenderType.COMMUNITY,
+        userId,
+        `${requesterName} ${counterpartStatus} the deliverables report.`,
+      );
+
+      if (spaceUserId && spaceUserId !== userId) {
+        void this.notificationsService
+          .create(
+            spaceUserId,
+            'space_deal_report_reviewed',
+            requesterName,
+            `${counterpartStatus === 'approved' ? 'Approved' : 'Requested changes to'} your deliverables report`,
+            { spaceInterestId: interest.id },
+          )
+          .catch(() => undefined);
+      }
+    }
+
+    const proofUrls = await Promise.all(
+      (report.proofKeys ?? []).filter(Boolean).map(async (key) => {
+        try {
+          return await this.storageService.getPresignedDownloadUrl(key);
+        } catch {
+          return '';
+        }
+      }),
+    );
+    return { ...report, proofUrls };
   }
 }

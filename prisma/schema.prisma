@@ -110,6 +110,7 @@ model User {
 
   spaceChatMessages SpaceChatMessage[] @relation("SpaceChatMessageSender")
   spaceDealsCreated SpaceDeal[]        @relation("SpaceDealCreatedBy")
+  spaceDealReportsSubmitted SpaceDealReport[] @relation("SpaceDealReportSubmittedBy")
 
   meetdayChatThread   MeetdayChatThread?   @relation("MeetdayChatThreadUser")
   meetdayChatMessages MeetdayChatMessage[] @relation("MeetdayChatMessageSender")
@@ -657,6 +658,7 @@ model SpaceChatMessage {
   senderType SpaceChatSenderType
   senderId   String
   sender     User                @relation("SpaceChatMessageSender", fields: [senderId], references: [id])
+  messageType ChatMessageType @default(TEXT)
 
   content  String  @db.Text
   mediaKey String?
@@ -705,6 +707,8 @@ model SpaceDeal {
   changeRequestNote String?         @db.Text
   approvedAt        DateTime?
 
+  report SpaceDealReport?
+
   createdById String
   createdBy   User   @relation("SpaceDealCreatedBy", fields: [createdById], references: [id])
 
@@ -713,6 +717,38 @@ model SpaceDeal {
 
   @@index([status])
   @@map("space_deals")
+}
+
+// Submitted by the space partner once the deal is APPROVED ("locked") — what deliverables were
+// actually completed, with optional photo evidence. One report per deal, editable/resubmittable.
+// Mirrors SponsorshipDealReport's shape exactly.
+model SpaceDealReport {
+  id          String    @id @default(uuid())
+  spaceDealId String    @unique
+  spaceDeal   SpaceDeal @relation(fields: [spaceDealId], references: [id], onDelete: Cascade)
+
+  projectName  String
+  eventDate    String
+  venue        String
+  time         String?
+  guestCount   String?
+  ageRange     String?
+  deliverables Json     @default("[]")
+  videoLinks   String[] @default([])
+  socialLinks  String[] @default([])
+  status       String   @default("PENDING") // PENDING, APPROVED, REVISION_REQUESTED
+  revisionNote String?
+
+  summary   String   @db.Text
+  proofKeys String[]
+  notes     String?  @db.Text
+
+  submittedById String
+  submittedBy   User     @relation("SpaceDealReportSubmittedBy", fields: [submittedById], references: [id])
+  submittedAt   DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("space_deal_reports")
 }
 
 enum CompanyType {

@@ -11,6 +11,8 @@ import { ListSpaceChatsQueryDto } from './dto/list-space-chats-query.dto';
 import { SendSpaceChatMessageDto } from './dto/send-space-chat-message.dto';
 import { UpsertSpaceDealDto } from './dto/upsert-space-deal.dto';
 import { RequestSpaceDealChangesDto } from './dto/request-space-deal-changes.dto';
+import { UpsertSpaceDealReportDto } from './dto/upsert-space-deal-report.dto';
+import { SpaceReportPdfService } from './space-report-pdf.service';
 
 @ApiTags('Spaces')
 @ApiBearerAuth('firebase-token')
@@ -18,7 +20,10 @@ import { RequestSpaceDealChangesDto } from './dto/request-space-deal-changes.dto
 @Roles('SPACE_PARTNER')
 @Controller('spaces')
 export class SpacesController {
-  constructor(private readonly spacesService: SpacesService) {}
+  constructor(
+    private readonly spacesService: SpacesService,
+    private readonly spaceReportPdfService: SpaceReportPdfService,
+  ) {}
 
   @Get('me')
   @ApiOperation({ summary: "Get the authenticated space partner's own profile" })
@@ -195,5 +200,45 @@ export class SpacesController {
     @Body() dto: RequestSpaceDealChangesDto,
   ) {
     return this.spacesService.requestSpaceDealChanges(userId, interestId, dto);
+  }
+
+  // ── Submit Report: space reports on completed deliverables once the deal is locked ────
+
+  @Get('chats/:interestId/deal/report')
+  @Roles('BRAND', 'HOST', 'SPACE_PARTNER')
+  @ApiOperation({ summary: 'Get the submitted deliverables report for a locked deal, if any' })
+  @ApiOkResponse({ description: 'Report, or null if none has been submitted yet.' })
+  getDealReport(
+    @GetUser('id') userId: string,
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Query('role') role?: 'BRAND' | 'COMMUNITY' | 'SPACE',
+  ) {
+    return this.spacesService.getSpaceDealReport(userId, interestId, role);
+  }
+
+  @Put('chats/:interestId/deal/report')
+  @Roles('BRAND', 'HOST', 'SPACE_PARTNER')
+  @ApiOperation({
+    summary: 'Submit/resubmit the deliverables report (space), or approve / request revision (counterpart)',
+    description: 'Only enabled once the deal is APPROVED/locked. Counterpart can only act on an already-submitted report.',
+  })
+  @ApiOkResponse({ description: 'Report saved.' })
+  upsertDealReport(
+    @GetUser('id') userId: string,
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Body() dto: UpsertSpaceDealReportDto,
+  ) {
+    return this.spacesService.upsertSpaceDealReport(userId, interestId, dto);
+  }
+
+  @Get('chats/:interestId/deal/report/pdf')
+  @Roles('BRAND', 'HOST', 'SPACE_PARTNER')
+  @ApiOperation({ summary: 'Get a presigned download URL for the deliverables report as a PDF' })
+  @ApiOkResponse({ description: 'Presigned report PDF URL.' })
+  async getDealReportPdfUrl(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string) {
+    // Reuses getSpaceDeal's participant access check before generating the PDF.
+    await this.spacesService.getSpaceDeal(userId, interestId);
+    const url = await this.spaceReportPdfService.getDownloadUrl(interestId);
+    return { url };
   }
 }

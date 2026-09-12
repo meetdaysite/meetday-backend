@@ -62,6 +62,7 @@ const CONTEXT_CONTENT_TYPES: Record<UploadContext, readonly string[]> = {
   [UploadContext.MEETDAY_CHAT_MEDIA]: IMAGE_TYPES,
   [UploadContext.COMMUNITY_PAST_EVENT_MEDIA]: IMAGE_TYPES,
   [UploadContext.SPONSORSHIP_DEAL_REPORT_MEDIA]: IMAGE_TYPES,
+  [UploadContext.SPACE_DEAL_REPORT_MEDIA]: IMAGE_TYPES,
   [UploadContext.COMMUNITY_BRAND_LOGO_MEDIA]: LOGO_IMAGE_TYPES,
   [UploadContext.ADMIN_ANNOUNCEMENT_ATTACHMENT]: [...IMAGE_TYPES, 'application/pdf'],
 };
@@ -497,6 +498,24 @@ export class StorageService {
           SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '');
         if (!isOwner) throw new ForbiddenException('You do not own this sponsorship deal');
         key = `sponsorship-deal-reports/${dto.resourceId}/${randomUUID()}.${ext}`;
+        break;
+      }
+
+      case UploadContext.SPACE_DEAL_REPORT_MEDIA: {
+        // Proof photos for the Space "Submit Report" deliverables report. resourceId is the
+        // space interest id — only the space partner who owns it (or an admin) may attach evidence.
+        if (!dto.resourceId) {
+          throw new BadRequestException('resourceId (space interest UUID) is required for SPACE_DEAL_REPORT_MEDIA');
+        }
+        const spaceReportInterest = await this.prisma.spaceInterest.findUnique({
+          where: { id: dto.resourceId },
+          select: { spaceCommunityProfile: { select: { spaceProfile: { select: { userId: true } } } } },
+        });
+        if (!spaceReportInterest) throw new NotFoundException('Chat thread not found');
+        const isSpaceReportOwner =
+          spaceReportInterest.spaceCommunityProfile.spaceProfile.userId === userId || SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '');
+        if (!isSpaceReportOwner) throw new ForbiddenException('You do not own this space deal');
+        key = `space-deal-reports/${dto.resourceId}/${randomUUID()}.${ext}`;
         break;
       }
 
