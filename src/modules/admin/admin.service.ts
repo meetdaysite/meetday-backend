@@ -2990,6 +2990,7 @@ export class AdminService {
         senderId: true,
         content: true,
         mediaKey: true,
+        messageType: true,
         deletedAt: true,
         createdAt: true,
         replyTo: { select: { id: true, senderType: true, content: true, mediaKey: true, deletedAt: true } },

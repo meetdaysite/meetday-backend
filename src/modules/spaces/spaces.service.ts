@@ -563,6 +563,7 @@ export class SpacesService {
         senderId: true,
         content: true,
         mediaKey: true,
+        messageType: true,
         deletedAt: true,
         createdAt: true,
         replyTo: { select: { id: true, senderType: true, content: true, mediaKey: true, deletedAt: true } },
@@ -751,6 +752,8 @@ export class SpacesService {
         .catch(() => undefined);
     }
 
+    await this.postSpaceDealSystemMessage(interest.id, SpaceChatSenderType.SPACE, userId, 'Space shared a deal proposal for your approval.');
+
     return deal;
   }
 
@@ -791,6 +794,8 @@ export class SpacesService {
         .catch(() => undefined);
     }
 
+    await this.postSpaceDealSystemMessage(interest.id, SpaceChatSenderType.SPACE, userId, 'Space updated the deal proposal.');
+
     return updated;
   }
 
@@ -818,6 +823,13 @@ export class SpacesService {
         .catch(() => undefined);
     }
 
+    await this.postSpaceDealSystemMessage(
+      interest.id,
+      interest.requesterType === 'BRAND' ? SpaceChatSenderType.BRAND : SpaceChatSenderType.COMMUNITY,
+      userId,
+      '🔒 The deal is officially locked and confirmed!',
+    );
+
     return updated;
   }
 
@@ -844,6 +856,15 @@ export class SpacesService {
         )
         .catch(() => undefined);
     }
+
+    const requesterLabel = interest.requesterType === 'BRAND' ? 'Brand' : 'Community';
+    const noteSuffix = dto.note?.trim() ? `: "${dto.note.trim()}"` : '.';
+    await this.postSpaceDealSystemMessage(
+      interest.id,
+      interest.requesterType === 'BRAND' ? SpaceChatSenderType.BRAND : SpaceChatSenderType.COMMUNITY,
+      userId,
+      `${requesterLabel} requested changes to the deal${noteSuffix}`,
+    );
 
     return updated;
   }
@@ -967,7 +988,14 @@ export class SpacesService {
         : (interest.hostProfile?.communityProfile?.name ?? interest.hostProfile?.displayName ?? 'The community');
 
     if (finalStatus === 'PENDING') {
-      await this.postSpaceDealSystemMessage(interest.id, SpaceChatSenderType.SPACE, userId, `${spaceName} submitted the deliverables report.`);
+      await this.postSpaceDealSystemMessage(
+        interest.id,
+        SpaceChatSenderType.SPACE,
+        userId,
+        existingReport
+          ? '📋 The deliverables report was updated and resubmitted for review.'
+          : '📋 The deliverables report was submitted for review.',
+      );
 
       if (requesterUserId && requesterUserId !== userId) {
         void this.notificationsService
@@ -982,7 +1010,9 @@ export class SpacesService {
         interest.id,
         interest.requesterType === 'BRAND' ? SpaceChatSenderType.BRAND : SpaceChatSenderType.COMMUNITY,
         userId,
-        `${requesterName} ${counterpartStatus} the deliverables report.`,
+        finalStatus === 'APPROVED'
+          ? '✅ Congratulations! The deal is officially completed and closed!'
+          : `⚠️ Revision was requested on the deliverables report${finalRevisionNote?.trim() ? `: "${finalRevisionNote.trim()}"` : '.'}`,
       );
 
       if (spaceUserId && spaceUserId !== userId) {
