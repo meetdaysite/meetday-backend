@@ -406,15 +406,17 @@ export class SpacesService {
       },
     });
 
-    void this.notificationsService
-      .create(
-        space.spaceProfile.userId,
-        'space_interest_requested',
-        'New interest in your Community Space',
-        `A ${requesterType === 'BRAND' ? 'brand' : 'community'} is interested — check your Chats to respond.`,
-        { spaceInterestId: interest.id, spaceCommunityProfileId },
-      )
-      .catch(() => undefined);
+    if (space.spaceProfile.userId !== userId) {
+      void this.notificationsService
+        .create(
+          space.spaceProfile.userId,
+          'space_interest_requested',
+          'New interest in your Community Space',
+          `A ${requesterType === 'BRAND' ? 'brand' : 'community'} is interested — check your Chats to respond.`,
+          { spaceInterestId: interest.id, spaceCommunityProfileId },
+        )
+        .catch(() => undefined);
+    }
 
     void this.notificationsService
       .create(userId, 'space_interest_confirmed', 'Interest sent!', `${space.name} has been notified of your interest.`, {
@@ -672,7 +674,7 @@ export class SpacesService {
     });
 
     const recipientUserId = interest.requesterType === 'BRAND' ? interest.brandProfile?.userId : interest.hostProfile?.userId;
-    if (recipientUserId) {
+    if (recipientUserId && recipientUserId !== userId) {
       void this.notificationsService
         .create(
           recipientUserId,
@@ -740,7 +742,7 @@ export class SpacesService {
     });
 
     const recipientUserId = this.recipientForCounterpart(interest);
-    if (recipientUserId) {
+    if (recipientUserId && recipientUserId !== userId) {
       void this.notificationsService
         .create(recipientUserId, 'space_deal_locked', 'Deal terms submitted', `${interest.spaceCommunityProfile.name} submitted deal terms for your review.`, {
           spaceInterestId: interest.id,
@@ -780,7 +782,7 @@ export class SpacesService {
     });
 
     const recipientUserId = this.recipientForCounterpart(interest);
-    if (recipientUserId) {
+    if (recipientUserId && recipientUserId !== userId) {
       void this.notificationsService
         .create(recipientUserId, 'space_deal_updated', 'Deal terms updated', `${interest.spaceCommunityProfile.name} updated the deal terms — please review again.`, {
           spaceInterestId: interest.id,
@@ -803,15 +805,17 @@ export class SpacesService {
       data: { status: 'APPROVED', approvedAt: new Date(), changeRequestNote: null },
     });
 
-    void this.notificationsService
-      .create(
-        interest.spaceCommunityProfile.spaceProfile.userId,
-        'space_deal_approved',
-        'Deal approved!',
-        'The counterpart approved the deal — it is now locked.',
-        { spaceInterestId: interest.id },
-      )
-      .catch(() => undefined);
+    if (interest.spaceCommunityProfile.spaceProfile.userId !== userId) {
+      void this.notificationsService
+        .create(
+          interest.spaceCommunityProfile.spaceProfile.userId,
+          'space_deal_approved',
+          'Deal approved!',
+          'The counterpart approved the deal — it is now locked.',
+          { spaceInterestId: interest.id },
+        )
+        .catch(() => undefined);
+    }
 
     return updated;
   }
@@ -828,15 +832,17 @@ export class SpacesService {
       data: { status: 'CHANGES_REQUESTED', changeRequestNote: dto.note ?? null },
     });
 
-    void this.notificationsService
-      .create(
-        interest.spaceCommunityProfile.spaceProfile.userId,
-        'space_deal_changes_requested',
-        'Changes requested on the deal',
-        dto.note || 'The counterpart requested changes to the deal terms.',
-        { spaceInterestId: interest.id },
-      )
-      .catch(() => undefined);
+    if (interest.spaceCommunityProfile.spaceProfile.userId !== userId) {
+      void this.notificationsService
+        .create(
+          interest.spaceCommunityProfile.spaceProfile.userId,
+          'space_deal_changes_requested',
+          'Changes requested on the deal',
+          dto.note || 'The counterpart requested changes to the deal terms.',
+          { spaceInterestId: interest.id },
+        )
+        .catch(() => undefined);
+    }
 
     return updated;
   }
