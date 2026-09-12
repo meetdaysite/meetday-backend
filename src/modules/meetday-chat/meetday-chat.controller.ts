@@ -1,15 +1,16 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { MeetdayChatService } from './meetday-chat.service';
 import { SendChatMessageDto } from '../sponsorship/dto/send-chat-message.dto';
+import { UpdateChatMessageDto } from '../sponsorship/dto/update-chat-message.dto';
 
 @ApiTags('Meetday Chat')
 @ApiBearerAuth('firebase-token')
 @UseGuards(RolesGuard)
-@Roles('HOST', 'BRAND')
+@Roles('HOST', 'BRAND', 'SPACE_PARTNER')
 @Controller('meetday-chat')
 export class MeetdayChatController {
   constructor(private readonly meetdayChatService: MeetdayChatService) {}
@@ -30,5 +31,23 @@ export class MeetdayChatController {
   @ApiOkResponse({ description: 'Message sent.' })
   sendMyMessage(@GetUser('id') userId: string, @Body() dto: SendChatMessageDto) {
     return this.meetdayChatService.sendMyMessage(userId, dto);
+  }
+
+  @Patch('messages/:messageId')
+  @ApiOperation({ summary: 'Edit my own message' })
+  @ApiOkResponse({ description: 'Message updated.' })
+  editMyMessage(
+    @GetUser('id') userId: string,
+    @Param('messageId', ParseUUIDPipe) messageId: string,
+    @Body() dto: UpdateChatMessageDto,
+  ) {
+    return this.meetdayChatService.editMyMessage(userId, messageId, dto);
+  }
+
+  @Delete('messages/:messageId')
+  @ApiOperation({ summary: 'Delete my own message' })
+  @ApiOkResponse({ description: 'Message deleted.' })
+  deleteMyMessage(@GetUser('id') userId: string, @Param('messageId', ParseUUIDPipe) messageId: string) {
+    return this.meetdayChatService.deleteMyMessage(userId, messageId);
   }
 }

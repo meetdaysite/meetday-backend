@@ -2232,6 +2232,43 @@ export class AdminController {
     return this.adminService.resolveMeetdayChat(threadId);
   }
 
+  @Patch('meetday-chats/:threadId/messages/:messageId')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({ summary: 'Edit a message in a "Talk to Meetday" thread' })
+  @ApiOkResponse({ description: 'Message updated.' })
+  @ApiNotFoundResponse({ description: 'Message not found.' })
+  editMeetdayChatMessage(
+    @Param('threadId', ParseUUIDPipe) threadId: string,
+    @Param('messageId', ParseUUIDPipe) messageId: string,
+    @Body() dto: UpdateChatMessageDto,
+    @GetUser('id') adminId: string,
+  ) {
+    return this.adminService.editMeetdayChatMessage(threadId, adminId, messageId, dto);
+  }
+
+  @Delete('meetday-chats/:threadId/messages/:messageId')
+  @Roles('SUPER_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({ summary: 'Delete a message in a "Talk to Meetday" thread' })
+  @ApiOkResponse({ description: 'Message deleted.' })
+  @ApiNotFoundResponse({ description: 'Message not found.' })
+  deleteMeetdayChatMessage(
+    @Param('threadId', ParseUUIDPipe) threadId: string,
+    @Param('messageId', ParseUUIDPipe) messageId: string,
+  ) {
+    return this.adminService.deleteMeetdayChatMessage(threadId, messageId);
+  }
+
+  @Get('space-profiles')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({
+    summary: 'List all space partner accounts',
+    description: 'Backs the "Spaces" tab in the Meetday Chats "New Support Chat" picker.',
+  })
+  @ApiOkResponse({ description: 'List of space partners.' })
+  listAllSpacePartners(@Query('search') search?: string) {
+    return this.adminService.listAllSpacePartners(search);
+  }
+
   @Post('brands/:id/approve')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN')
   @HttpCode(HttpStatus.OK)

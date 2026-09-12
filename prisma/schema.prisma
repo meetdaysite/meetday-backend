@@ -1588,6 +1588,9 @@ model MeetdayChatMessage {
   replyTo   MeetdayChatMessage?  @relation("MeetdayChatReplies", fields: [replyToId], references: [id], onDelete: SetNull)
   replies   MeetdayChatMessage[] @relation("MeetdayChatReplies")
 
+  editedAt  DateTime? // set when the sender edits their own message's content
+  deletedAt DateTime? // soft delete — placeholder shown to the other side, admin still sees original
+
   createdAt DateTime @default(now())
 
   @@index([threadId, createdAt])

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -53,9 +54,12 @@ export class MeetdayChatService {
   }
 
   private replyToPreview(
-    replyTo: { id: string; senderType: string; content: string; mediaKey: string | null } | null,
+    replyTo: { id: string; senderType: string; content: string; mediaKey: string | null; deletedAt?: Date | null } | null,
   ) {
     if (!replyTo) return null;
+    if (replyTo.deletedAt) {
+      return { id: replyTo.id, senderType: replyTo.senderType, content: 'This message was deleted', hasMedia: false };
+    }
     return { id: replyTo.id, senderType: replyTo.senderType, content: replyTo.content, hasMedia: !!replyTo.mediaKey };
   }
 
@@ -71,8 +75,10 @@ export class MeetdayChatService {
         senderId: true,
         content: true,
         mediaKey: true,
+        editedAt: true,
+        deletedAt: true,
         createdAt: true,
-        replyTo: { select: { id: true, senderType: true, content: true, mediaKey: true } },
+        replyTo: { select: { id: true, senderType: true, content: true, mediaKey: true, deletedAt: true } },
       },
     });
 
@@ -81,11 +87,15 @@ export class MeetdayChatService {
       .catch((err) => this.logger.error('Failed to update Meetday chat read state', err));
 
     const withMediaUrls = await Promise.all(
-      messages.map(async ({ mediaKey, replyTo, ...m }) => ({
-        ...m,
-        mediaUrl: mediaKey ? await this.storageService.getPresignedDownloadUrl(mediaKey) : null,
-        replyTo: this.replyToPreview(replyTo),
-      })),
+      messages.map(async ({ mediaKey, deletedAt, replyTo, ...m }) => {
+        if (deletedAt) return { ...m, content: '', mediaUrl: null, deletedAt, replyTo: this.replyToPreview(replyTo) };
+        return {
+          ...m,
+          deletedAt: null,
+          mediaUrl: mediaKey ? await this.storageService.getPresignedDownloadUrl(mediaKey) : null,
+          replyTo: this.replyToPreview(replyTo),
+        };
+      }),
     );
 
     return { messages: withMediaUrls };
@@ -98,11 +108,11 @@ export class MeetdayChatService {
     const thread = await this.getOrCreateThread(userId);
     const { content, wasRedacted } = dto.content ? redactPersonalInfo(dto.content) : { content: '', wasRedacted: false };
 
-    let replyToRow: { id: string; senderType: string; content: string; mediaKey: string | null } | null = null;
+    let replyToRow: { id: string; senderType: string; content: string; mediaKey: string | null; deletedAt: Date | null } | null = null;
     if (dto.replyToId) {
       const original = await this.prisma.meetdayChatMessage.findUnique({
         where: { id: dto.replyToId },
-        select: { id: true, senderType: true, content: true, mediaKey: true, threadId: true },
+        select: { id: true, senderType: true, content: true, mediaKey: true, deletedAt: true, threadId: true },
       });
       if (original && original.threadId === thread.id) {
         replyToRow = original;
@@ -136,6 +146,31 @@ export class MeetdayChatService {
     }
 
     return { ...message, mediaUrl, wasRedacted, replyTo: this.replyToPreview(replyToRow) };
+  }
+
+  async editMyMessage(userId: string, messageId: string, dto: { content: string }) {
+    const message = await this.prisma.meetdayChatMessage.findUnique({ where: { id: messageId } });
+    if (!message || message.senderType !== 'USER' || message.senderId !== userId) throw new NotFoundException('Message not found');
+    if (message.deletedAt) throw new BadRequestException('Cannot edit a deleted message');
+
+    const updated = await this.prisma.meetdayChatMessage.update({
+      where: { id: messageId },
+      data: { content: dto.content, editedAt: new Date() },
+      include: { replyTo: { select: { id: true, senderType: true, content: true, mediaKey: true, deletedAt: true } } },
+    });
+
+    const { replyTo, mediaKey, ...rest } = updated;
+    const mediaUrl = mediaKey ? await this.storageService.getPresignedDownloadUrl(mediaKey) : null;
+    return { ...rest, mediaUrl, replyTo: this.replyToPreview(replyTo) };
+  }
+
+  async deleteMyMessage(userId: string, messageId: string) {
+    const message = await this.prisma.meetdayChatMessage.findUnique({ where: { id: messageId } });
+    if (!message || message.senderType !== 'USER' || message.senderId !== userId) throw new NotFoundException('Message not found');
+    if (message.deletedAt) return { message: 'Already deleted', deleted: true };
+
+    await this.prisma.meetdayChatMessage.update({ where: { id: messageId }, data: { deletedAt: new Date() } });
+    return { message: 'Message deleted', deleted: true };
   }
 
   // Runs the scripted intake flow: classifies the message as GREETING / NEEDS_DETAIL / DETAILED

@@ -3386,6 +3386,7 @@ export class AdminService {
             role: { select: { name: true } },
             hostProfile: { select: { communityProfile: { select: { logoKey: true } } } },
             brandProfile: { select: { logoKey: true } },
+            spaceProfile: { select: { businessName: true, communityProfile: { select: { logoKey: true } } } },
           },
         },
         messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true, mediaKey: true, createdAt: true } },
@@ -3427,7 +3428,7 @@ export class AdminService {
 
     return Promise.all(
       threads.map(async (t, idx) => {
-        const logoKey = t.user.brandProfile?.logoKey || t.user.hostProfile?.communityProfile?.logoKey || null;
+        const logoKey = t.user.brandProfile?.logoKey || t.user.hostProfile?.communityProfile?.logoKey || t.user.spaceProfile?.communityProfile?.logoKey || null;
         return {
           id: t.id,
           userId: t.userId,
@@ -3460,10 +3461,14 @@ export class AdminService {
         senderId: true,
         content: true,
         mediaKey: true,
+        editedAt: true,
+        deletedAt: true,
         createdAt: true,
-        replyTo: { select: { id: true, senderType: true, content: true, mediaKey: true } },
+        replyTo: { select: { id: true, senderType: true, content: true, mediaKey: true, deletedAt: true } },
       },
     });
+    // Admin sees the original content even after a user "deletes" it — deletedAt is surfaced so
+    // the UI can flag it, not hidden like it is for them.
     const withMediaUrls = await Promise.all(
       messages.map(async ({ mediaKey, replyTo, ...m }) => ({
         ...m,
@@ -3472,8 +3477,8 @@ export class AdminService {
           ? {
               id: replyTo.id,
               senderType: replyTo.senderType,
-              content: replyTo.content,
-              hasMedia: !!replyTo.mediaKey,
+              content: replyTo.deletedAt ? 'This message was deleted' : replyTo.content,
+              hasMedia: !replyTo.deletedAt && !!replyTo.mediaKey,
             }
           : null,
       })),
@@ -3493,11 +3498,11 @@ export class AdminService {
       throw new BadRequestException('Message must have text or an image');
     }
 
-    let replyToRow: { id: string; senderType: string; content: string; mediaKey: string | null } | null = null;
+    let replyToRow: { id: string; senderType: string; content: string; mediaKey: string | null; deletedAt: Date | null } | null = null;
     if (dto.replyToId) {
       const original = await this.prisma.meetdayChatMessage.findUnique({
         where: { id: dto.replyToId },
-        select: { id: true, senderType: true, content: true, mediaKey: true, threadId: true },
+        select: { id: true, senderType: true, content: true, mediaKey: true, deletedAt: true, threadId: true },
       });
       if (original && original.threadId === threadId) {
         replyToRow = original;
@@ -3533,11 +3538,47 @@ export class AdminService {
         ? {
             id: replyToRow.id,
             senderType: replyToRow.senderType,
-            content: replyToRow.content,
-            hasMedia: !!replyToRow.mediaKey,
+            content: replyToRow.deletedAt ? 'This message was deleted' : replyToRow.content,
+            hasMedia: !replyToRow.deletedAt && !!replyToRow.mediaKey,
           }
         : null,
     };
+  }
+
+  async editMeetdayChatMessage(threadId: string, adminId: string, messageId: string, dto: UpdateChatMessageDto) {
+    const message = await this.prisma.meetdayChatMessage.findUnique({ where: { id: messageId } });
+    if (!message || message.threadId !== threadId) throw new NotFoundException('Message not found');
+    if (message.deletedAt) throw new BadRequestException('Cannot edit a deleted message');
+
+    const updated = await this.prisma.meetdayChatMessage.update({
+      where: { id: messageId },
+      data: { content: dto.content, editedAt: new Date() },
+      include: { replyTo: { select: { id: true, senderType: true, content: true, mediaKey: true, deletedAt: true } } },
+    });
+
+    const { replyTo, mediaKey, ...rest } = updated;
+    const mediaUrl = mediaKey ? await this.storageService.getPresignedDownloadUrl(mediaKey) : null;
+    return {
+      ...rest,
+      mediaUrl,
+      replyTo: replyTo
+        ? {
+            id: replyTo.id,
+            senderType: replyTo.senderType,
+            content: replyTo.deletedAt ? 'This message was deleted' : replyTo.content,
+            hasMedia: !replyTo.deletedAt && !!replyTo.mediaKey,
+          }
+        : null,
+    };
+  }
+
+  async deleteMeetdayChatMessage(threadId: string, messageId: string) {
+    const message = await this.prisma.meetdayChatMessage.findUnique({ where: { id: messageId } });
+    if (!message || message.threadId !== threadId) throw new NotFoundException('Message not found');
+    if (message.deletedAt) return { message: 'Already deleted', deleted: true };
+
+    await this.prisma.meetdayChatMessage.update({ where: { id: messageId }, data: { deletedAt: new Date() } });
+    return { message: 'Message deleted', deleted: true };
   }
 
   // Looks up (without creating) the existing Meetday support thread for a specific user — used
@@ -4175,6 +4216,40 @@ export class AdminService {
     ]);
 
     return { spacePartners, total, page, limit };
+  }
+
+  // All space partner accounts (regardless of community profile status) — backs the "Spaces"
+  // tab in the admin Meetday Chats "New Support Chat" picker.
+  async listAllSpacePartners(search?: string) {
+    const where: Prisma.SpaceProfileWhereInput = {
+      ...(search && {
+        OR: [
+          { businessName: { contains: search, mode: 'insensitive' } },
+          { user: { email: { contains: search, mode: 'insensitive' } } },
+        ],
+      }),
+    };
+
+    const spacePartners = await this.prisma.spaceProfile.findMany({
+      where,
+      select: {
+        id: true,
+        businessName: true,
+        communityProfile: { select: { logoKey: true } },
+        user: { select: { id: true, firstName: true, lastName: true, email: true } },
+      },
+      orderBy: { businessName: 'asc' },
+      take: 200,
+    });
+
+    return Promise.all(
+      spacePartners.map(async (s) => ({
+        id: s.id,
+        businessName: s.businessName,
+        logoUrl: s.communityProfile?.logoKey ? await this.storageService.getPresignedDownloadUrl(s.communityProfile.logoKey) : null,
+        user: s.user,
+      })),
+    );
   }
 
   // Admin creates a community space profile already-approved for a space partner who doesn't
