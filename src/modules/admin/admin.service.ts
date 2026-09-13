@@ -1585,6 +1585,13 @@ export class AdminService {
         user: { select: { id: true, firstName: true, lastName: true, email: true } },
       },
     },
+    spaceProfile: {
+      select: {
+        id: true,
+        businessName: true,
+        user: { select: { id: true, firstName: true, lastName: true, email: true } },
+      },
+    },
   } as const;
 
   async listPendingSponsorships(page: number, limit: number) {
@@ -1651,6 +1658,13 @@ export class AdminService {
           select: {
             id: true,
             displayName: true,
+            user: { select: { id: true, firstName: true, lastName: true, email: true } },
+          },
+        },
+        spaceProfile: {
+          select: {
+            id: true,
+            businessName: true,
             user: { select: { id: true, firstName: true, lastName: true, email: true } },
           },
         },
