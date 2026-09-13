@@ -1,6 +1,7 @@
 import {
   IsArray,
   IsDateString,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -133,4 +134,15 @@ export class CreateProposalDto {
   @IsOptional()
   @IsString()
   brandingPrice?: string;
+
+  @ApiPropertyOptional({
+    enum: ['HOST', 'SPACE'],
+    description:
+      'Disambiguates which profile to create/act as when the same account has both a Host and a ' +
+      'Space Partner profile. Only used on create (POST) — ignored on update/submit/delete, which ' +
+      'are scoped to an existing proposal id instead.',
+  })
+  @IsOptional()
+  @IsIn(['HOST', 'SPACE'])
+  actorType?: 'HOST' | 'SPACE';
 }

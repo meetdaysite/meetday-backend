@@ -160,11 +160,24 @@ export class SponsorshipService {
     return proposal;
   }
 
-  // Resolves which kind of profile (Host or Space Partner) is creating/owning a proposal, based
-  // on the caller's account role — mirrors the pattern used for Meetday support chat threads.
-  private async resolveProposalOwner(userId: string): Promise<
+  // Resolves which kind of profile (Host or Space Partner) is creating/owning a proposal.
+  // An account can have BOTH a HostProfile and a SpaceProfile at once (same login, two distinct
+  // entities) — `role.name` alone can't disambiguate which dashboard the caller means, so an
+  // explicit `actorType` hint from the frontend (which DOES know which dashboard it's on) takes
+  // priority. Falls back to `role.name`-based inference only when no hint is given, for older
+  // clients / accounts that only have one profile type.
+  private async resolveProposalOwner(userId: string, actorType?: 'HOST' | 'SPACE'): Promise<
     { type: 'SPACE'; spaceProfileId: string } | { type: 'HOST'; hostProfileId: string }
   > {
+    if (actorType === 'SPACE') {
+      const spaceProfile = await this.prisma.spaceProfile.findUnique({ where: { userId }, select: { id: true } });
+      if (!spaceProfile) throw new NotFoundException('Space profile not found');
+      return { type: 'SPACE', spaceProfileId: spaceProfile.id };
+    }
+    if (actorType === 'HOST') {
+      const hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
+      return { type: 'HOST', hostProfileId };
+    }
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: { select: { name: true } } } });
     if (user?.role?.name === 'SPACE_PARTNER') {
       const spaceProfile = await this.prisma.spaceProfile.findUnique({ where: { userId }, select: { id: true } });
@@ -176,7 +189,7 @@ export class SponsorshipService {
   }
 
   async createProposal(userId: string, dto: CreateProposalDto) {
-    const owner = await this.resolveProposalOwner(userId);
+    const owner = await this.resolveProposalOwner(userId, dto.actorType);
 
     if (owner.type === 'SPACE') {
       const proposal = await this.prisma.sponsorshipProposal.create({
@@ -353,7 +366,7 @@ export class SponsorshipService {
   }
 
   async getMyProposals(userId: string, query: ListProposalsQueryDto) {
-    const owner = await this.resolveProposalOwner(userId);
+    const owner = await this.resolveProposalOwner(userId, query.actorType);
 
     const proposals = await this.prisma.sponsorshipProposal.findMany({
       where: {
