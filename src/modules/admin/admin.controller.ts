@@ -66,6 +66,7 @@ import { UpdateAdminCommunityProfileDto } from './dto/update-admin-community-pro
 import { SetCommunityProfileVisibilityDto } from './dto/set-community-profile-visibility.dto';
 import { ListSpaceCommunityProfilesQueryDto } from './dto/list-space-community-profiles-query.dto';
 import { ListEligibleSpacePartnersQueryDto } from './dto/list-eligible-space-partners-query.dto';
+import { ListSpacePartnersQueryDto } from './dto/list-space-partners-query.dto';
 import { CreateAdminSpaceCommunityProfileDto } from './dto/create-admin-space-community-profile.dto';
 import { UpdateAdminSpaceCommunityProfileDto } from './dto/update-admin-space-community-profile.dto';
 import { SetSpaceCommunityProfileVisibilityDto } from './dto/set-space-community-profile-visibility.dto';
@@ -2267,6 +2268,17 @@ export class AdminController {
   @ApiOkResponse({ description: 'List of space partners.' })
   listAllSpacePartners(@Query('search') search?: string) {
     return this.adminService.listAllSpacePartners(search);
+  }
+
+  @Get('space-partners')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
+  @ApiOperation({
+    summary: 'List space partner accounts (paginated directory — "Community Space Reps")',
+    description: 'Mirrors GET /admin/hosts for Space Partner accounts. Filter by search, city, and profile status.',
+  })
+  @ApiOkResponse({ description: 'Paginated list of space partners.' })
+  listSpacePartners(@Query() query: ListSpacePartnersQueryDto) {
+    return this.adminService.listSpacePartners(query);
   }
 
   @Post('brands/:id/approve')

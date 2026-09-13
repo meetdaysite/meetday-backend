@@ -42,6 +42,7 @@ import { CreateAdminCommunityProfileDto } from './dto/create-admin-community-pro
 import { UpdateAdminCommunityProfileDto } from './dto/update-admin-community-profile.dto';
 import { ListSpaceCommunityProfilesQueryDto } from './dto/list-space-community-profiles-query.dto';
 import { ListEligibleSpacePartnersQueryDto } from './dto/list-eligible-space-partners-query.dto';
+import { ListSpacePartnersQueryDto } from './dto/list-space-partners-query.dto';
 import { CreateAdminSpaceCommunityProfileDto } from './dto/create-admin-space-community-profile.dto';
 import { UpdateAdminSpaceCommunityProfileDto } from './dto/update-admin-space-community-profile.dto';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
@@ -4216,6 +4217,61 @@ export class AdminService {
     ]);
 
     return { spacePartners, total, page, limit };
+  }
+
+  // Full paginated directory of Space Partner accounts (signups) — mirrors getHosts()/"Community
+  // Reps" exactly, but for Space Partner accounts. SpaceProfile itself has no approvalStatus (no
+  // account-level KYC step, unlike HostProfile) — `profileStatus` instead filters by the derived
+  // Community Space Profile approval state (or NOT_ACTIVATED if none exists yet).
+  async listSpacePartners(query: ListSpacePartnersQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const where: Prisma.SpaceProfileWhereInput = {
+      ...(query.search && {
+        OR: [
+          { businessName: { contains: query.search, mode: 'insensitive' } },
+          { user: { email: { contains: query.search, mode: 'insensitive' } } },
+          { user: { firstName: { contains: query.search, mode: 'insensitive' } } },
+          { user: { lastName: { contains: query.search, mode: 'insensitive' } } },
+        ],
+      }),
+      ...(query.city && { operatingCities: { has: query.city } }),
+      ...(query.profileStatus &&
+        query.profileStatus !== 'ALL' &&
+        (query.profileStatus === 'NOT_ACTIVATED'
+          ? { communityProfile: null }
+          : { communityProfile: { approvalStatus: query.profileStatus } })),
+    };
+
+    const [spacePartners, total] = await Promise.all([
+      this.prisma.spaceProfile.findMany({
+        where,
+        select: {
+          id: true,
+          businessName: true,
+          phone: true,
+          operatingCities: true,
+          createdAt: true,
+          user: { select: { id: true, firstName: true, lastName: true, email: true } },
+          communityProfile: { select: { approvalStatus: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.spaceProfile.count({ where }),
+    ]);
+
+    return {
+      spacePartners: spacePartners.map(({ communityProfile, ...rest }) => ({
+        ...rest,
+        profileStatus: communityProfile?.approvalStatus ?? 'NOT_ACTIVATED',
+      })),
+      total,
+      page,
+      limit,
+    };
   }
 
   // All space partner accounts (regardless of community profile status) — backs the "Spaces"
