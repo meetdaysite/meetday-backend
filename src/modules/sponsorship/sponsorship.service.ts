@@ -210,10 +210,6 @@ export class SponsorshipService {
           videoUrl: dto.videoUrl ?? null,
           sponsorshipType: dto.sponsorshipType || 'CASH',
           sponsorTiers: (dto.sponsorshipType === 'BARTER' ? [] : (dto.sponsorTiers ?? [])) as unknown as Prisma.InputJsonValue,
-          popupDays: dto.popupDays ?? null,
-          popupPrice: dto.popupPrice ?? null,
-          brandingDays: dto.brandingDays ?? null,
-          brandingPrice: dto.brandingPrice ?? null,
           status: SponsorshipStatus.DRAFT,
         },
       });
@@ -320,10 +316,6 @@ export class SponsorshipService {
             ...(dto.sponsorTiers !== undefined && {
               sponsorTiers: (dto.sponsorshipType === 'BARTER' ? [] : dto.sponsorTiers) as unknown as Prisma.InputJsonValue,
             }),
-            ...(dto.popupDays !== undefined && { popupDays: dto.popupDays }),
-            ...(dto.popupPrice !== undefined && { popupPrice: dto.popupPrice }),
-            ...(dto.brandingDays !== undefined && { brandingDays: dto.brandingDays }),
-            ...(dto.brandingPrice !== undefined && { brandingPrice: dto.brandingPrice }),
           },
         }),
       );
@@ -869,15 +861,9 @@ export class SponsorshipService {
     if (!proposal.ageGroup) missing.push('ageGroup');
     if (!proposal.guestCount) missing.push('guestCount');
     const sponsorshipType = proposal.sponsorshipType || 'CASH';
-    if (isSpace) {
-      const hasPopup = !!proposal.popupDays && !!proposal.popupPrice;
-      const hasBranding = !!proposal.brandingDays && !!proposal.brandingPrice;
-      if (!hasPopup && !hasBranding) missing.push('popup/branding pricing');
-    } else {
-      if (!proposal.docKey) missing.push('docKey');
-      if (sponsorshipType !== 'BARTER' && !(proposal.sponsorTiers as unknown[])?.length) {
-        missing.push('sponsorTiers');
-      }
+    if (!isSpace && !proposal.docKey) missing.push('docKey');
+    if (sponsorshipType !== 'BARTER' && !(proposal.sponsorTiers as unknown[])?.length) {
+      missing.push('sponsorTiers');
     }
 
     if (missing.length) throw new BadRequestException(`Proposal is incomplete. Missing: ${missing.join(', ')}`);

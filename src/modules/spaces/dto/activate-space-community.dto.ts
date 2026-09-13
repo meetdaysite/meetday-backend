@@ -76,4 +76,24 @@ export class ActivateSpaceCommunityDto {
   @ValidateNested({ each: true })
   @Type(() => BrandWorkedWithDto)
   brandsWorkedWith?: BrandWorkedWithDto[];
+
+  @ApiPropertyOptional({ description: 'Sponsorship offering — number of days for a Pop-up activation slot' })
+  @IsOptional()
+  @IsString()
+  popupDays?: string;
+
+  @ApiPropertyOptional({ description: 'Sponsorship offering — price for a Pop-up activation slot' })
+  @IsOptional()
+  @IsString()
+  popupPrice?: string;
+
+  @ApiPropertyOptional({ description: 'Sponsorship offering — number of days for a Branding slot' })
+  @IsOptional()
+  @IsString()
+  brandingDays?: string;
+
+  @ApiPropertyOptional({ description: 'Sponsorship offering — price for a Branding slot' })
+  @IsOptional()
+  @IsString()
+  brandingPrice?: string;
 }
