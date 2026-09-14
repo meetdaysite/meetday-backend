@@ -2599,6 +2599,13 @@ export class AdminService {
                 communityProfile: { select: { name: true, logoKey: true } },
               },
             },
+            spaceProfile: {
+              select: {
+                id: true,
+                businessName: true,
+                communityProfile: { select: { name: true, logoKey: true } },
+              },
+            },
           },
         },
         campaign: {
@@ -2666,9 +2673,13 @@ export class AdminService {
 
         const brandProfile = t.brandProfile ?? t.campaign?.brandProfile;
         const hostProfile = t.hostProfile ?? t.sponsorshipProposal?.hostProfile;
+        const spaceProfile = !isCampaign ? t.sponsorshipProposal?.spaceProfile : null;
+        const isSpaceOwned = !!spaceProfile;
 
         const brandLogoKey = brandProfile?.logoKey ?? null;
-        const communityLogoKey = hostProfile?.communityProfile?.logoKey ?? null;
+        const communityLogoKey = isSpaceOwned
+          ? (spaceProfile?.communityProfile?.logoKey ?? null)
+          : (hostProfile?.communityProfile?.logoKey ?? null);
 
         const [brandLogoUrl, communityLogoUrl] = await Promise.all([
           brandLogoKey ? this.storageService.getPresignedDownloadUrl(brandLogoKey) : null,
@@ -2676,13 +2687,16 @@ export class AdminService {
         ]);
 
         const brandName = brandProfile?.brandName ?? 'Brand';
-        const communityName = hostProfile?.communityProfile?.name ?? hostProfile?.displayName ?? 'Community';
+        const communityName = isSpaceOwned
+          ? (spaceProfile?.communityProfile?.name ?? spaceProfile?.businessName ?? 'Community Space')
+          : (hostProfile?.communityProfile?.name ?? hostProfile?.displayName ?? 'Community');
+        const ownerType: 'HOST' | 'SPACE' = isSpaceOwned ? 'SPACE' : 'HOST';
 
         const senderRole: 'BRAND' | 'HOST' = isCampaign ? 'HOST' : 'BRAND';
         const senderName = isCampaign ? communityName : brandName;
         const senderLogoUrl = isCampaign ? communityLogoUrl : brandLogoUrl;
 
-        const receiverRole: 'HOST' | 'BRAND' = isCampaign ? 'BRAND' : 'HOST';
+        const receiverRole: 'HOST' | 'BRAND' | 'SPACE' = isCampaign ? 'BRAND' : isSpaceOwned ? 'SPACE' : 'HOST';
         const receiverName = isCampaign ? brandName : communityName;
         const receiverLogoUrl = isCampaign ? brandLogoUrl : communityLogoUrl;
 
@@ -2698,6 +2712,7 @@ export class AdminService {
           campaignId: t.campaign?.id ?? null,
           campaignName: t.campaign?.name ?? null,
           communityName,
+          ownerType,
           brandName,
           senderRole,
           senderName,
