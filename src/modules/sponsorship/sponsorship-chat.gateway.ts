@@ -7,7 +7,7 @@ import { getCorsOrigin } from '../../common/utils/cors-origin.util';
 
 const TYPING_TIMEOUT_MS = 3000;
 
-type TypingPayload = { interestId: string; senderType: 'HOST' | 'BRAND' | 'ADMIN' };
+type TypingPayload = { interestId: string; senderType: 'HOST' | 'SPACE' | 'BRAND' | 'ADMIN' };
 
 // Lightweight, presence-only gateway just for the "X is typing…" indicator on sponsorship
 // (TriChat) threads — actual messages still go through the existing REST + polling flow.

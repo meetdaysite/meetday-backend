@@ -8,10 +8,10 @@ export class ListSponsorshipChatsQueryDto {
   @IsEnum(SponsorshipChatStatus)
   status?: SponsorshipChatStatus;
 
-  @ApiPropertyOptional({ description: 'Filter/context by role: HOST or BRAND.' })
+  @ApiPropertyOptional({ description: 'Filter/context by role: HOST, SPACE, or BRAND.' })
   @IsOptional()
   @IsString()
-  role?: 'HOST' | 'BRAND';
+  role?: 'HOST' | 'SPACE' | 'BRAND';
 
   @ApiPropertyOptional({ description: 'Filter by type: SPONSORSHIP or CAMPAIGN.' })
   @IsOptional()

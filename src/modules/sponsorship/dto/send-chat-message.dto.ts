@@ -22,12 +22,12 @@ export class SendChatMessageDto {
   replyToId?: string;
 
   @ApiPropertyOptional({
-    enum: ['HOST', 'BRAND'],
+    enum: ['HOST', 'SPACE', 'BRAND'],
     description:
       'Which "hat" you are sending as — only needed to disambiguate the rare case where the same ' +
-      'account owns both the host and brand profile on this interest (self-interest). Ignored otherwise.',
+      'account owns both sides of this interest (self-interest). Ignored otherwise.',
   })
   @IsOptional()
-  @IsEnum(['HOST', 'BRAND'])
-  asRole?: 'HOST' | 'BRAND';
+  @IsEnum(['HOST', 'SPACE', 'BRAND'])
+  asRole?: 'HOST' | 'SPACE' | 'BRAND';
 }

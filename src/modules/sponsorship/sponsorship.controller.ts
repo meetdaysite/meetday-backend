@@ -235,7 +235,7 @@ export class SponsorshipController {
 
   @Get('chats')
   @UseGuards(RolesGuard)
-  @Roles('HOST', 'BRAND')
+  @Roles('HOST', 'SPACE_PARTNER', 'BRAND')
   @ApiOperation({
     summary: 'List my sponsorship chat threads',
     description:
@@ -250,7 +250,7 @@ export class SponsorshipController {
 
   @Get('chats/:interestId/messages')
   @UseGuards(RolesGuard)
-  @Roles('HOST', 'BRAND')
+  @Roles('HOST', 'SPACE_PARTNER', 'BRAND')
   @ApiOperation({ summary: 'List messages in a chat thread' })
   @ApiOkResponse({ description: 'Messages, oldest first.' })
   @ApiForbiddenResponse({ description: 'Not a participant in this chat.' })
@@ -258,14 +258,14 @@ export class SponsorshipController {
   listChatMessages(
     @GetUser('id') userId: string,
     @Param('interestId', ParseUUIDPipe) interestId: string,
-    @Query('role') role?: 'HOST' | 'BRAND',
+    @Query('role') role?: 'HOST' | 'SPACE' | 'BRAND',
   ) {
     return this.sponsorshipService.listChatMessages(userId, interestId, role);
   }
 
   @Post('chats/:interestId/messages')
   @UseGuards(RolesGuard)
-  @Roles('HOST', 'BRAND')
+  @Roles('HOST', 'SPACE_PARTNER', 'BRAND')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Send a chat message',
@@ -284,7 +284,7 @@ export class SponsorshipController {
 
   @Patch('chats/:interestId/messages/:messageId')
   @UseGuards(RolesGuard)
-  @Roles('HOST', 'BRAND')
+  @Roles('HOST', 'SPACE_PARTNER', 'BRAND')
   @ApiOperation({ summary: 'Edit a message you sent', description: 'Only the original sender can edit; adds an "edited" marker.' })
   @ApiOkResponse({ description: 'Message updated.' })
   @ApiForbiddenResponse({ description: 'Not your message.' })
@@ -300,7 +300,7 @@ export class SponsorshipController {
 
   @Delete('chats/:interestId/messages/:messageId')
   @UseGuards(RolesGuard)
-  @Roles('HOST', 'BRAND')
+  @Roles('HOST', 'SPACE_PARTNER', 'BRAND')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Delete a message you sent',
@@ -319,7 +319,7 @@ export class SponsorshipController {
 
   @Post('chats/:interestId/accept')
   @UseGuards(RolesGuard)
-  @Roles('HOST', 'BRAND')
+  @Roles('HOST', 'SPACE_PARTNER', 'BRAND')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: "Accept an interest request and open the chat",
@@ -336,7 +336,7 @@ export class SponsorshipController {
 
   @Get('chats/:interestId/deal')
   @UseGuards(RolesGuard)
-  @Roles('HOST', 'BRAND')
+  @Roles('HOST', 'SPACE_PARTNER', 'BRAND')
   @ApiOperation({ summary: 'Get the negotiated deal for a chat thread, if one exists' })
   @ApiOkResponse({ description: 'Deal, or null if none has been locked/proposed yet.' })
   @ApiForbiddenResponse({ description: 'Not a participant in this chat.' })
@@ -346,7 +346,7 @@ export class SponsorshipController {
 
   @Post('chats/:interestId/deal')
   @UseGuards(RolesGuard)
-  @Roles('HOST', 'BRAND')
+  @Roles('HOST', 'SPACE_PARTNER', 'BRAND')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Lock the deal — community or brand submits the negotiated terms',
@@ -365,7 +365,7 @@ export class SponsorshipController {
 
   @Patch('chats/:interestId/deal')
   @UseGuards(RolesGuard)
-  @Roles('HOST', 'BRAND')
+  @Roles('HOST', 'SPACE_PARTNER', 'BRAND')
   @ApiOperation({
     summary: 'Edit the deal',
     description: 'Resets status to PENDING_APPROVAL and bumps the version. Not allowed once APPROVED.',
@@ -383,7 +383,7 @@ export class SponsorshipController {
 
   @Post('chats/:interestId/deal/approve')
   @UseGuards(RolesGuard)
-  @Roles('HOST', 'BRAND')
+  @Roles('HOST', 'SPACE_PARTNER', 'BRAND')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Approve and lock the deal' })
   @ApiOkResponse({ description: 'Deal locked.' })
@@ -394,7 +394,7 @@ export class SponsorshipController {
 
   @Post('chats/:interestId/deal/request-changes')
   @UseGuards(RolesGuard)
-  @Roles('HOST', 'BRAND')
+  @Roles('HOST', 'SPACE_PARTNER', 'BRAND')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request changes to the proposed deal' })
   @ApiOkResponse({ description: 'Deal marked as changes requested.' })
@@ -410,7 +410,7 @@ export class SponsorshipController {
 
   @Get('chats/:interestId/deal/report')
   @UseGuards(RolesGuard)
-  @Roles('HOST', 'BRAND')
+  @Roles('HOST', 'SPACE_PARTNER', 'BRAND')
   @ApiOperation({ summary: 'Get the submitted deliverables report for a locked deal, if any' })
   @ApiOkResponse({ description: 'Report, or null if none has been submitted yet.' })
   @ApiNotFoundResponse({ description: 'No deal exists yet for this chat.' })
@@ -420,7 +420,7 @@ export class SponsorshipController {
 
   @Put('chats/:interestId/deal/report')
   @UseGuards(RolesGuard)
-  @Roles('HOST', 'BRAND')
+  @Roles('HOST', 'SPACE_PARTNER', 'BRAND')
   @ApiOperation({
     summary: 'Submit/resubmit the deliverables report (community), or approve / request revision (brand)',
     description: 'Only enabled once the deal is APPROVED/locked. Brand can only act on an already-submitted report.',
@@ -473,7 +473,7 @@ export class SponsorshipController {
 
   @Get('chats/:interestId/deal/invoice')
   @UseGuards(RolesGuard)
-  @Roles('HOST', 'BRAND')
+  @Roles('HOST', 'SPACE_PARTNER', 'BRAND')
   @ApiOperation({ summary: 'Get a presigned download URL for the paid deal\'s receipt PDF' })
   @ApiOkResponse({ description: 'Presigned invoice PDF URL.' })
   @ApiNotFoundResponse({ description: 'No deal exists, or it has not been paid for yet.' })
@@ -486,7 +486,7 @@ export class SponsorshipController {
 
   @Get('chats/:interestId/deal/report/pdf')
   @UseGuards(RolesGuard)
-  @Roles('HOST', 'BRAND')
+  @Roles('HOST', 'SPACE_PARTNER', 'BRAND')
   @ApiOperation({ summary: 'Get a presigned download URL for the deliverables report as a PDF' })
   @ApiOkResponse({ description: 'Presigned report PDF URL.' })
   @ApiNotFoundResponse({ description: 'No report has been submitted for this deal yet.' })

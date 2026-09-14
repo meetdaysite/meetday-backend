@@ -725,16 +725,16 @@ export class SponsorshipService {
             communityProfile: { select: { name: true } },
           },
         },
+        spaceProfile: {
+          include: {
+            user: { select: { id: true } },
+            communityProfile: { select: { name: true } },
+          },
+        },
       },
     });
     if (!proposal || proposal.status !== SponsorshipStatus.PUBLISHED)
       throw new NotFoundException('Sponsorship proposal not found');
-    // Space Partner-owned proposals route interest through the existing Community Space
-    // interest/chat pipeline (spaces.service.ts markSpaceInterest) instead — the frontend calls
-    // that endpoint directly for these, so reaching here for one is a client bug, not a valid path.
-    if (proposal.spaceProfileId) {
-      throw new BadRequestException('Use the Community Space interest endpoint for this proposal');
-    }
 
     const effectiveEndDate = proposal.eventEndDate ?? proposal.eventDate;
     const startOfToday = new Date();
@@ -752,17 +752,20 @@ export class SponsorshipService {
       data: { sponsorshipProposalId: proposalId, brandProfileId: brandProfile.id },
     });
 
-    // Host/community notification now reveals the brand's name — TriChat needs the host to know
-    // who is interested so they can decide whether to accept and start chatting.
-    void this.notificationsService
-      .create(
-        proposal.hostProfile.user.id,
-        'brand_interested_in_sponsorship',
-        `${brandProfile.brandName} is interested!`,
-        'This brand is interested in your proposal. Check your Chats to respond.',
-        { proposalId, sponsorshipInterestId: interest.id },
-      )
-      .catch((err) => this.logger.error('Failed to notify host of brand interest', err));
+    // Owner (Community or Community Space) notification now reveals the brand's name — TriChat
+    // needs the owner to know who is interested so they can decide whether to accept and chat.
+    const ownerUserId = SponsorshipService.ownerUserId(proposal);
+    if (ownerUserId) {
+      void this.notificationsService
+        .create(
+          ownerUserId,
+          'brand_interested_in_sponsorship',
+          `${brandProfile.brandName} is interested!`,
+          'This brand is interested in your proposal. Check your Chats to respond.',
+          { proposalId, sponsorshipInterestId: interest.id },
+        )
+        .catch((err) => this.logger.error('Failed to notify owner of brand interest', err));
+    }
 
     // Confirms back to the brand itself that the community has been notified — persisted so it
     // shows up in their Notifications page, not just an ephemeral success toast.
@@ -776,7 +779,7 @@ export class SponsorshipService {
       )
       .catch((err) => this.logger.error('Failed to notify brand of confirmed interest', err));
 
-    const communityName = proposal.hostProfile.communityProfile?.name ?? proposal.hostProfile.displayName ?? 'Unknown community';
+    const communityName = SponsorshipService.ownerDisplayName(proposal);
     for (const to of ADMIN_ALERT_EMAILS) {
       void this.mailQueue
         .add('brand-interest', {
@@ -984,22 +987,28 @@ export class SponsorshipService {
   // this status field — the frontend segments the same list by it, no separate query needed.
 
   private async getOwnProfiles(userId: string) {
-    const [hostProfileIds, brandProfileIds] = await Promise.all([
+    const [hostProfileIds, brandProfileIds, spaceProfile] = await Promise.all([
       this.teamAccessService.getHostProfileIds(userId),
       this.teamAccessService.getBrandProfileIds(userId),
+      this.prisma.spaceProfile.findUnique({ where: { userId }, select: { id: true } }),
     ]);
     return {
       hostProfile: hostProfileIds[0] ? { id: hostProfileIds[0] } : null,
       brandProfile: brandProfileIds[0] ? { id: brandProfileIds[0] } : null,
+      spaceProfile: spaceProfile ? { id: spaceProfile.id } : null,
     };
   }
 
   async listMyChats(userId: string, query: ListSponsorshipChatsQueryDto) {
-    const { hostProfile: originalHost, brandProfile: originalBrand } = await this.getOwnProfiles(userId);
-    if (!originalHost && !originalBrand) throw new NotFoundException('No host or brand profile found for this account');
+    const { hostProfile: originalHost, brandProfile: originalBrand, spaceProfile: originalSpace } = await this.getOwnProfiles(userId);
+    if (!originalHost && !originalBrand && !originalSpace)
+      throw new NotFoundException('No host, space, or brand profile found for this account');
 
-    const hostProfile = query.role === 'BRAND' ? null : originalHost;
-    const brandProfile = query.role === 'HOST' ? null : originalBrand;
+    const hostProfile = query.role === 'BRAND' || query.role === 'SPACE' ? null : originalHost;
+    const spaceProfile = query.role === 'BRAND' || query.role === 'HOST' ? null : originalSpace;
+    const brandProfile = query.role === 'HOST' || query.role === 'SPACE' ? null : originalBrand;
+    // Prefer HOST when a dual-profile account didn't specify a role — same default as before.
+    const isOwnerSide = !!(hostProfile || spaceProfile) && !brandProfile;
 
     const where: Prisma.SponsorshipInterestWhereInput = {
       ...(query.status && { chatStatus: query.status }),
@@ -1010,7 +1019,9 @@ export class SponsorshipService {
               { hostProfileId: hostProfile.id },
             ],
           }
-        : { brandProfileId: brandProfile!.id }),
+        : spaceProfile
+          ? { sponsorshipProposal: { spaceProfileId: spaceProfile.id } }
+          : { brandProfileId: brandProfile!.id }),
     };
 
     const interests = await this.prisma.sponsorshipInterest.findMany({
@@ -1021,6 +1032,7 @@ export class SponsorshipService {
             id: true,
             name: true,
             hostProfile: { select: { displayName: true, communityProfile: { select: { name: true, logoKey: true } } } },
+            spaceProfile: { select: { businessName: true, communityProfile: { select: { name: true, logoKey: true } } } },
           },
         },
         campaign: {
@@ -1046,8 +1058,10 @@ export class SponsorshipService {
 
     const unreadStats = await Promise.all(
       interests.map(async (i) => {
-        const lastReadAt = hostProfile ? i.hostLastReadAt : i.brandLastReadAt;
-        const mySenderType = hostProfile ? ChatSenderType.HOST : ChatSenderType.BRAND;
+        // `hostLastReadAt` doubles as "the proposal owner's last read" for Space-owned proposals
+        // too (a given interest's proposal is owned by exactly one of host/space, never both).
+        const lastReadAt = isOwnerSide ? i.hostLastReadAt : i.brandLastReadAt;
+        const mySenderType = spaceProfile ? ChatSenderType.SPACE : isOwnerSide ? ChatSenderType.HOST : ChatSenderType.BRAND;
         const unreadMessages = await this.prisma.sponsorshipChatMessage.findMany({
           where: {
             sponsorshipInterestId: i.id,
@@ -1063,12 +1077,16 @@ export class SponsorshipService {
         });
 
         const myKeywords: string[] = [];
-        if (hostProfile) {
+        if (spaceProfile) {
+          myKeywords.push('space');
+          const spaceName = i.sponsorshipProposal?.spaceProfile?.communityProfile?.name ?? i.sponsorshipProposal?.spaceProfile?.businessName;
+          if (spaceName) myKeywords.push(spaceName.toLowerCase());
+        } else if (isOwnerSide) {
           myKeywords.push('host', 'community');
           const isCamp = !!i.campaignId;
           const hostName = isCamp
             ? i.hostProfile?.communityProfile?.name || i.hostProfile?.displayName
-            : i.sponsorshipProposal?.hostProfile.communityProfile?.name || i.sponsorshipProposal?.hostProfile.displayName;
+            : i.sponsorshipProposal?.hostProfile?.communityProfile?.name || i.sponsorshipProposal?.hostProfile?.displayName;
           if (hostName) myKeywords.push(hostName.toLowerCase());
         } else {
           myKeywords.push('brand');
@@ -1098,30 +1116,37 @@ export class SponsorshipService {
       interests.map(async (i, idx) => {
         const isCampaign = !!i.campaignId;
         let counterpartLogoKey: string | null = null;
-        if (hostProfile) {
+        if (isOwnerSide) {
           counterpartLogoKey = isCampaign ? i.campaign?.brandProfile.logoKey : i.brandProfile.logoKey;
         } else {
           counterpartLogoKey = isCampaign
             ? i.hostProfile?.communityProfile?.logoKey || null
-            : i.sponsorshipProposal?.hostProfile.communityProfile?.logoKey || null;
+            : (i.sponsorshipProposal?.hostProfile?.communityProfile?.logoKey || i.sponsorshipProposal?.spaceProfile?.communityProfile?.logoKey || null);
         }
 
         const proposalId = isCampaign ? i.campaign?.id : i.sponsorshipProposal?.id;
         const proposalName = isCampaign ? i.campaign?.name : i.sponsorshipProposal?.name;
 
         let counterpartName = 'Community';
-        if (hostProfile) {
+        if (isOwnerSide) {
           counterpartName = isCampaign ? i.campaign?.brandProfile.brandName : i.brandProfile.brandName;
         } else {
           counterpartName = isCampaign
             ? i.hostProfile?.communityProfile?.name ?? i.hostProfile?.displayName ?? 'Community'
-            : i.sponsorshipProposal?.hostProfile.communityProfile?.name ?? i.sponsorshipProposal?.hostProfile.displayName ?? 'Community';
+            : i.sponsorshipProposal?.hostProfile?.communityProfile?.name ??
+              i.sponsorshipProposal?.hostProfile?.displayName ??
+              i.sponsorshipProposal?.spaceProfile?.communityProfile?.name ??
+              i.sponsorshipProposal?.spaceProfile?.businessName ??
+              'Community';
         }
 
         return {
           id: i.id,
           proposalId,
           proposalName,
+          // Lets Brand-side threads show whether the counterpart is a Community or a Community
+          // Space, per the "segregate/tag chats" requirement.
+          counterpartType: isCampaign ? 'HOST' : i.sponsorshipProposal?.spaceProfile ? 'SPACE' : 'HOST',
           chatStatus: i.chatStatus,
           createdAt: i.createdAt,
           chatAcceptedAt: i.chatAcceptedAt,
@@ -1158,12 +1183,10 @@ export class SponsorshipService {
     return { id: replyTo.id, senderType: replyTo.senderType, content: replyTo.content, hasMedia: !!replyTo.mediaKey };
   }
 
-  // Verifies the caller is either the host or the brand on this interest and returns which "hat"
-  // they're wearing, for use as senderType when they post a message. When the SAME account owns
-  // both sides (a single email holding both a Brand and a Community/Host profile, self-interest),
-  // isHost/isBrand are both true — preferredRole (from the caller, who knows which dashboard
-  // they're acting from) disambiguates instead of always defaulting to HOST.
-  private async getInterestForParticipant(userId: string, interestId: string, preferredRole?: 'HOST' | 'BRAND') {
+  // Verifies the caller is either the proposal owner (host or space) or the brand on this
+  // interest and returns which "hat" they're wearing, for use as senderType when they post a
+  // message. When the SAME account owns both sides (self-interest), preferredRole disambiguates.
+  private async getInterestForParticipant(userId: string, interestId: string, preferredRole?: 'HOST' | 'SPACE' | 'BRAND') {
     const interest = await this.prisma.sponsorshipInterest.findUnique({
       where: { id: interestId },
       include: {
@@ -1172,6 +1195,7 @@ export class SponsorshipService {
             id: true,
             name: true,
             hostProfile: { select: { id: true, userId: true, displayName: true, communityProfile: { select: { name: true } } } },
+            spaceProfile: { select: { id: true, userId: true, businessName: true, communityProfile: { select: { name: true } } } },
           },
         },
         campaign: {
@@ -1195,47 +1219,63 @@ export class SponsorshipService {
     if (!interest) throw new NotFoundException('Chat thread not found');
 
     const isCampaign = !!interest.campaignId;
-    const participantHostProfileId = isCampaign ? interest.hostProfile?.id : interest.sponsorshipProposal?.hostProfile.id;
-    const participantHostUserId = isCampaign ? interest.hostProfile?.userId : interest.sponsorshipProposal?.hostProfile.userId;
+    const isSpaceProposal = !isCampaign && !!interest.sponsorshipProposal?.spaceProfile;
+    const participantHostProfileId = isCampaign
+      ? interest.hostProfile?.id
+      : isSpaceProposal
+        ? undefined
+        : interest.sponsorshipProposal?.hostProfile?.id;
+    const participantHostUserId = isCampaign
+      ? interest.hostProfile?.userId
+      : isSpaceProposal
+        ? undefined
+        : interest.sponsorshipProposal?.hostProfile?.userId;
+    const participantSpaceProfileId = isSpaceProposal ? interest.sponsorshipProposal?.spaceProfile?.id : undefined;
+    const participantSpaceUserId = isSpaceProposal ? interest.sponsorshipProposal?.spaceProfile?.userId : undefined;
     const participantBrandProfileId = isCampaign ? (interest.campaign?.brandProfile?.id ?? interest.brandProfile?.id) : interest.brandProfile?.id;
     const participantBrandUserId = isCampaign ? (interest.campaign?.brandProfile?.userId ?? interest.brandProfile?.userId) : interest.brandProfile?.userId;
 
     // Owner check first (cheap, no extra query) — team membership is an additional fallback.
     let isHost = participantHostUserId === userId;
+    let isSpace = participantSpaceUserId === userId;
     let isBrand = participantBrandUserId === userId;
-    if (!isHost && !isBrand) {
-      const [hostProfileIds, brandProfileIds] = await Promise.all([
+    if (!isHost && !isSpace && !isBrand) {
+      const [hostProfileIds, brandProfileIds, spaceProfile] = await Promise.all([
         this.teamAccessService.getHostProfileIds(userId),
         this.teamAccessService.getBrandProfileIds(userId),
+        this.prisma.spaceProfile.findUnique({ where: { userId }, select: { id: true } }),
       ]);
       isHost = !!participantHostProfileId && hostProfileIds.includes(participantHostProfileId);
+      isSpace = !!participantSpaceProfileId && spaceProfile?.id === participantSpaceProfileId;
       isBrand = !!participantBrandProfileId && brandProfileIds.includes(participantBrandProfileId);
     }
-    if (!isHost && !isBrand) throw new ForbiddenException('You do not have access to this chat');
+    if (!isHost && !isSpace && !isBrand) throw new ForbiddenException('You do not have access to this chat');
 
-    // Ambiguous only when both are true (self-interest edge case) — let the caller's hint break
-    // the tie; otherwise fall back to the pre-existing HOST-first default for compatibility.
+    // Ambiguous only when both an owner side and brand are true (self-interest edge case) — let
+    // the caller's hint break the tie; otherwise fall back to the pre-existing default.
+    const isOwnerSide = isHost || isSpace;
     const senderType =
-      isHost && isBrand && preferredRole
+      isOwnerSide && isBrand && preferredRole
         ? ChatSenderType[preferredRole]
-        : isCampaign
-        ? isBrand
-          ? ChatSenderType.BRAND
-          : ChatSenderType.HOST
-        : isHost
+        : isSpace
+        ? ChatSenderType.SPACE
+        : isOwnerSide
         ? ChatSenderType.HOST
         : ChatSenderType.BRAND;
 
-    return { interest, senderType, isHost, isBrand };
+    return { interest, senderType, isHost, isSpace, isBrand };
   }
 
-  async listChatMessages(userId: string, interestId: string, preferredRole?: 'HOST' | 'BRAND') {
+  async listChatMessages(userId: string, interestId: string, preferredRole?: 'HOST' | 'SPACE' | 'BRAND') {
     const { interest, senderType } = await this.getInterestForParticipant(userId, interestId, preferredRole);
+    // hostLastReadAt/hostProfile-tagged read receipts double as "the proposal owner's" (host OR
+    // space) — a given interest's proposal owner is always exactly one of the two.
+    const isOwnerSenderType = senderType === ChatSenderType.HOST || senderType === ChatSenderType.SPACE;
 
     // Captured before this call marks the thread read below, so both the unread-divider and the
     // seen-tick reflect state as of the moment the thread was opened, not after.
-    const myPreviousLastReadAt = senderType === ChatSenderType.HOST ? interest.hostLastReadAt : interest.brandLastReadAt;
-    const otherLastReadAt = senderType === ChatSenderType.HOST ? interest.brandLastReadAt : interest.hostLastReadAt;
+    const myPreviousLastReadAt = isOwnerSenderType ? interest.hostLastReadAt : interest.brandLastReadAt;
+    const otherLastReadAt = isOwnerSenderType ? interest.brandLastReadAt : interest.hostLastReadAt;
 
     const messages = await this.prisma.sponsorshipChatMessage.findMany({
       where: { sponsorshipInterestId: interest.id },
@@ -1285,7 +1325,7 @@ export class SponsorshipService {
     void this.prisma.sponsorshipInterest
       .update({
         where: { id: interest.id },
-        data: senderType === ChatSenderType.HOST ? { hostLastReadAt: new Date() } : { brandLastReadAt: new Date() },
+        data: isOwnerSenderType ? { hostLastReadAt: new Date() } : { brandLastReadAt: new Date() },
       })
       .catch((err) => this.logger.error('Failed to update chat read state', err));
 
@@ -1356,24 +1396,27 @@ export class SponsorshipService {
     const message = await this.prisma.sponsorshipChatMessage.create({
       data: { sponsorshipInterestId: interest.id, senderType, senderId: userId, content, mediaKey: dto.mediaKey, replyToId: dto.replyToId },
     });
+    const isOwnerSenderType = senderType === ChatSenderType.HOST || senderType === ChatSenderType.SPACE;
     await this.prisma.sponsorshipInterest.update({
       where: { id: interest.id },
       data: {
         lastMessageAt: message.createdAt,
         // Sending also counts as having read up to now, on my own side.
-        ...(senderType === ChatSenderType.HOST ? { hostLastReadAt: message.createdAt } : { brandLastReadAt: message.createdAt }),
+        ...(isOwnerSenderType ? { hostLastReadAt: message.createdAt } : { brandLastReadAt: message.createdAt }),
       },
     });
 
     const isCampaign = !!interest.campaignId;
-    const hostUserId = isCampaign ? interest.hostProfile?.userId : interest.sponsorshipProposal?.hostProfile?.userId;
-    const recipientUserId =
-      senderType === ChatSenderType.HOST ? interest.brandProfile.userId : hostUserId;
-    
+    const ownerUserId = isCampaign
+      ? interest.hostProfile?.userId
+      : SponsorshipService.ownerUserId(interest.sponsorshipProposal ?? {});
+    const recipientUserId = isOwnerSenderType ? interest.brandProfile.userId : ownerUserId;
+
     let senderName = 'The community';
-    if (senderType === ChatSenderType.HOST) {
-      const host = isCampaign ? interest.hostProfile : interest.sponsorshipProposal?.hostProfile;
-      senderName = host?.communityProfile?.name ?? host?.displayName ?? 'The community';
+    if (isOwnerSenderType) {
+      senderName = isCampaign
+        ? (interest.hostProfile?.communityProfile?.name ?? interest.hostProfile?.displayName ?? 'The community')
+        : SponsorshipService.ownerDisplayName(interest.sponsorshipProposal ?? {});
     } else {
       senderName = interest.brandProfile.brandName;
     }
@@ -1398,13 +1441,13 @@ export class SponsorshipService {
 
   // Host accepts a brand's interest OR brand accepts a host's interest (for campaigns) — opens the chat window both sides ("Requests" → "General").
   async acceptChatRequest(userId: string, interestId: string) {
-    const { interest, isHost, isBrand } = await this.getInterestForParticipant(userId, interestId);
+    const { interest, isHost, isSpace, isBrand } = await this.getInterestForParticipant(userId, interestId);
     const isCampaign = !!interest.campaignId;
 
     if (isCampaign) {
       if (!isBrand) throw new ForbiddenException('Only the brand can accept this request');
     } else {
-      if (!isHost) throw new ForbiddenException('Only the host can accept this request');
+      if (!isHost && !isSpace) throw new ForbiddenException('Only the community or space can accept this request');
     }
 
     if (interest.chatStatus === SponsorshipChatStatus.ACCEPTED) {
@@ -1416,7 +1459,9 @@ export class SponsorshipService {
       data: { chatStatus: SponsorshipChatStatus.ACCEPTED, chatAcceptedAt: new Date() },
     });
 
-    const hostUserId = isCampaign ? (interest.hostProfile?.userId ?? interest.sponsorshipProposal?.hostProfile?.userId) : (interest.sponsorshipProposal?.hostProfile?.userId ?? interest.hostProfile?.userId);
+    const hostUserId = isCampaign
+      ? (interest.hostProfile?.userId ?? interest.sponsorshipProposal?.hostProfile?.userId)
+      : SponsorshipService.ownerUserId(interest.sponsorshipProposal ?? {});
     const brandUserId = isCampaign ? (interest.campaign?.brandProfile?.userId ?? interest.brandProfile?.userId) : interest.brandProfile?.userId;
     const recipientUserId = isCampaign ? hostUserId : brandUserId;
     const brandName = interest.campaign?.brandProfile?.brandName ?? interest.brandProfile?.brandName ?? 'Brand';
@@ -1453,11 +1498,12 @@ export class SponsorshipService {
     const message = await this.prisma.sponsorshipChatMessage.create({
       data: { sponsorshipInterestId: interestId, senderType, senderId, content, messageType: 'SYSTEM' },
     });
+    const isOwnerSenderType = senderType === ChatSenderType.HOST || senderType === ChatSenderType.SPACE;
     await this.prisma.sponsorshipInterest.update({
       where: { id: interestId },
       data: {
         lastMessageAt: message.createdAt,
-        ...(senderType === ChatSenderType.HOST ? { hostLastReadAt: message.createdAt } : { brandLastReadAt: message.createdAt }),
+        ...(isOwnerSenderType ? { hostLastReadAt: message.createdAt } : { brandLastReadAt: message.createdAt }),
       },
     });
     return message;
@@ -1467,7 +1513,7 @@ export class SponsorshipService {
     if (interest.campaignId && interest.hostProfile) {
       return interest.hostProfile.communityProfile?.name ?? interest.hostProfile.displayName ?? 'The community';
     }
-    return interest.sponsorshipProposal?.hostProfile?.communityProfile?.name ?? interest.sponsorshipProposal?.hostProfile?.displayName ?? 'The community';
+    return SponsorshipService.ownerDisplayName(interest.sponsorshipProposal ?? {});
   }
 
   private brandNameOf(interest: any) {
@@ -1478,18 +1524,18 @@ export class SponsorshipService {
   }
 
   async createDeal(userId: string, interestId: string, dto: UpsertSponsorshipDealDto) {
-    const { interest, isHost, isBrand } = await this.getInterestForParticipant(userId, interestId);
+    const { interest, isHost, isSpace, isBrand } = await this.getInterestForParticipant(userId, interestId);
     const isCampaign = !!interest.campaignId;
     if (isCampaign) {
       if (!isBrand) {
         throw new ForbiddenException('Only the brand can lock a deal for a campaign');
       }
     } else {
-      if (!isHost) {
-        throw new ForbiddenException('Only the community can lock a deal');
+      if (!isHost && !isSpace) {
+        throw new ForbiddenException('Only the community or space can lock a deal');
       }
     }
-    const senderType = isCampaign ? ChatSenderType.BRAND : ChatSenderType.HOST;
+    const senderType = isCampaign ? ChatSenderType.BRAND : SponsorshipService.ownerSenderType(interest.sponsorshipProposal ?? {});
     if (interest.chatStatus !== SponsorshipChatStatus.ACCEPTED) {
       throw new BadRequestException('The chat must be accepted before locking a deal');
     }
@@ -1549,18 +1595,18 @@ export class SponsorshipService {
   }
 
   async updateDeal(userId: string, interestId: string, dto: UpsertSponsorshipDealDto) {
-    const { interest, isHost, isBrand } = await this.getInterestForParticipant(userId, interestId);
+    const { interest, isHost, isSpace, isBrand } = await this.getInterestForParticipant(userId, interestId);
     const isCampaign = !!interest.campaignId;
     if (isCampaign) {
       if (!isBrand) {
         throw new ForbiddenException('Only the brand can edit the deal for a campaign');
       }
     } else {
-      if (!isHost) {
-        throw new ForbiddenException('Only the community can edit the deal');
+      if (!isHost && !isSpace) {
+        throw new ForbiddenException('Only the community or space can edit the deal');
       }
     }
-    const senderType = isCampaign ? ChatSenderType.BRAND : ChatSenderType.HOST;
+    const senderType = isCampaign ? ChatSenderType.BRAND : SponsorshipService.ownerSenderType(interest.sponsorshipProposal ?? {});
 
     const existing = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
     if (!existing) throw new NotFoundException('No deal found for this chat — lock a deal first');
@@ -1590,7 +1636,7 @@ export class SponsorshipService {
     const brandName = interest.campaign?.brandProfile?.brandName ?? interest.brandProfile?.brandName ?? 'The brand';
     const creatorName = isCampaign ? brandName : hostName;
     const targetUserId = isCampaign
-      ? (interest.hostProfile?.userId ?? interest.sponsorshipProposal?.hostProfile?.userId)
+      ? (interest.hostProfile?.userId ?? SponsorshipService.ownerUserId(interest.sponsorshipProposal ?? {}))
       : interest.brandProfile?.userId;
 
     await this.postDealSystemMessage(
@@ -1652,7 +1698,7 @@ export class SponsorshipService {
     const approverName = isCampaign ? hostName : brandName;
     const targetUserId = isCampaign
       ? interest.brandProfile?.userId
-      : (interest.hostProfile?.userId ?? interest.sponsorshipProposal?.hostProfile?.userId);
+      : (interest.hostProfile?.userId ?? SponsorshipService.ownerUserId(interest.sponsorshipProposal ?? {}));
 
     if (targetUserId) {
       void this.notificationsService
@@ -1713,7 +1759,7 @@ export class SponsorshipService {
     const requesterName = isCampaign ? hostName : brandName;
     const targetUserId = isCampaign
       ? interest.brandProfile?.userId
-      : (interest.hostProfile?.userId ?? interest.sponsorshipProposal?.hostProfile?.userId);
+      : (interest.hostProfile?.userId ?? SponsorshipService.ownerUserId(interest.sponsorshipProposal ?? {}));
 
     const noteSuffix = dto.note?.trim() ? `: "${dto.note.trim()}"` : '.';
     await this.postDealSystemMessage(
@@ -1761,7 +1807,7 @@ export class SponsorshipService {
   }
 
   async upsertDealReport(userId: string, interestId: string, dto: UpsertSponsorshipDealReportDto) {
-    const { interest, isHost, isBrand } = await this.getInterestForParticipant(userId, interestId);
+    const { interest, isHost, isSpace, isBrand } = await this.getInterestForParticipant(userId, interestId);
 
     const deal = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
     if (!deal) throw new NotFoundException('No deal found for this chat');
@@ -1770,9 +1816,10 @@ export class SponsorshipService {
     }
 
     const existingReport = await this.prisma.sponsorshipDealReport.findUnique({ where: { sponsorshipDealId: deal.id } });
+    const isOwnerSide = isHost || isSpace;
     // Brand can only approve/request-revision on an already-submitted report, not create one.
-    if (!isHost && !existingReport) {
-      throw new ForbiddenException('Only the community can submit the deliverables report');
+    if (!isOwnerSide && !existingReport) {
+      throw new ForbiddenException('Only the community or space can submit the deliverables report');
     }
 
     let parsedSummaryStatus: string | undefined;
@@ -1784,9 +1831,8 @@ export class SponsorshipService {
 
     const explicitStatus = dto.status || parsedSummaryStatus;
     const isBrandReviewAction = explicitStatus === 'APPROVED' || explicitStatus === 'REVISION_REQUESTED';
-    const isHostSubmission = !isBrandReviewAction || isHost;
 
-    const finalStatus = isBrandReviewAction && !isHost ? explicitStatus : (explicitStatus ?? 'PENDING');
+    const finalStatus = isBrandReviewAction && !isOwnerSide ? explicitStatus : (explicitStatus ?? 'PENDING');
     const finalRevisionNote = finalStatus === 'REVISION_REQUESTED' ? (dto.revisionNote ?? dto.notes ?? null) : null;
 
     const report = await this.prisma.sponsorshipDealReport.upsert({
@@ -1831,7 +1877,7 @@ export class SponsorshipService {
     if (finalStatus === 'PENDING') {
       await this.postDealSystemMessage(
         interest.id,
-        ChatSenderType.HOST,
+        interest.campaignId ? ChatSenderType.HOST : SponsorshipService.ownerSenderType(interest.sponsorshipProposal ?? {}),
         userId,
         `${this.hostNameOf(interest)} submitted the deliverables report.`,
       );
@@ -1858,7 +1904,7 @@ export class SponsorshipService {
         `${brandName} ${brandStatus} the deliverables report.`,
       );
 
-      const hostUserId = interest.campaignId ? interest.hostProfile?.userId : interest.sponsorshipProposal?.hostProfile?.userId;
+      const hostUserId = interest.campaignId ? interest.hostProfile?.userId : SponsorshipService.ownerUserId(interest.sponsorshipProposal ?? {});
       if (hostUserId) {
         void this.notificationsService
           .create(
@@ -1958,7 +2004,7 @@ export class SponsorshipService {
 
     void this.notificationsService
       .create(
-        interest.campaignId ? interest.hostProfile?.userId : interest.sponsorshipProposal?.hostProfile?.userId,
+        interest.campaignId ? interest.hostProfile?.userId : SponsorshipService.ownerUserId(interest.sponsorshipProposal ?? {}),
         'sponsorship_deal_paid',
         interest.brandProfile.brandName,
         `💳 Paid ₹${paidAmount.toLocaleString('en-IN')} for the deal: ${deal.projectName}`,
@@ -2003,7 +2049,12 @@ export class SponsorshipService {
             campaignId: true,
             sponsorshipProposalId: true,
             sponsorshipProposal: {
-              select: { id: true, name: true, hostProfile: { select: { displayName: true, communityProfile: { select: { name: true } } } } },
+              select: {
+                id: true,
+                name: true,
+                hostProfile: { select: { displayName: true, communityProfile: { select: { name: true } } } },
+                spaceProfile: { select: { businessName: true, communityProfile: { select: { name: true } } } },
+              },
             },
             campaign: {
               select: { id: true, name: true },
@@ -2037,7 +2088,7 @@ export class SponsorshipService {
         if (isCampaign) {
           communityName = d.sponsorshipInterest.hostProfile?.communityProfile?.name ?? d.sponsorshipInterest.hostProfile?.displayName ?? 'Community';
         } else {
-          communityName = d.sponsorshipInterest.sponsorshipProposal?.hostProfile.communityProfile?.name ?? d.sponsorshipInterest.sponsorshipProposal?.hostProfile.displayName ?? 'Community';
+          communityName = SponsorshipService.ownerDisplayName(d.sponsorshipInterest.sponsorshipProposal ?? {});
         }
 
         return {

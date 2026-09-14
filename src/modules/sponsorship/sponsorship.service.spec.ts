@@ -13,6 +13,7 @@ function makePrisma() {
   const prisma: any = {
     hostProfile: { findUnique: jest.fn() },
     brandProfile: { findUnique: jest.fn() },
+    spaceProfile: { findUnique: jest.fn().mockResolvedValue(null) },
     sponsorshipProposal: { findUnique: jest.fn(), findMany: jest.fn().mockResolvedValue([]), create: jest.fn(), update: jest.fn(), delete: jest.fn().mockResolvedValue({}) },
     sponsorshipInterest: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}), count: jest.fn().mockResolvedValue(0) },
     sponsorshipChatMessage: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), count: jest.fn().mockResolvedValue(0) },
