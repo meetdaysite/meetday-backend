@@ -188,9 +188,9 @@ export class SponsorshipController {
 
   @Get('communities')
   @UseGuards(RolesGuard)
-  @Roles('BRAND')
+  @Roles('BRAND', 'SPACE_PARTNER')
   @ApiOperation({
-    summary: 'List onboarded communities (brand view)',
+    summary: 'List onboarded communities (brand/space partner view)',
     description: 'Basic info (logo, name, size, categories) for admin-approved host community profiles.',
   })
   @ApiOkResponse({ description: 'List of onboarded communities.' })

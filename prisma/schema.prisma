@@ -108,9 +108,13 @@ model User {
   sponsorshipDealsCreated         SponsorshipDeal[]        @relation("SponsorshipDealCreatedBy")
   sponsorshipDealReportsSubmitted SponsorshipDealReport[]  @relation("SponsorshipDealReportSubmittedBy")
 
-  spaceChatMessages SpaceChatMessage[] @relation("SpaceChatMessageSender")
-  spaceDealsCreated SpaceDeal[]        @relation("SpaceDealCreatedBy")
-  spaceDealReportsSubmitted SpaceDealReport[] @relation("SpaceDealReportSubmittedBy")
+  spaceChatMessages         SpaceChatMessage[] @relation("SpaceChatMessageSender")
+  spaceDealsCreated         SpaceDeal[]        @relation("SpaceDealCreatedBy")
+  spaceDealReportsSubmitted SpaceDealReport[]  @relation("SpaceDealReportSubmittedBy")
+
+  communityInterestChatMessages SpaceHostChatMessage[] @relation("SpaceHostChatMessageSender")
+  communityDealsCreated         SpaceHostDeal[]        @relation("SpaceHostDealCreatedBy")
+  communityDealReportsSubmitted SpaceHostDealReport[]  @relation("SpaceHostDealReportSubmittedBy")
 
   meetdayChatThread   MeetdayChatThread?   @relation("MeetdayChatThreadUser")
   meetdayChatMessages MeetdayChatMessage[] @relation("MeetdayChatMessageSender")
@@ -441,6 +445,10 @@ model HostProfile {
   spaceInterests       SpaceInterest[]
   teamMembers          HostTeamMember[]
 
+  // Requests received from Space Partners wanting to partner with this Community (reverse of
+  // spaceInterests, where this Host is the requester).
+  communityInterests SpaceHostInterest[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -525,8 +533,12 @@ model SpaceProfile {
   phone           String?
   socialLinks     Json? // { instagram, linkedin, youtube, website }
 
-  communityProfile SpaceCommunityProfile?
+  communityProfile     SpaceCommunityProfile?
   sponsorshipProposals SponsorshipProposal[]
+
+  // Requests this Space Partner sent to Communities wanting to partner (reverse of SpaceInterest,
+  // where this Space is the target/owner instead of the requester).
+  communityInterests SpaceHostInterest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -664,10 +676,10 @@ model SpaceChatMessage {
   spaceInterestId String
   spaceInterest   SpaceInterest @relation(fields: [spaceInterestId], references: [id], onDelete: Cascade)
 
-  senderType SpaceChatSenderType
-  senderId   String
-  sender     User                @relation("SpaceChatMessageSender", fields: [senderId], references: [id])
-  messageType ChatMessageType @default(TEXT)
+  senderType  SpaceChatSenderType
+  senderId    String
+  sender      User                @relation("SpaceChatMessageSender", fields: [senderId], references: [id])
+  messageType ChatMessageType     @default(TEXT)
 
   content  String  @db.Text
   mediaKey String?
@@ -758,6 +770,153 @@ model SpaceDealReport {
   updatedAt     DateTime @updatedAt
 
   @@map("space_deal_reports")
+}
+
+enum SpaceHostChatStatus {
+  REQUESTED
+  ACCEPTED
+  DECLINED
+}
+
+enum SpaceHostChatSenderType {
+  SPACE
+  HOST
+  ADMIN
+}
+
+enum SpaceHostDealStatus {
+  PENDING_APPROVAL // space submitted/edited, awaiting the community's review
+  CHANGES_REQUESTED // community asked for changes, space needs to edit
+  APPROVED // community approved — deal is locked, preserved as the final record
+}
+
+// A Space Partner expressing interest in partnering with a Community — the reverse direction of
+// SpaceInterest (there the Space is the target being requested; here the Community/Host is the
+// target and the Space is always the sole requester, so no requesterType enum is needed). Same
+// request/accept/chat/deal shape throughout — the Space always locks the deal and submits the
+// deliverables report, the Community always approves, mirroring SpaceInterest's "space handles
+// deal admin" business rule regardless of which side initiated.
+model SpaceHostInterest {
+  id            String      @id @default(uuid())
+  hostProfileId String
+  hostProfile   HostProfile @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
+
+  spaceProfileId String
+  spaceProfile   SpaceProfile @relation(fields: [spaceProfileId], references: [id], onDelete: Cascade)
+
+  message String? @db.Text // optional note sent along with the interest request
+
+  chatStatus     SpaceHostChatStatus @default(REQUESTED)
+  chatAcceptedAt DateTime?
+  lastMessageAt  DateTime?
+
+  requesterLastReadAt DateTime? // space's read time
+  communityLastReadAt DateTime? // host's read time
+  adminLastReadAt     DateTime?
+
+  chatMessages SpaceHostChatMessage[]
+  deal         SpaceHostDeal?
+
+  createdAt DateTime @default(now())
+
+  @@unique([hostProfileId, spaceProfileId])
+  @@index([hostProfileId])
+  @@index([spaceProfileId])
+  @@index([chatStatus])
+  @@map("space_host_interests")
+}
+
+model SpaceHostChatMessage {
+  id                  String            @id @default(uuid())
+  spaceHostInterestId String
+  spaceHostInterest   SpaceHostInterest @relation(fields: [spaceHostInterestId], references: [id], onDelete: Cascade)
+
+  senderType  SpaceHostChatSenderType
+  senderId    String
+  sender      User                    @relation("SpaceHostChatMessageSender", fields: [senderId], references: [id])
+  messageType ChatMessageType         @default(TEXT)
+
+  content  String  @db.Text
+  mediaKey String?
+
+  replyToId String?
+  replyTo   SpaceHostChatMessage?  @relation("SpaceHostMessageReplyTo", fields: [replyToId], references: [id])
+  replies   SpaceHostChatMessage[] @relation("SpaceHostMessageReplyTo")
+
+  deletedAt DateTime? // soft delete — placeholder shown to both sides
+
+  createdAt DateTime @default(now())
+
+  @@index([spaceHostInterestId, createdAt])
+  @@map("space_host_chat_messages")
+}
+
+// Negotiated final terms for a Space<->Community partnership — filled in by the space partner
+// once chat negotiation is done ("Lock the Deal"), reviewed/approved by the community. Mirrors
+// SpaceDeal's shape exactly.
+model SpaceHostDeal {
+  id                  String            @id @default(uuid())
+  spaceHostInterestId String            @unique
+  spaceHostInterest   SpaceHostInterest @relation(fields: [spaceHostInterestId], references: [id], onDelete: Cascade)
+
+  projectName       String
+  goals             Json? // string[] or string, free-form from the form
+  venue             String
+  time              String?
+  targetAudience    Json? // string[] or string
+  startDate         DateTime
+  endDate           DateTime?
+  sponsorshipAmount Decimal
+  barterElements    String?   @db.Text
+  deliverables      String    @db.Text
+  otherTerms        String?   @db.Text
+  additionalNotes   String?   @db.Text
+
+  status            SpaceHostDealStatus @default(PENDING_APPROVAL)
+  changeRequestNote String?             @db.Text
+  approvedAt        DateTime?
+
+  report SpaceHostDealReport?
+
+  createdById String
+  createdBy   User   @relation("SpaceHostDealCreatedBy", fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@map("space_host_deals")
+}
+
+// Submitted by the space partner once the deal is APPROVED ("locked") — mirrors
+// SpaceDealReport's shape exactly.
+model SpaceHostDealReport {
+  id              String        @id @default(uuid())
+  spaceHostDealId String        @unique
+  spaceHostDeal   SpaceHostDeal @relation(fields: [spaceHostDealId], references: [id], onDelete: Cascade)
+
+  projectName  String
+  eventDate    String
+  venue        String
+  time         String?
+  guestCount   String?
+  ageRange     String?
+  deliverables Json     @default("[]")
+  videoLinks   String[] @default([])
+  socialLinks  String[] @default([])
+  status       String   @default("PENDING") // PENDING, APPROVED, REVISION_REQUESTED
+  revisionNote String?
+
+  summary   String   @db.Text
+  proofKeys String[]
+  notes     String?  @db.Text
+
+  submittedById String
+  submittedBy   User     @relation("SpaceHostDealReportSubmittedBy", fields: [submittedById], references: [id])
+  submittedAt   DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("space_host_deal_reports")
 }
 
 enum CompanyType {
