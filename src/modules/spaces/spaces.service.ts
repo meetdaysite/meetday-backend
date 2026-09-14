@@ -492,6 +492,10 @@ export class SpacesService {
           id: i.id,
           spaceCommunityProfileId: i.spaceCommunityProfileId,
           requesterType: i.requesterType,
+          // Raw requester ids — lets a caller cross-reference this thread against the reverse
+          // (Space -> Community) SpaceHostInterest feature to detect an existing channel.
+          hostProfileId: i.hostProfileId,
+          brandProfileId: i.brandProfileId,
           chatStatus: i.chatStatus,
           createdAt: i.createdAt,
           chatAcceptedAt: i.chatAcceptedAt,
