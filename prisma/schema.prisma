@@ -1422,6 +1422,7 @@ enum ChatSenderType {
   HOST
   BRAND
   ADMIN
+  SPACE
 }
 
 // TEXT: a normal chat bubble. SYSTEM: an automated narrative message about the deal lifecycle

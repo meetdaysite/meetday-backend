@@ -108,6 +108,43 @@ export class SponsorshipService {
     return { ...proposal, imageUrl, docUrl, pendingRevision };
   }
 
+  // ── Host-or-Space owner resolution helpers ──────────────────────────────────
+  // A SponsorshipProposal's owner is EITHER a HostProfile OR a SpaceProfile (never both) — these
+  // helpers resolve the common fields (user id, display name, logo key) regardless of which one
+  // it is, so chat/deal/billing code doesn't need to duplicate the `hostProfile ?? spaceProfile`
+  // branch at every call site. Not yet wired into the chat/deal pipeline (Phase 2) — additive only.
+  private static ownerUserId(owner: {
+    hostProfile?: { userId: string } | null;
+    spaceProfile?: { userId: string } | null;
+  }): string | undefined {
+    return owner.hostProfile?.userId ?? owner.spaceProfile?.userId;
+  }
+
+  private static ownerDisplayName(owner: {
+    hostProfile?: { displayName?: string | null; communityProfile?: { name?: string | null } | null } | null;
+    spaceProfile?: { businessName?: string | null; communityProfile?: { name?: string | null } | null } | null;
+  }): string {
+    return (
+      owner.hostProfile?.communityProfile?.name ??
+      owner.hostProfile?.displayName ??
+      owner.spaceProfile?.communityProfile?.name ??
+      owner.spaceProfile?.businessName ??
+      'Unknown'
+    );
+  }
+
+  private static ownerLogoKey(owner: {
+    hostProfile?: { communityProfile?: { logoKey?: string | null } | null } | null;
+    spaceProfile?: { communityProfile?: { logoKey?: string | null } | null } | null;
+  }): string | null {
+    return owner.hostProfile?.communityProfile?.logoKey ?? owner.spaceProfile?.communityProfile?.logoKey ?? null;
+  }
+
+  // Which ChatSenderType a HOST-or-SPACE participant should post messages as.
+  private static ownerSenderType(owner: { hostProfile?: unknown | null; spaceProfile?: unknown | null }): ChatSenderType {
+    return owner.spaceProfile ? ChatSenderType.SPACE : ChatSenderType.HOST;
+  }
+
   // Signs each past event's image keys into downloadable URLs — pastEvents is stored as raw
   // JSON (array of { name?, description?, imageKeys? }), entirely optional at every level.
   private async withPastEventImageUrls(pastEvents: PastEventLike[] | null | undefined) {
