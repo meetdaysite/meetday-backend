@@ -58,6 +58,8 @@ import { SendChatMessageDto } from '../sponsorship/dto/send-chat-message.dto';
 import { UpdateChatMessageDto } from '../sponsorship/dto/update-chat-message.dto';
 import { ListSpaceChatsQueryDto } from '../spaces/dto/list-space-chats-query.dto';
 import { SendSpaceChatMessageDto } from '../spaces/dto/send-space-chat-message.dto';
+import { ListSpaceHostChatsQueryDto } from '../space-host-interest/dto/list-space-host-chats-query.dto';
+import { SendSpaceHostChatMessageDto } from '../space-host-interest/dto/send-space-host-chat-message.dto';
 import { SponsorshipInvoicePdfService } from '../sponsorship/sponsorship-invoice-pdf.service';
 import { SponsorshipReportPdfService } from '../sponsorship/sponsorship-report-pdf.service';
 import { RESOLVED_SYSTEM_MESSAGE } from '../meetday-chat/meetday-chat.service';
@@ -3116,6 +3118,204 @@ export class AdminService {
     if (message.deletedAt) return { message: 'Already deleted', deleted: true };
 
     await this.prisma.spaceChatMessage.update({ where: { id: messageId }, data: { deletedAt: new Date() } });
+    return { message: 'Message deleted', deleted: true };
+  }
+
+  // ── Space Partner ↔ Community partnership chats (admin oversight) ──────────
+  // Mirrors the Community Space chats block above — the Space is always the requester and the
+  // Host/Community is always the target, so there's no requesterType branching here.
+
+  async listSpaceHostChats(query: ListSpaceHostChatsQueryDto) {
+    const threads = await this.prisma.spaceHostInterest.findMany({
+      where: {
+        ...(query.status && { chatStatus: query.status }),
+      },
+      include: {
+        hostProfile: { select: { id: true, displayName: true, communityProfile: { select: { name: true, logoKey: true } } } },
+        spaceProfile: { select: { id: true, businessName: true, communityProfile: { select: { name: true, logoKey: true } } } },
+        chatMessages: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { content: true, mediaKey: true, senderType: true, createdAt: true },
+        },
+      },
+      orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    const unreadStats = await Promise.all(
+      threads.map(async (t) => {
+        const unreadMessages = await this.prisma.spaceHostChatMessage.findMany({
+          where: {
+            spaceHostInterestId: t.id,
+            senderType: { not: 'ADMIN' },
+            deletedAt: null,
+            ...(t.adminLastReadAt && { createdAt: { gt: t.adminLastReadAt } }),
+          },
+          select: {
+            id: true,
+            content: true,
+            replyTo: { select: { senderType: true } },
+          },
+        });
+
+        const msgs = unreadMessages || [];
+        const hasUnreadMention = msgs.some((msg) => {
+          if (msg.replyTo && msg.replyTo.senderType === 'ADMIN') return true;
+          if (msg.content) {
+            const lower = msg.content.toLowerCase();
+            return lower.includes('@meetday') || lower.includes('@admin');
+          }
+          return false;
+        });
+
+        return { unreadCount: msgs.length, hasUnreadMention };
+      }),
+    );
+
+    return Promise.all(
+      threads.map(async (t, idx) => {
+        const communityLogoKey = t.hostProfile.communityProfile?.logoKey ?? null;
+        const spaceLogoKey = t.spaceProfile.communityProfile?.logoKey ?? null;
+
+        const [communityLogoUrl, spaceLogoUrl] = await Promise.all([
+          communityLogoKey ? this.storageService.getPresignedDownloadUrl(communityLogoKey) : null,
+          spaceLogoKey ? this.storageService.getPresignedDownloadUrl(spaceLogoKey) : null,
+        ]);
+
+        const communityName = t.hostProfile.communityProfile?.name ?? t.hostProfile.displayName ?? 'Community';
+        const spaceName = t.spaceProfile.communityProfile?.name ?? t.spaceProfile.businessName ?? 'Space Partner';
+
+        return {
+          id: t.id,
+          hostProfileId: t.hostProfileId,
+          spaceProfileId: t.spaceProfileId,
+          communityName,
+          communityLogoUrl,
+          spaceName,
+          spaceLogoUrl,
+          chatStatus: t.chatStatus,
+          createdAt: t.createdAt,
+          chatAcceptedAt: t.chatAcceptedAt,
+          lastMessageAt: t.lastMessageAt,
+          lastMessagePreview: t.chatMessages[0]
+            ? (t.chatMessages[0].content || (t.chatMessages[0].mediaKey ? '📷 Photo' : '')).slice(0, 120)
+            : (t.message ?? null),
+          unreadCount: unreadStats[idx].unreadCount,
+          hasUnreadMention: unreadStats[idx].hasUnreadMention,
+        };
+      }),
+    );
+  }
+
+  // Count of Space<->Community requests awaiting the community's acceptance — backs a sidebar badge.
+  async countPendingSpaceHostChats() {
+    return this.prisma.spaceHostInterest.count({ where: { chatStatus: 'REQUESTED' } });
+  }
+
+  async getSpaceHostChatMessages(interestId: string) {
+    const interest = await this.prisma.spaceHostInterest.findUnique({ where: { id: interestId } });
+    if (!interest) throw new NotFoundException('Chat thread not found');
+
+    const messages = await this.prisma.spaceHostChatMessage.findMany({
+      where: { spaceHostInterestId: interestId },
+      orderBy: { createdAt: 'asc' },
+      take: 200,
+      select: {
+        id: true,
+        senderType: true,
+        senderId: true,
+        content: true,
+        mediaKey: true,
+        messageType: true,
+        deletedAt: true,
+        createdAt: true,
+        replyTo: { select: { id: true, senderType: true, content: true, mediaKey: true, deletedAt: true } },
+      },
+    });
+    const withMediaUrls = await Promise.all(
+      messages.map(async ({ mediaKey, replyTo, ...m }) => ({
+        ...m,
+        mediaUrl: mediaKey ? await this.storageService.getPresignedDownloadUrl(mediaKey) : null,
+        replyTo: replyTo
+          ? { id: replyTo.id, senderType: replyTo.senderType, content: replyTo.deletedAt ? 'This message was deleted' : replyTo.content, hasMedia: !replyTo.deletedAt && !!replyTo.mediaKey }
+          : null,
+      })),
+    );
+
+    void this.prisma.spaceHostInterest
+      .update({ where: { id: interestId }, data: { adminLastReadAt: new Date() } })
+      .catch((err) => this.logger.error('Failed to update admin space-host chat read state', err));
+
+    return { messages: withMediaUrls, chatStatus: interest.chatStatus };
+  }
+
+  async sendSpaceHostChatMessage(interestId: string, adminId: string, dto: SendSpaceHostChatMessageDto) {
+    const interest = await this.prisma.spaceHostInterest.findUnique({
+      where: { id: interestId },
+      include: {
+        hostProfile: { select: { userId: true } },
+        spaceProfile: { select: { userId: true } },
+      },
+    });
+    if (!interest) throw new NotFoundException('Chat thread not found');
+    if (!dto.content?.trim() && !dto.mediaKey) {
+      throw new BadRequestException('Message must have text or an image');
+    }
+
+    let replyToRow: { id: string; senderType: string; content: string; mediaKey: string | null; deletedAt: Date | null } | null = null;
+    if (dto.replyToId) {
+      const original = await this.prisma.spaceHostChatMessage.findUnique({
+        where: { id: dto.replyToId },
+        select: { id: true, senderType: true, content: true, mediaKey: true, deletedAt: true, spaceHostInterestId: true },
+      });
+      if (!original || original.spaceHostInterestId !== interestId) {
+        throw new BadRequestException('You can only reply to a message in this chat');
+      }
+      replyToRow = original;
+    }
+
+    const message = await this.prisma.spaceHostChatMessage.create({
+      data: {
+        spaceHostInterestId: interestId,
+        senderType: 'ADMIN',
+        senderId: adminId,
+        content: dto.content ?? '',
+        mediaKey: dto.mediaKey,
+        replyToId: dto.replyToId,
+      },
+    });
+    await this.prisma.spaceHostInterest.update({ where: { id: interestId }, data: { lastMessageAt: message.createdAt } });
+
+    const recipients = [interest.hostProfile.userId, interest.spaceProfile.userId].filter((id): id is string => Boolean(id));
+
+    const preview = dto.content?.trim() ? dto.content.slice(0, 80) : '📷 Sent a photo';
+    for (const to of recipients) {
+      void this.notificationsService
+        .create(to, 'space_host_chat_message', 'Meetday', preview, { spaceHostInterestId: interestId })
+        .catch((err) => this.logger.error('Failed to notify of admin space-host chat message', err));
+    }
+
+    const mediaUrl = dto.mediaKey ? await this.storageService.getPresignedDownloadUrl(dto.mediaKey) : null;
+    return {
+      ...message,
+      mediaUrl,
+      replyTo: replyToRow
+        ? {
+            id: replyToRow.id,
+            senderType: replyToRow.senderType,
+            content: replyToRow.deletedAt ? 'This message was deleted' : replyToRow.content,
+            hasMedia: !replyToRow.deletedAt && !!replyToRow.mediaKey,
+          }
+        : null,
+    };
+  }
+
+  async deleteSpaceHostChatMessage(interestId: string, adminId: string, messageId: string) {
+    const message = await this.prisma.spaceHostChatMessage.findUnique({ where: { id: messageId } });
+    if (!message || message.spaceHostInterestId !== interestId) throw new NotFoundException('Message not found');
+    if (message.deletedAt) return { message: 'Already deleted', deleted: true };
+
+    await this.prisma.spaceHostChatMessage.update({ where: { id: messageId }, data: { deletedAt: new Date() } });
     return { message: 'Message deleted', deleted: true };
   }
 

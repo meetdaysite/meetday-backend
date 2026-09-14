@@ -81,6 +81,8 @@ import { ListSponsorshipChatsQueryDto } from '../sponsorship/dto/list-sponsorshi
 import { ListSpaceChatsQueryDto } from '../spaces/dto/list-space-chats-query.dto';
 import { SendSpaceChatMessageDto } from '../spaces/dto/send-space-chat-message.dto';
 import { ListSpaceDealsQueryDto } from '../spaces/dto/list-space-deals-query.dto';
+import { ListSpaceHostChatsQueryDto } from '../space-host-interest/dto/list-space-host-chats-query.dto';
+import { SendSpaceHostChatMessageDto } from '../space-host-interest/dto/send-space-host-chat-message.dto';
 import { SendChatMessageDto } from '../sponsorship/dto/send-chat-message.dto';
 import { UpdateChatMessageDto } from '../sponsorship/dto/update-chat-message.dto';
 import { ListSponsorshipDealsQueryDto } from '../sponsorship/dto/list-sponsorship-deals-query.dto';
@@ -2073,6 +2075,66 @@ export class AdminController {
     @GetUser('id') adminId: string,
   ) {
     return this.adminService.deleteSpaceChatMessage(interestId, adminId, messageId);
+  }
+
+  // ─── Space Partner ↔ Community partnership chats (admin oversight) ─────
+
+  @Get('space-host-chats')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({
+    summary: 'List every Space Partner ↔ Community partnership chat thread',
+    description: 'Admin "Ongoing Chats" view for Space<->Community partnership requests, newest activity first.',
+  })
+  @ApiOkResponse({ description: 'List of chat threads.' })
+  listSpaceHostChats(@Query() query: ListSpaceHostChatsQueryDto) {
+    return this.adminService.listSpaceHostChats(query);
+  }
+
+  @Get('space-host-chats/pending-count')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({ summary: 'Count of space-host requests not yet accepted by the community', description: 'Backs the sidebar badge.' })
+  @ApiOkResponse({ description: 'Pending count.' })
+  countPendingSpaceHostChats() {
+    return this.adminService.countPendingSpaceHostChats();
+  }
+
+  @Get('space-host-chats/:interestId/messages')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({ summary: 'List messages in a Space-host chat thread' })
+  @ApiOkResponse({ description: 'Messages, oldest first.' })
+  @ApiNotFoundResponse({ description: 'Chat thread not found.' })
+  getSpaceHostChatMessages(@Param('interestId', ParseUUIDPipe) interestId: string) {
+    return this.adminService.getSpaceHostChatMessages(interestId);
+  }
+
+  @Post('space-host-chats/:interestId/messages')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Send a message into a Space-host chat thread as Meetday',
+    description: 'Posted as "Meetday" to both the community and the space partner — usable any time, regardless of accept status.',
+  })
+  @ApiOkResponse({ description: 'Message sent.' })
+  @ApiNotFoundResponse({ description: 'Chat thread not found.' })
+  sendSpaceHostChatMessage(
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Body() dto: SendSpaceHostChatMessageDto,
+    @GetUser('id') adminId: string,
+  ) {
+    return this.adminService.sendSpaceHostChatMessage(interestId, adminId, dto);
+  }
+
+  @Delete('space-host-chats/:interestId/messages/:messageId')
+  @Roles('SUPER_ADMIN', 'MODERATOR', 'SUPPORT')
+  @ApiOperation({ summary: 'Delete a message in a space-host chat thread' })
+  @ApiOkResponse({ description: 'Message deleted.' })
+  @ApiNotFoundResponse({ description: 'Message not found.' })
+  deleteSpaceHostChatMessage(
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Param('messageId', ParseUUIDPipe) messageId: string,
+    @GetUser('id') adminId: string,
+  ) {
+    return this.adminService.deleteSpaceHostChatMessage(interestId, adminId, messageId);
   }
 
   @Get('space-deals')
