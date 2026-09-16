@@ -1,19 +1,117 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
+import { StorageService } from '../../common/storage/storage.service'
 import { CreateCollaborationMessageDto } from './dto/create-collaboration-message.dto'
-import { CommunityCollaborationStatus } from '@prisma/client'
+import { CommunityCollaborationStatus, Prisma } from '@prisma/client'
 
 @Injectable()
 export class CommunityCollaborationService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private storageService: StorageService,
+  ) {}
 
-  async markCollaborationInterest(communityId: string, targetCommunityId: string, userId: string) {
-    if (communityId === targetCommunityId) {
-      throw new BadRequestException('Cannot collaborate with yourself')
+  async listApprovedCommunities(userId?: string) {
+    let excludeCommunityProfileId: string | undefined
+    if (userId) {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          hostProfile: {
+            select: {
+              communityProfile: { select: { id: true } },
+            },
+          },
+          hostTeamMemberships: {
+            where: { status: 'ACTIVE' },
+            select: { hostProfile: { select: { communityProfile: { select: { id: true } } } } },
+          },
+        },
+      })
+      excludeCommunityProfileId =
+        user?.hostProfile?.communityProfile?.id ||
+        user?.hostTeamMemberships?.[0]?.hostProfile?.communityProfile?.id
     }
 
-    const requesterProfile = await this.prisma.hostCommunityProfile.findUnique({
-      where: { id: communityId },
+    const where: Prisma.HostCommunityProfileWhereInput = {
+      approvalStatus: 'APPROVED',
+      isHidden: false,
+    }
+    if (excludeCommunityProfileId) {
+      where.id = { not: excludeCommunityProfileId }
+    }
+
+    const profiles = await this.prisma.hostCommunityProfile.findMany({
+      where,
+      select: {
+        id: true,
+        hostProfileId: true,
+        name: true,
+        about: true,
+        logoKey: true,
+        secondaryImageKey: true,
+        size: true,
+        avgGuestCount: true,
+        experiencesPerYear: true,
+        pastEvents: true,
+        brandsWorkedWith: true,
+        categories: { select: { category: { select: { id: true, name: true } } } },
+        hostProfile: {
+          select: {
+            operatingCities: true,
+            socialLinks: true,
+          },
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+    })
+
+    const signPastEvents = async (pastEvents: any) => {
+      if (!pastEvents || !Array.isArray(pastEvents)) return []
+      return Promise.all(
+        pastEvents.map(async (event: any) => ({
+          name: event?.name ?? null,
+          description: event?.description ?? null,
+          imageKeys: event?.imageKeys ?? [],
+          imageUrls: await Promise.all(
+            (event?.imageKeys ?? []).map((key: string) => this.storageService.getPresignedDownloadUrl(key)),
+          ),
+        })),
+      )
+    }
+
+    const signBrands = async (brandsWorkedWith: any) => {
+      if (!brandsWorkedWith || !Array.isArray(brandsWorkedWith)) return []
+      return Promise.all(
+        brandsWorkedWith.map(async (b: any) => ({
+          brandName: b?.brandName ?? null,
+          logoKey: b?.logoKey ?? null,
+          logoUrl: b?.logoKey ? await this.storageService.getPresignedDownloadUrl(b.logoKey) : null,
+        })),
+      )
+    }
+
+    const communities = await Promise.all(
+      profiles.map(async ({ logoKey, secondaryImageKey, categories, hostProfile, pastEvents, brandsWorkedWith, ...rest }) => ({
+        ...rest,
+        logoUrl: logoKey ? await this.storageService.getPresignedDownloadUrl(logoKey) : null,
+        secondaryImageUrl: secondaryImageKey ? await this.storageService.getPresignedDownloadUrl(secondaryImageKey) : null,
+        categories: categories.map((c) => c.category),
+        operatingCities: hostProfile?.operatingCities ?? [],
+        socialLinks: hostProfile?.socialLinks ?? null,
+        pastEvents: await signPastEvents(pastEvents),
+        brandsWorkedWith: await signBrands(brandsWorkedWith),
+      })),
+    )
+
+    return { communities, total: communities.length }
+  }
+
+  async markCollaborationInterest(communityId: string, targetCommunityId: string, userId: string) {
+    const requesterProfile = await this.prisma.hostCommunityProfile.findFirst({
+      where: {
+        OR: [{ id: communityId }, { hostProfileId: communityId }],
+      },
       include: { hostProfile: true },
     })
 
@@ -22,19 +120,27 @@ export class CommunityCollaborationService {
     }
 
     const targetProfile = await this.prisma.hostCommunityProfile.findFirst({
-      where: { id: targetCommunityId, approvalStatus: 'APPROVED', isHidden: false },
+      where: {
+        OR: [{ id: targetCommunityId }, { hostProfileId: targetCommunityId }],
+        approvalStatus: 'APPROVED',
+        isHidden: false,
+      },
     })
 
     if (!targetProfile) {
       throw new NotFoundException('Target community not found')
     }
 
-    const existing = await this.prisma.communityCollaborationInterest.findUnique({
+    if (requesterProfile.id === targetProfile.id) {
+      throw new BadRequestException('Cannot collaborate with yourself')
+    }
+
+    const existing = await this.prisma.communityCollaborationInterest.findFirst({
       where: {
-        requesterCommunityId_targetCommunityId: {
-          requesterCommunityId: communityId,
-          targetCommunityId: targetCommunityId,
-        },
+        OR: [
+          { requesterCommunityId: requesterProfile.id, targetCommunityId: targetProfile.id },
+          { requesterCommunityId: targetProfile.id, targetCommunityId: requesterProfile.id },
+        ],
       },
     })
 
@@ -49,8 +155,8 @@ export class CommunityCollaborationService {
 
     const interest = await this.prisma.communityCollaborationInterest.create({
       data: {
-        requesterCommunityId: communityId,
-        targetCommunityId: targetCommunityId,
+        requesterCommunityId: requesterProfile.id,
+        targetCommunityId: targetProfile.id,
         chatStatus: 'REQUESTED',
       },
     })
@@ -64,10 +170,19 @@ export class CommunityCollaborationService {
   }
 
   async getMyCommunityCollaborationChats(communityId: string, status?: CommunityCollaborationStatus) {
+    // Resolve canonical communityProfile id if hostProfileId was passed
+    const canonicalProfile = await this.prisma.hostCommunityProfile.findFirst({
+      where: {
+        OR: [{ id: communityId }, { hostProfileId: communityId }],
+      },
+      select: { id: true },
+    })
+    const resolvedId = canonicalProfile?.id || communityId
+
     const whereClause: any = {
       OR: [
-        { requesterCommunityId: communityId },
-        { targetCommunityId: communityId },
+        { requesterCommunityId: resolvedId },
+        { targetCommunityId: resolvedId },
       ],
     }
 
@@ -84,46 +199,100 @@ export class CommunityCollaborationService {
         targetCommunity: {
           include: { hostProfile: true },
         },
+        chatMessages: {
+          where: { deletedAt: null },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { content: true, mediaKey: true, createdAt: true },
+        },
       },
-      orderBy: { lastMessageAt: 'desc' },
+      orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
     })
 
-    return chats.map(chat => {
-      const isRequester = chat.requesterCommunityId === communityId
-      const counterpart = isRequester ? chat.targetCommunity : chat.requesterCommunity
+    return Promise.all(
+      chats.map(async (chat) => {
+        const isRequester = chat.requesterCommunityId === resolvedId
+        const counterpart = isRequester ? chat.targetCommunity : chat.requesterCommunity
+        const myLastReadAt = isRequester ? chat.requesterLastReadAt : chat.targetLastReadAt
 
-      return {
-        id: chat.id,
-        communityId: isRequester ? chat.requesterCommunityId : chat.targetCommunityId,
-        hostId: isRequester ? chat.targetCommunityId : chat.requesterCommunityId,
-        mySenderType: isRequester ? 'REQUESTER' : 'TARGET',
-        communityName: counterpart.name,
-        hostName: counterpart.name,
-        communityAvatarUrl: counterpart.logoKey ?? null,
-        hostAvatarUrl: counterpart.logoKey ?? null,
-        chatStatus: chat.chatStatus,
-        lastMessagePreview: null,
-        lastMessageAt: chat.lastMessageAt,
-        createdAt: chat.createdAt,
-        unreadCount: 0,
-      }
-    })
+        const unreadCount = await this.prisma.communityCollaborationMessage.count({
+          where: {
+            communityCollaborationId: chat.id,
+            deletedAt: null,
+            senderType: isRequester ? 'TARGET' : 'REQUESTER',
+            ...(myLastReadAt ? { createdAt: { gt: myLastReadAt } } : {}),
+          },
+        })
+
+        const lastMsg = chat.chatMessages[0]
+        const lastMessagePreview = lastMsg
+          ? lastMsg.content || (lastMsg.mediaKey ? '📎 Attachment' : '')
+          : null
+
+        const counterpartAvatarUrl = counterpart?.logoKey
+          ? await this.storageService.getPresignedDownloadUrl(counterpart.logoKey)
+          : null
+
+        return {
+          id: chat.id,
+          requesterCommunityId: chat.requesterCommunityId,
+          targetCommunityId: chat.targetCommunityId,
+          communityId: counterpart?.id,
+          hostId: counterpart?.hostProfileId,
+          counterpartCommunityId: counterpart?.id,
+          counterpartHostProfileId: counterpart?.hostProfileId,
+          mySenderType: isRequester ? 'REQUESTER' : 'TARGET',
+          direction: isRequester ? 'OUTGOING' : 'INCOMING',
+          communityName: counterpart?.name ?? '',
+          hostName: counterpart?.name ?? '',
+          counterpartName: counterpart?.name ?? '',
+          communityAvatarUrl: counterpartAvatarUrl,
+          hostAvatarUrl: counterpartAvatarUrl,
+          counterpartAvatarUrl,
+          chatStatus: chat.chatStatus,
+          lastMessagePreview,
+          lastMessageAt: chat.lastMessageAt || chat.createdAt,
+          createdAt: chat.createdAt,
+          unreadCount,
+        }
+      }),
+    )
   }
 
-  async getCommunityCollaborationChatMessages(interestId: string, communityId: string) {
+  async getCommunityCollaborationChatMessages(interestId: string, communityId: string, userId?: string) {
+    const canonicalProfile = await this.prisma.hostCommunityProfile.findFirst({
+      where: {
+        OR: [{ id: communityId }, { hostProfileId: communityId }],
+      },
+      select: { id: true },
+    })
+    const resolvedId = canonicalProfile?.id || communityId
+
     const interest = await this.prisma.communityCollaborationInterest.findUnique({
       where: { id: interestId },
+      include: {
+        requesterCommunity: true,
+        targetCommunity: true,
+      },
     })
 
     if (!interest) {
       throw new NotFoundException('Collaboration chat not found')
     }
 
-    if (interest.requesterCommunityId !== communityId && interest.targetCommunityId !== communityId) {
+    const isRequester = interest.requesterCommunityId === resolvedId
+    const isTarget = interest.targetCommunityId === resolvedId
+    if (!isRequester && !isTarget) {
       throw new BadRequestException('Community is not part of this collaboration')
     }
 
-    const messages = await this.prisma.communityCollaborationMessage.findMany({
+    // Update read timestamp
+    await this.prisma.communityCollaborationInterest.update({
+      where: { id: interestId },
+      data: isRequester ? { requesterLastReadAt: new Date() } : { targetLastReadAt: new Date() },
+    })
+
+    const rawMessages = await this.prisma.communityCollaborationMessage.findMany({
       where: { communityCollaborationId: interestId },
       include: {
         sender: {
@@ -140,13 +309,47 @@ export class CommunityCollaborationService {
       orderBy: { createdAt: 'asc' },
     })
 
+    const messages = await Promise.all(
+      rawMessages.map(async (msg) => ({
+        id: msg.id,
+        communityCollaborationId: msg.communityCollaborationId,
+        senderType: msg.senderType,
+        senderId: msg.senderId,
+        sender: msg.sender,
+        messageType: msg.messageType,
+        content: msg.content,
+        mediaKey: msg.mediaKey,
+        mediaUrl: msg.mediaKey ? await this.storageService.getPresignedDownloadUrl(msg.mediaKey) : null,
+        replyToId: msg.replyToId,
+        replyTo: msg.replyTo,
+        deletedAt: msg.deletedAt,
+        createdAt: msg.createdAt,
+      })),
+    )
+
+    const counterpart = isRequester ? interest.targetCommunity : interest.requesterCommunity
+    const counterpartAvatarUrl = counterpart?.logoKey
+      ? await this.storageService.getPresignedDownloadUrl(counterpart.logoKey)
+      : null
+
     return {
       messages,
       chatStatus: interest.chatStatus,
+      mySenderType: isRequester ? 'REQUESTER' : 'TARGET',
+      counterpartName: counterpart?.name ?? '',
+      counterpartAvatarUrl,
     }
   }
 
   async acceptCollaborationRequest(interestId: string, communityId: string) {
+    const canonicalProfile = await this.prisma.hostCommunityProfile.findFirst({
+      where: {
+        OR: [{ id: communityId }, { hostProfileId: communityId }],
+      },
+      select: { id: true },
+    })
+    const resolvedId = canonicalProfile?.id || communityId
+
     const interest = await this.prisma.communityCollaborationInterest.findUnique({
       where: { id: interestId },
     })
@@ -155,7 +358,7 @@ export class CommunityCollaborationService {
       throw new NotFoundException('Collaboration request not found')
     }
 
-    if (interest.targetCommunityId !== communityId) {
+    if (interest.targetCommunityId !== resolvedId) {
       throw new BadRequestException('Only the target community can accept this request')
     }
 
@@ -174,6 +377,14 @@ export class CommunityCollaborationService {
   }
 
   async declineCollaborationRequest(interestId: string, communityId: string) {
+    const canonicalProfile = await this.prisma.hostCommunityProfile.findFirst({
+      where: {
+        OR: [{ id: communityId }, { hostProfileId: communityId }],
+      },
+      select: { id: true },
+    })
+    const resolvedId = canonicalProfile?.id || communityId
+
     const interest = await this.prisma.communityCollaborationInterest.findUnique({
       where: { id: interestId },
     })
@@ -182,7 +393,7 @@ export class CommunityCollaborationService {
       throw new NotFoundException('Collaboration request not found')
     }
 
-    if (interest.targetCommunityId !== communityId) {
+    if (interest.targetCommunityId !== resolvedId) {
       throw new BadRequestException('Only the target community can decline this request')
     }
 
@@ -203,6 +414,14 @@ export class CommunityCollaborationService {
     userId: string,
     payload: CreateCollaborationMessageDto,
   ) {
+    const canonicalProfile = await this.prisma.hostCommunityProfile.findFirst({
+      where: {
+        OR: [{ id: communityId }, { hostProfileId: communityId }],
+      },
+      select: { id: true },
+    })
+    const resolvedId = canonicalProfile?.id || communityId
+
     const interest = await this.prisma.communityCollaborationInterest.findUnique({
       where: { id: interestId },
     })
@@ -215,8 +434,9 @@ export class CommunityCollaborationService {
       throw new BadRequestException('Chat is not active yet')
     }
 
-    const isRequester = interest.requesterCommunityId === communityId
-    if (!isRequester && interest.targetCommunityId !== communityId) {
+    const isRequester = interest.requesterCommunityId === resolvedId
+    const isTarget = interest.targetCommunityId === resolvedId
+    if (!isRequester && !isTarget) {
       throw new BadRequestException('Community is not part of this collaboration')
     }
 
@@ -225,7 +445,7 @@ export class CommunityCollaborationService {
         communityCollaborationId: interestId,
         senderType: isRequester ? 'REQUESTER' : 'TARGET',
         senderId: userId,
-        content: payload.content,
+        content: payload.content || '',
         mediaKey: payload.mediaKey,
         replyToId: payload.replyToId,
       },
@@ -233,30 +453,54 @@ export class CommunityCollaborationService {
         sender: {
           select: { id: true, firstName: true, lastName: true, avatarUrl: true },
         },
+        replyTo: {
+          include: {
+            sender: {
+              select: { firstName: true, lastName: true },
+            },
+          },
+        },
       },
     })
 
     await this.prisma.communityCollaborationInterest.update({
       where: { id: interestId },
-      data: { lastMessageAt: new Date() },
+      data: {
+        lastMessageAt: new Date(),
+        ...(isRequester ? { requesterLastReadAt: new Date() } : { targetLastReadAt: new Date() }),
+      },
     })
 
-    return message
+    const mediaUrl = message.mediaKey
+      ? await this.storageService.getPresignedDownloadUrl(message.mediaKey)
+      : null
+
+    return {
+      ...message,
+      mediaUrl,
+    }
   }
 
   async getCommunityCollaborationChatByPartner(communityId: string, partnerId: string) {
+    const [myProfile, partnerProfile] = await Promise.all([
+      this.prisma.hostCommunityProfile.findFirst({
+        where: { OR: [{ id: communityId }, { hostProfileId: communityId }] },
+        select: { id: true },
+      }),
+      this.prisma.hostCommunityProfile.findFirst({
+        where: { OR: [{ id: partnerId }, { hostProfileId: partnerId }] },
+        select: { id: true, name: true, logoKey: true, hostProfileId: true },
+      }),
+    ])
+
+    const myId = myProfile?.id || communityId
+    const targetId = partnerProfile?.id || partnerId
+
     const chat = await this.prisma.communityCollaborationInterest.findFirst({
       where: {
-        chatStatus: 'ACCEPTED',
         OR: [
-          {
-            requesterCommunityId: communityId,
-            targetCommunityId: partnerId,
-          },
-          {
-            requesterCommunityId: partnerId,
-            targetCommunityId: communityId,
-          },
+          { requesterCommunityId: myId, targetCommunityId: targetId },
+          { requesterCommunityId: targetId, targetCommunityId: myId },
         ],
       },
     })
@@ -265,23 +509,36 @@ export class CommunityCollaborationService {
       return null
     }
 
-    const isRequester = chat.requesterCommunityId === communityId
-    const counterpart = await this.prisma.hostCommunityProfile.findUnique({
-      where: {
-        id: isRequester ? chat.targetCommunityId : chat.requesterCommunityId,
-      },
-      include: { hostProfile: true },
-    })
+    const isRequester = chat.requesterCommunityId === myId
+    const counterpartId = isRequester ? chat.targetCommunityId : chat.requesterCommunityId
+    const counterpart =
+      partnerProfile?.id === counterpartId
+        ? partnerProfile
+        : await this.prisma.hostCommunityProfile.findUnique({
+            where: { id: counterpartId },
+            select: { id: true, name: true, logoKey: true, hostProfileId: true },
+          })
+
+    const counterpartAvatarUrl = counterpart?.logoKey
+      ? await this.storageService.getPresignedDownloadUrl(counterpart.logoKey)
+      : null
 
     return {
       id: chat.id,
-      communityId: isRequester ? chat.requesterCommunityId : chat.targetCommunityId,
-      hostId: isRequester ? chat.targetCommunityId : chat.requesterCommunityId,
+      requesterCommunityId: chat.requesterCommunityId,
+      targetCommunityId: chat.targetCommunityId,
+      communityId: counterpart?.id,
+      hostId: counterpart?.hostProfileId,
+      counterpartCommunityId: counterpart?.id,
+      counterpartHostProfileId: counterpart?.hostProfileId,
       mySenderType: isRequester ? 'REQUESTER' : 'TARGET',
-      communityName: counterpart?.name,
-      hostName: counterpart?.name,
-      communityAvatarUrl: counterpart?.logoKey ?? null,
-      hostAvatarUrl: counterpart?.logoKey ?? null,
+      direction: isRequester ? 'OUTGOING' : 'INCOMING',
+      communityName: counterpart?.name ?? '',
+      hostName: counterpart?.name ?? '',
+      counterpartName: counterpart?.name ?? '',
+      communityAvatarUrl: counterpartAvatarUrl,
+      hostAvatarUrl: counterpartAvatarUrl,
+      counterpartAvatarUrl,
       chatStatus: chat.chatStatus,
       createdAt: chat.createdAt,
     }

@@ -16,11 +16,26 @@ export class CommunityCollaborationController {
   private async getCommunityContext(req: any): Promise<{ communityId: string; userId: string }> {
     const user = await this.prisma.user.findUnique({
       where: { firebaseUid: req.user.uid },
-      select: { id: true, hostProfile: { select: { communityProfile: { select: { id: true } } } } },
+      select: {
+        id: true,
+        hostProfile: { select: { communityProfile: { select: { id: true } } } },
+        hostTeamMemberships: {
+          where: { status: 'ACTIVE' },
+          select: { hostProfile: { select: { communityProfile: { select: { id: true } } } } },
+        },
+      },
     })
-    const communityId = user?.hostProfile?.communityProfile?.id
+    const communityId =
+      user?.hostProfile?.communityProfile?.id ||
+      user?.hostTeamMemberships?.[0]?.hostProfile?.communityProfile?.id
     if (!user || !communityId) throw new UnauthorizedException('Community profile required')
     return { communityId, userId: user.id }
+  }
+
+  @Get('communities')
+  async getCommunities(@Request() req: any) {
+    const { userId } = await this.getCommunityContext(req)
+    return this.service.listApprovedCommunities(userId)
   }
 
   @Post('interest/:targetCommunityId')
@@ -37,8 +52,8 @@ export class CommunityCollaborationController {
 
   @Get('chats/:interestId/messages')
   async getMessages(@Param('interestId') interestId: string, @Request() req: any) {
-    const { communityId } = await this.getCommunityContext(req)
-    return this.service.getCommunityCollaborationChatMessages(interestId, communityId)
+    const { communityId, userId } = await this.getCommunityContext(req)
+    return this.service.getCommunityCollaborationChatMessages(interestId, communityId, userId)
   }
 
   @Post('chats/:interestId/accept')

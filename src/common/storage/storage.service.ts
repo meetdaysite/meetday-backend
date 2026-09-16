@@ -67,6 +67,7 @@ const CONTEXT_CONTENT_TYPES: Record<UploadContext, readonly string[]> = {
   [UploadContext.SPACE_HOST_DEAL_REPORT_MEDIA]: IMAGE_TYPES,
   [UploadContext.COMMUNITY_BRAND_LOGO_MEDIA]: LOGO_IMAGE_TYPES,
   [UploadContext.ADMIN_ANNOUNCEMENT_ATTACHMENT]: [...IMAGE_TYPES, 'application/pdf'],
+  [UploadContext.COMMUNITY_COLLABORATION_CHAT_MEDIA]: [...IMAGE_TYPES, 'application/pdf'],
 };
 
 // Platform-admin roles required by the admin-only contexts.
@@ -477,6 +478,32 @@ export class StorageService {
           throw new ForbiddenException('This chat has not been accepted yet');
         }
         key = `space-host-chats/${dto.resourceId}/${randomUUID()}.${ext}`;
+        break;
+      }
+
+      case UploadContext.COMMUNITY_COLLABORATION_CHAT_MEDIA: {
+        if (!dto.resourceId) {
+          throw new BadRequestException('resourceId (collaboration interest UUID) is required for COMMUNITY_COLLABORATION_CHAT_MEDIA');
+        }
+        const interest = await this.prisma.communityCollaborationInterest.findUnique({
+          where: { id: dto.resourceId },
+          select: {
+            chatStatus: true,
+            requesterCommunity: { select: { hostProfileId: true } },
+            targetCommunity: { select: { hostProfileId: true } },
+          },
+        });
+        if (!interest) throw new NotFoundException('Chat thread not found');
+        const hostProfileIds = await this.teamAccessService.getHostProfileIds(userId);
+        const isParticipant =
+          hostProfileIds.includes(interest.requesterCommunity.hostProfileId) ||
+          hostProfileIds.includes(interest.targetCommunity.hostProfileId) ||
+          SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '');
+        if (!isParticipant) throw new ForbiddenException('You do not have access to this chat');
+        if (interest.chatStatus !== 'ACCEPTED') {
+          throw new ForbiddenException('This chat has not been accepted yet');
+        }
+        key = `community-collaborations/${dto.resourceId}/${randomUUID()}.${ext}`;
         break;
       }
 
