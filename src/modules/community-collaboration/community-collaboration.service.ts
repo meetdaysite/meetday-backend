@@ -21,8 +21,8 @@ export class CommunityCollaborationService {
       throw new NotFoundException('Requester community not found')
     }
 
-    const targetProfile = await this.prisma.hostCommunityProfile.findUnique({
-      where: { id: targetCommunityId },
+    const targetProfile = await this.prisma.hostCommunityProfile.findFirst({
+      where: { id: targetCommunityId, approvalStatus: 'APPROVED', isHidden: false },
     })
 
     if (!targetProfile) {
@@ -96,6 +96,7 @@ export class CommunityCollaborationService {
         id: chat.id,
         communityId: isRequester ? chat.requesterCommunityId : chat.targetCommunityId,
         hostId: isRequester ? chat.targetCommunityId : chat.requesterCommunityId,
+        mySenderType: isRequester ? 'REQUESTER' : 'TARGET',
         communityName: counterpart.name,
         hostName: counterpart.name,
         communityAvatarUrl: counterpart.logoKey ?? null,
@@ -116,6 +117,10 @@ export class CommunityCollaborationService {
 
     if (!interest) {
       throw new NotFoundException('Collaboration chat not found')
+    }
+
+    if (interest.requesterCommunityId !== communityId && interest.targetCommunityId !== communityId) {
+      throw new BadRequestException('Community is not part of this collaboration')
     }
 
     const messages = await this.prisma.communityCollaborationMessage.findMany({
@@ -272,6 +277,7 @@ export class CommunityCollaborationService {
       id: chat.id,
       communityId: isRequester ? chat.requesterCommunityId : chat.targetCommunityId,
       hostId: isRequester ? chat.targetCommunityId : chat.requesterCommunityId,
+      mySenderType: isRequester ? 'REQUESTER' : 'TARGET',
       communityName: counterpart?.name,
       hostName: counterpart?.name,
       communityAvatarUrl: counterpart?.logoKey ?? null,
