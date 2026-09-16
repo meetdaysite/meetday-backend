@@ -116,6 +116,8 @@ model User {
   communityDealsCreated         SpaceHostDeal[]        @relation("SpaceHostDealCreatedBy")
   communityDealReportsSubmitted SpaceHostDealReport[]  @relation("SpaceHostDealReportSubmittedBy")
 
+  communityCollaborationMessages CommunityCollaborationMessage[] @relation("CommunityChatMessageSender")
+
   meetdayChatThread   MeetdayChatThread?   @relation("MeetdayChatThreadUser")
   meetdayChatMessages MeetdayChatMessage[] @relation("MeetdayChatMessageSender")
 
@@ -1819,6 +1821,10 @@ model HostCommunityProfile {
   // unaffected: full dashboard access, can still create/edit proposals, chat, etc.
   isHidden Boolean @default(false)
 
+  // Community Collaboration relationships
+  collaborationsAsRequester CommunityCollaborationInterest[] @relation("CommunityCollaborationRequester")
+  collaborationsAsTarget    CommunityCollaborationInterest[] @relation("CommunityCollaborationTarget")
+
   activatedAt DateTime @default(now())
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -3488,4 +3494,66 @@ model HostFeePromoUsage {
 
   @@unique([promoId, eventId])
   @@map("host_fee_promo_usages")
+}
+
+// ─── Community Collaboration ──────────────────────────────────────────────────
+
+enum CommunityCollaborationStatus {
+  REQUESTED
+  ACCEPTED
+  DECLINED
+}
+
+model CommunityCollaborationInterest {
+  id                      String                        @id @default(uuid())
+  requesterCommunityId    String
+  requesterCommunity      HostCommunityProfile         @relation("CommunityCollaborationRequester", fields: [requesterCommunityId], references: [id], onDelete: Cascade)
+
+  targetCommunityId       String
+  targetCommunity         HostCommunityProfile         @relation("CommunityCollaborationTarget", fields: [targetCommunityId], references: [id], onDelete: Cascade)
+
+  message String? @db.Text // optional note sent along with the collaboration request
+
+  chatStatus     CommunityCollaborationStatus @default(REQUESTED)
+  chatAcceptedAt DateTime?
+  lastMessageAt  DateTime?
+
+  requesterLastReadAt DateTime? // requester's last read time
+  targetLastReadAt    DateTime? // target's last read time
+  adminLastReadAt     DateTime?
+
+  chatMessages CommunityCollaborationMessage[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([requesterCommunityId, targetCommunityId])
+  @@index([requesterCommunityId])
+  @@index([targetCommunityId])
+  @@index([chatStatus])
+  @@map("community_collaboration_interests")
+}
+
+model CommunityCollaborationMessage {
+  id                            String                           @id @default(uuid())
+  communityCollaborationId      String
+  communityCollaboration        CommunityCollaborationInterest   @relation(fields: [communityCollaborationId], references: [id], onDelete: Cascade)
+
+  senderType  String // "REQUESTER" | "TARGET"
+  senderId    String
+  sender      User                                 @relation("CommunityChatMessageSender", fields: [senderId], references: [id])
+  messageType ChatMessageType                      @default(TEXT)
+
+  content  String  @db.Text
+  mediaKey String?
+
+  replyToId String?
+  replyTo   CommunityCollaborationMessage?  @relation("CommunityChatMessageReplyTo", fields: [replyToId], references: [id])
+  replies   CommunityCollaborationMessage[] @relation("CommunityChatMessageReplyTo")
+
+  deletedAt DateTime? // soft delete — placeholder shown to both sides
+
+  createdAt DateTime @default(now())
+
+  @@index([communityCollaborationId, createdAt])
+  @@map("community_collaboration_messages")
 }

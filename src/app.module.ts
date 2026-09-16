@@ -25,6 +25,7 @@ import { ReviewsModule } from './modules/reviews/reviews.module';
 import { CheckInModule } from './modules/check-in/check-in.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { CommunityChatModule } from './modules/community-chat/community-chat.module';
+import { CommunityCollaborationModule } from './modules/community-collaboration/community-collaboration.module';
 import { CommunityAnnouncementsModule } from './modules/community-announcements/community-announcements.module';
 import { CommunityFeedModule } from './modules/community-feed/community-feed.module';
 import { AuditLogModule } from './modules/audit-log/audit-log.module';
@@ -96,6 +97,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     GraphModule,
     CommunitiesModule,
     CommunityChatModule,
+    CommunityCollaborationModule,
     CommunityAnnouncementsModule,
     CommunityFeedModule,
     SupportTicketModule,
