@@ -1,11 +1,11 @@
 import { Controller, Post, Get, Param, Body, UseGuards, Request, Query } from '@nestjs/common'
-import { AuthGuard } from '@nestjs/passport'
 import { CommunityCollaborationService } from './community-collaboration.service'
 import { CreateCollaborationMessageDto } from './dto/create-collaboration-message.dto'
 import { CommunityCollaborationStatus } from '@prisma/client'
+import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard'
 
 @Controller('community-collaboration')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(FirebaseAuthGuard)
 export class CommunityCollaborationController {
   constructor(private readonly service: CommunityCollaborationService) {}
 
@@ -16,7 +16,7 @@ export class CommunityCollaborationController {
   }
 
   @Get('chats')
-  async getChats(@Query('status') status?: CommunityCollaborationStatus, @Request() req: any) {
+  async getChats(@Request() req: any, @Query('status') status?: CommunityCollaborationStatus) {
     const communityId = req.user.communityId
     return this.service.getMyCommunityCollaborationChats(communityId, status)
   }

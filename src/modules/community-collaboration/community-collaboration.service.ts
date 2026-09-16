@@ -1,5 +1,5 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common'
-import { PrismaService } from '@/src/prisma/prisma.service'
+import { PrismaService } from '../../prisma/prisma.service'
 import { CreateCollaborationMessageDto } from './dto/create-collaboration-message.dto'
 import { CommunityCollaborationStatus } from '@prisma/client'
 
@@ -98,8 +98,8 @@ export class CommunityCollaborationService {
         hostId: isRequester ? chat.targetCommunityId : chat.requesterCommunityId,
         communityName: counterpart.name,
         hostName: counterpart.name,
-        communityAvatarUrl: counterpart.hostProfile?.avatarUrl,
-        hostAvatarUrl: counterpart.hostProfile?.avatarUrl,
+        communityAvatarUrl: counterpart.logoKey ?? null,
+        hostAvatarUrl: counterpart.logoKey ?? null,
         chatStatus: chat.chatStatus,
         lastMessagePreview: null,
         lastMessageAt: chat.lastMessageAt,
@@ -274,8 +274,8 @@ export class CommunityCollaborationService {
       hostId: isRequester ? chat.targetCommunityId : chat.requesterCommunityId,
       communityName: counterpart?.name,
       hostName: counterpart?.name,
-      communityAvatarUrl: counterpart?.hostProfile?.avatarUrl,
-      hostAvatarUrl: counterpart?.hostProfile?.avatarUrl,
+      communityAvatarUrl: counterpart?.logoKey ?? null,
+      hostAvatarUrl: counterpart?.logoKey ?? null,
       chatStatus: chat.chatStatus,
       createdAt: chat.createdAt,
     }
