@@ -83,6 +83,7 @@ import { SendSpaceChatMessageDto } from '../spaces/dto/send-space-chat-message.d
 import { ListSpaceDealsQueryDto } from '../spaces/dto/list-space-deals-query.dto';
 import { ListSpaceHostChatsQueryDto } from '../space-host-interest/dto/list-space-host-chats-query.dto';
 import { SendSpaceHostChatMessageDto } from '../space-host-interest/dto/send-space-host-chat-message.dto';
+import { CreateCollaborationMessageDto } from '../community-collaboration/dto/create-collaboration-message.dto';
 import { SendChatMessageDto } from '../sponsorship/dto/send-chat-message.dto';
 import { UpdateChatMessageDto } from '../sponsorship/dto/update-chat-message.dto';
 import { ListSponsorshipDealsQueryDto } from '../sponsorship/dto/list-sponsorship-deals-query.dto';
@@ -2137,6 +2138,40 @@ export class AdminController {
     return this.adminService.deleteSpaceHostChatMessage(interestId, adminId, messageId);
   }
 
+  // ─── Community ↔ Community collaboration chats (admin oversight) ────────
+
+  @Get('community-collaboration-chats')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  listCommunityCollaborationChats(@Query('status') status?: string) {
+    return this.adminService.listCommunityCollaborationChats(status);
+  }
+
+  @Get('community-collaboration-chats/:interestId/messages')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  getCommunityCollaborationChatMessages(@Param('interestId', ParseUUIDPipe) interestId: string) {
+    return this.adminService.getCommunityCollaborationChatMessages(interestId);
+  }
+
+  @Post('community-collaboration-chats/:interestId/messages')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
+  @HttpCode(HttpStatus.CREATED)
+  sendCommunityCollaborationChatMessage(
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Body() dto: CreateCollaborationMessageDto,
+    @GetUser('id') adminId: string,
+  ) {
+    return this.adminService.sendCommunityCollaborationChatMessage(interestId, adminId, dto);
+  }
+
+  @Delete('community-collaboration-chats/:interestId/messages/:messageId')
+  @Roles('SUPER_ADMIN', 'MODERATOR', 'SUPPORT')
+  deleteCommunityCollaborationChatMessage(
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Param('messageId', ParseUUIDPipe) messageId: string,
+  ) {
+    return this.adminService.deleteCommunityCollaborationChatMessage(interestId, messageId);
+  }
+
   @Get('space-deals')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR', 'SUPPORT')
   @ApiOperation({
@@ -2241,8 +2276,8 @@ export class AdminController {
     description: 'Used to open a chat window for a Brand/Community picked from the search dropdown before any message has been sent.',
   })
   @ApiOkResponse({ description: 'Existing thread id + messages, or a null threadId if none exists yet.' })
-  getMeetdayChatByUser(@Param('userId', ParseUUIDPipe) userId: string) {
-    return this.adminService.getMeetdayChatByUserId(userId);
+  getMeetdayChatByUser(@Param('userId', ParseUUIDPipe) userId: string, @Query('context') context?: string) {
+    return this.adminService.getMeetdayChatByUserId(userId, context);
   }
 
   @Post('meetday-chats/by-user/:userId/messages')
@@ -2258,8 +2293,9 @@ export class AdminController {
     @Param('userId', ParseUUIDPipe) userId: string,
     @Body() dto: SendChatMessageDto,
     @GetUser('id') adminId: string,
+    @Query('context') context?: string,
   ) {
-    return this.adminService.startMeetdayChatByUser(userId, adminId, dto);
+    return this.adminService.startMeetdayChatByUser(userId, adminId, dto, context);
   }
 
   @Get('meetday-chats/:threadId/messages')

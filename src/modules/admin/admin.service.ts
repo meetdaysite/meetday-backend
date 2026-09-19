@@ -60,6 +60,7 @@ import { ListSpaceChatsQueryDto } from '../spaces/dto/list-space-chats-query.dto
 import { SendSpaceChatMessageDto } from '../spaces/dto/send-space-chat-message.dto';
 import { ListSpaceHostChatsQueryDto } from '../space-host-interest/dto/list-space-host-chats-query.dto';
 import { SendSpaceHostChatMessageDto } from '../space-host-interest/dto/send-space-host-chat-message.dto';
+import { CreateCollaborationMessageDto } from '../community-collaboration/dto/create-collaboration-message.dto';
 import { SponsorshipInvoicePdfService } from '../sponsorship/sponsorship-invoice-pdf.service';
 import { SponsorshipReportPdfService } from '../sponsorship/sponsorship-report-pdf.service';
 import { RESOLVED_SYSTEM_MESSAGE } from '../meetday-chat/meetday-chat.service';
@@ -2155,6 +2156,7 @@ export class AdminService {
     activeLocations: true,
     centreShowcaseImageKeys: true,
     videoLink: true,
+    proposalPdfKey: true,
     pastEvents: true,
     brandsWorkedWith: true,
     approvalStatus: true,
@@ -3319,6 +3321,88 @@ export class AdminService {
     return { message: 'Message deleted', deleted: true };
   }
 
+  // ── Community ↔ Community collaboration chats (admin oversight) ───────────
+
+  async listCommunityCollaborationChats(status?: string) {
+    const threads = await this.prisma.communityCollaborationInterest.findMany({
+      where: status ? { chatStatus: status as any } : undefined,
+      include: {
+        requesterCommunity: { select: { id: true, name: true, logoKey: true } },
+        targetCommunity: { select: { id: true, name: true, logoKey: true } },
+        chatMessages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true, mediaKey: true } },
+      },
+      orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    return Promise.all(threads.map(async (thread) => {
+      const unreadCount = await this.prisma.communityCollaborationMessage.count({
+        where: {
+          communityCollaborationId: thread.id,
+          senderType: { not: 'ADMIN' },
+          deletedAt: null,
+          ...(thread.adminLastReadAt ? { createdAt: { gt: thread.adminLastReadAt } } : {}),
+        },
+      });
+      const [requesterLogoUrl, targetLogoUrl] = await Promise.all([
+        thread.requesterCommunity.logoKey ? this.storageService.getPresignedDownloadUrl(thread.requesterCommunity.logoKey) : null,
+        thread.targetCommunity.logoKey ? this.storageService.getPresignedDownloadUrl(thread.targetCommunity.logoKey) : null,
+      ]);
+      const lastMessage = thread.chatMessages[0];
+      return {
+        id: thread.id,
+        requesterCommunityId: thread.requesterCommunityId,
+        targetCommunityId: thread.targetCommunityId,
+        requesterCommunityName: thread.requesterCommunity.name,
+        targetCommunityName: thread.targetCommunity.name,
+        requesterLogoUrl,
+        targetLogoUrl,
+        chatStatus: thread.chatStatus,
+        createdAt: thread.createdAt,
+        lastMessageAt: thread.lastMessageAt ?? thread.createdAt,
+        lastMessagePreview: lastMessage ? (lastMessage.content || (lastMessage.mediaKey ? 'Attachment' : '')) : thread.message,
+        unreadCount,
+      };
+    }));
+  }
+
+  async getCommunityCollaborationChatMessages(interestId: string) {
+    const interest = await this.prisma.communityCollaborationInterest.findUnique({ where: { id: interestId } });
+    if (!interest) throw new NotFoundException('Chat thread not found');
+    const messages = await this.prisma.communityCollaborationMessage.findMany({
+      where: { communityCollaborationId: interestId },
+      orderBy: { createdAt: 'asc' },
+      take: 200,
+      select: { id: true, senderType: true, senderId: true, content: true, mediaKey: true, messageType: true, deletedAt: true, createdAt: true, replyTo: { select: { id: true, senderType: true, content: true, mediaKey: true, deletedAt: true } } },
+    });
+    await this.prisma.communityCollaborationInterest.update({ where: { id: interestId }, data: { adminLastReadAt: new Date() } });
+    return {
+      chatStatus: interest.chatStatus,
+      messages: await Promise.all(messages.map(async ({ mediaKey, replyTo, ...message }) => ({
+        ...message,
+        mediaUrl: mediaKey ? await this.storageService.getPresignedDownloadUrl(mediaKey) : null,
+        replyTo: replyTo ? { id: replyTo.id, senderType: replyTo.senderType, content: replyTo.deletedAt ? 'This message was deleted' : replyTo.content, hasMedia: !replyTo.deletedAt && !!replyTo.mediaKey } : null,
+      }))),
+    };
+  }
+
+  async sendCommunityCollaborationChatMessage(interestId: string, adminId: string, dto: CreateCollaborationMessageDto) {
+    const interest = await this.prisma.communityCollaborationInterest.findUnique({ where: { id: interestId } });
+    if (!interest) throw new NotFoundException('Chat thread not found');
+    if (!dto.content?.trim() && !dto.mediaKey) throw new BadRequestException('Message must have text or media');
+    const message = await this.prisma.communityCollaborationMessage.create({
+      data: { communityCollaborationId: interestId, senderType: 'ADMIN', senderId: adminId, content: dto.content ?? '', mediaKey: dto.mediaKey, replyToId: dto.replyToId },
+    });
+    await this.prisma.communityCollaborationInterest.update({ where: { id: interestId }, data: { lastMessageAt: message.createdAt } });
+    return { ...message, mediaUrl: message.mediaKey ? await this.storageService.getPresignedDownloadUrl(message.mediaKey) : null };
+  }
+
+  async deleteCommunityCollaborationChatMessage(interestId: string, messageId: string) {
+    const message = await this.prisma.communityCollaborationMessage.findUnique({ where: { id: messageId } });
+    if (!message || message.communityCollaborationId !== interestId) throw new NotFoundException('Message not found');
+    await this.prisma.communityCollaborationMessage.update({ where: { id: messageId }, data: { deletedAt: new Date() } });
+    return { message: 'Message deleted', deleted: true };
+  }
+
   // ── Community Space Deals: admin oversight of negotiated & locked space deals ──
 
   async listSpaceDeals(status?: 'PENDING_APPROVAL' | 'CHANGES_REQUESTED' | 'APPROVED') {
@@ -3665,6 +3749,7 @@ export class AdminService {
           userName: `${t.user.firstName} ${t.user.lastName}`.trim(),
           userEmail: t.user.email,
           userRole: t.user.role?.name ?? null,
+          chatContext: t.context,
           createdAt: t.createdAt,
           lastMessageAt: t.lastMessageAt,
           lastMessagePreview: t.messages[0] ? (t.messages[0].content || (t.messages[0].mediaKey ? '📷 Photo' : '')).slice(0, 120) : null,
@@ -3814,8 +3899,9 @@ export class AdminService {
   // Looks up (without creating) the existing Meetday support thread for a specific user — used
   // to open a chat window for a Brand/Community picked from the admin's search dropdown before
   // any message has been sent, so an empty state doesn't spuriously create a thread row.
-  async getMeetdayChatByUserId(userId: string) {
-    const thread = await this.prisma.meetdayChatThread.findUnique({ where: { userId } });
+  async getMeetdayChatByUserId(userId: string, context?: string) {
+    const chatContext = context === 'SPACE' || context === 'SPACE_PARTNER' ? 'SPACE_PARTNER' : context === 'BRAND' ? 'BRAND' : 'HOST';
+    const thread = await this.prisma.meetdayChatThread.findUnique({ where: { userId_context: { userId, context: chatContext as any } } });
     if (!thread) return { threadId: null, messages: [] };
     const { messages } = await this.getMeetdayChatMessages(thread.id);
     return { threadId: thread.id, messages };
@@ -3823,13 +3909,14 @@ export class AdminService {
 
   // Admin-initiated conversation: creates the thread (if this user has never messaged support
   // before) on first send, so they immediately appear in the Support Chats list.
-  async startMeetdayChatByUser(userId: string, adminId: string, dto: SendChatMessageDto) {
+  async startMeetdayChatByUser(userId: string, adminId: string, dto: SendChatMessageDto, context?: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
     if (!user) throw new NotFoundException('User not found');
 
+    const chatContext = context === 'SPACE' || context === 'SPACE_PARTNER' ? 'SPACE_PARTNER' : context === 'BRAND' ? 'BRAND' : 'HOST';
     const thread = await this.prisma.meetdayChatThread.upsert({
-      where: { userId },
-      create: { userId },
+      where: { userId_context: { userId, context: chatContext as any } },
+      create: { userId, context: chatContext as any },
       update: {},
     });
     return this.sendMeetdayChatMessage(thread.id, adminId, dto);
@@ -4378,14 +4465,16 @@ export class AdminService {
       | (Record<string, unknown> & {
           logoKey?: string;
           posterKey?: string;
+          proposalPdfKey?: string;
           pastEvents?: { name?: string; description?: string; imageKeys?: string[] }[];
           brandsWorkedWith?: { brandName?: string; logoKey?: string; url?: string }[];
         })
       | null;
     if (pendingRevision) {
-      const [revisionLogoUrl, revisionPosterUrl, revisionPastEvents, revisionBrandsWorkedWith] = await Promise.all([
+      const [revisionLogoUrl, revisionPosterUrl, revisionProposalPdfUrl, revisionPastEvents, revisionBrandsWorkedWith] = await Promise.all([
         pendingRevision.logoKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.logoKey) : undefined,
         pendingRevision.posterKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.posterKey) : undefined,
+        pendingRevision.proposalPdfKey ? this.storageService.getPresignedDownloadUrl(pendingRevision.proposalPdfKey) : undefined,
         this.withPastEventImageUrls(pendingRevision.pastEvents),
         this.withBrandsWorkedWithLogoUrls(pendingRevision.brandsWorkedWith),
       ]);
@@ -4393,6 +4482,7 @@ export class AdminService {
         ...pendingRevision,
         logoUrl: revisionLogoUrl,
         posterUrl: revisionPosterUrl,
+        proposalPdfUrl: revisionProposalPdfUrl,
         pastEvents: revisionPastEvents,
         brandsWorkedWith: revisionBrandsWorkedWith,
       };
@@ -4402,6 +4492,7 @@ export class AdminService {
       ...AdminService.flattenSpaceCommunityProfileCategories(profile),
       logoUrl: await this.storageService.getPresignedDownloadUrl(profile.logoKey),
       posterUrl: profile.posterKey ? await this.storageService.getPresignedDownloadUrl(profile.posterKey) : null,
+      proposalPdfUrl: profile.proposalPdfKey ? await this.storageService.getPresignedDownloadUrl(profile.proposalPdfKey) : null,
       centreShowcaseUrls: await Promise.all(
         (profile.centreShowcaseImageKeys ?? []).map((key) => this.storageService.getPresignedDownloadUrl(key)),
       ),

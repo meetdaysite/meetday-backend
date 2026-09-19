@@ -62,7 +62,7 @@ describe('MeetdayChatService', () => {
       const result = await service.getMyChat('user-1');
 
       expect(prisma.meetdayChatThread.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { userId: 'user-1' } }),
+        expect.objectContaining({ where: { userId_context: { userId: 'user-1', context: 'HOST' } } }),
       );
       expect(result.messages).toHaveLength(1);
       expect(result.messages[0].mediaUrl).toBeNull();

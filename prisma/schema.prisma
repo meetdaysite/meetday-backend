@@ -118,7 +118,7 @@ model User {
 
   communityCollaborationMessages CommunityCollaborationMessage[] @relation("CommunityChatMessageSender")
 
-  meetdayChatThread   MeetdayChatThread?   @relation("MeetdayChatThreadUser")
+  meetdayChatThreads  MeetdayChatThread[]  @relation("MeetdayChatThreadUser")
   meetdayChatMessages MeetdayChatMessage[] @relation("MeetdayChatMessageSender")
 
   createdCommunities   Community[]       @relation("CommunityCreatedBy")
@@ -567,6 +567,7 @@ model SpaceCommunityProfile {
   activeLocations         String[] @default([])
   centreShowcaseImageKeys String[] @default([]) // Photographs of the centre
   videoLink               String?
+  proposalPdfKey          String? // Optional PDF describing the hub's activation proposal
 
   // Optional showcase of past events — array of { name?, description?, imageKeys: string[] }
   // (max 2 imageKeys each), same shape as HostCommunityProfile.pastEvents.
@@ -1727,8 +1728,9 @@ model SponsorshipDealReport {
 // TriChat (which is tied to a specific sponsorship interest).
 model MeetdayChatThread {
   id     String @id @default(uuid())
-  userId String @unique
+  userId String
   user   User   @relation("MeetdayChatThreadUser", fields: [userId], references: [id], onDelete: Cascade)
+  context MeetdayChatContext @default(HOST)
 
   createdAt       DateTime  @default(now())
   lastMessageAt   DateTime?
@@ -1741,7 +1743,15 @@ model MeetdayChatThread {
 
   messages MeetdayChatMessage[]
 
+  @@unique([userId, context])
+
   @@map("meetday_chat_threads")
+}
+
+enum MeetdayChatContext {
+  HOST
+  BRAND
+  SPACE_PARTNER
 }
 
 enum MeetdayChatSenderType {

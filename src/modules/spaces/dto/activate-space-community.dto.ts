@@ -58,6 +58,11 @@ export class ActivateSpaceCommunityDto {
   @IsString()
   videoLink?: string;
 
+  @ApiPropertyOptional({ description: 'GCS object key for the optional proposal PDF' })
+  @IsOptional()
+  @IsString()
+  proposalPdfKey?: string | null;
+
   @ApiProperty({ type: [String], description: 'Space category UUIDs from GET /categories?type=SPACE' })
   @IsArray()
   @IsUUID('4', { each: true })

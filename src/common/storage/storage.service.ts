@@ -57,6 +57,7 @@ const CONTEXT_CONTENT_TYPES: Record<UploadContext, readonly string[]> = {
   [UploadContext.COMMUNITY_FEED_MEDIA]: [...IMAGE_TYPES, 'video/mp4'],
   [UploadContext.SPONSORSHIP_MEDIA]: LOGO_IMAGE_TYPES,
   [UploadContext.SPONSORSHIP_DOCUMENT]: PITCH_DOC_TYPES,
+  [UploadContext.SPACE_PROPOSAL_DOCUMENT]: ['application/pdf'],
   [UploadContext.SPONSORSHIP_CHAT_MEDIA]: [...IMAGE_TYPES, 'application/pdf'],
   [UploadContext.SPACE_CHAT_MEDIA]: [...IMAGE_TYPES, 'application/pdf'],
   [UploadContext.SPACE_HOST_CHAT_MEDIA]: [...IMAGE_TYPES, 'application/pdf'],
@@ -292,6 +293,19 @@ export class StorageService {
           break;
         }
         throw new NotFoundException('Host profile not found');
+      }
+
+      case UploadContext.SPACE_PROPOSAL_DOCUMENT: {
+        const spaceProfile = await this.prisma.spaceProfile.findUnique({ where: { userId }, select: { id: true } });
+        if (spaceProfile) {
+          key = `spaces/${spaceProfile.id}/community-profile/proposal/${randomUUID()}.${ext}`;
+          break;
+        }
+        if (['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'].includes(roleName ?? '')) {
+          key = `admin/space-community-profiles/proposal/${randomUUID()}.${ext}`;
+          break;
+        }
+        throw new ForbiddenException('You do not have permission to upload a proposal PDF');
       }
 
       case UploadContext.INTEREST_IMAGE: {

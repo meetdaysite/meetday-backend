@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -21,16 +21,16 @@ export class MeetdayChatController {
     description: 'Returns (and lazily creates) my own thread with the Meetday team, oldest message first.',
   })
   @ApiOkResponse({ description: 'Messages, oldest first.' })
-  getMyChat(@GetUser('id') userId: string) {
-    return this.meetdayChatService.getMyChat(userId);
+  getMyChat(@GetUser('id') userId: string, @Query('context') context?: string) {
+    return this.meetdayChatService.getMyChat(userId, context);
   }
 
   @Post('messages')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Send a message to Meetday' })
   @ApiOkResponse({ description: 'Message sent.' })
-  sendMyMessage(@GetUser('id') userId: string, @Body() dto: SendChatMessageDto) {
-    return this.meetdayChatService.sendMyMessage(userId, dto);
+  sendMyMessage(@GetUser('id') userId: string, @Body() dto: SendChatMessageDto, @Query('context') context?: string) {
+    return this.meetdayChatService.sendMyMessage(userId, dto, context);
   }
 
   @Patch('messages/:messageId')

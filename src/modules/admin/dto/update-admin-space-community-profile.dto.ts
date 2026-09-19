@@ -72,6 +72,11 @@ export class UpdateAdminSpaceCommunityProfileDto {
   @IsString()
   videoLink?: string;
 
+  @ApiPropertyOptional({ description: 'GCS object key for the optional proposal PDF; pass an empty string to clear it' })
+  @IsOptional()
+  @IsString()
+  proposalPdfKey?: string;
+
   @ApiPropertyOptional({ description: 'Hide (true) or unhide (false) this space from brand/community browse — does not affect the partner\'s own access.' })
   @IsOptional()
   @IsBoolean()

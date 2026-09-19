@@ -10,6 +10,7 @@ import { StorageService } from '../../common/storage/storage.service';
 import { SendChatMessageDto } from '../sponsorship/dto/send-chat-message.dto';
 import { redactPersonalInfo } from '../../common/utils/redact-personal-info.util';
 import { NotificationsService } from '../notifications/notifications.service';
+import { MeetdayChatContext } from '@prisma/client';
 
 const ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'];
 const GREETING_MESSAGE = 'Hello, welcome to Meetday Support! How can we help you today?';
@@ -34,10 +35,17 @@ export class MeetdayChatService {
     this.aiServerUrl = this.config.get<string>('aiServerUrl')!;
   }
 
-  private async getOrCreateThread(userId: string) {
+  private normalizeContext(context?: string): MeetdayChatContext {
+    if (context === 'SPACE' || context === 'SPACE_PARTNER') return MeetdayChatContext.SPACE_PARTNER;
+    if (context === 'BRAND') return MeetdayChatContext.BRAND;
+    return MeetdayChatContext.HOST;
+  }
+
+  private async getOrCreateThread(userId: string, context?: string) {
+    const chatContext = this.normalizeContext(context);
     return this.prisma.meetdayChatThread.upsert({
-      where: { userId },
-      create: { userId },
+      where: { userId_context: { userId, context: chatContext } },
+      create: { userId, context: chatContext },
       update: {},
     });
   }
@@ -63,8 +71,8 @@ export class MeetdayChatService {
     return { id: replyTo.id, senderType: replyTo.senderType, content: replyTo.content, hasMedia: !!replyTo.mediaKey };
   }
 
-  async getMyChat(userId: string) {
-    const thread = await this.getOrCreateThread(userId);
+  async getMyChat(userId: string, context?: string) {
+    const thread = await this.getOrCreateThread(userId, context);
     const messages = await this.prisma.meetdayChatMessage.findMany({
       where: { threadId: thread.id },
       orderBy: { createdAt: 'asc' },
@@ -101,11 +109,11 @@ export class MeetdayChatService {
     return { messages: withMediaUrls };
   }
 
-  async sendMyMessage(userId: string, dto: SendChatMessageDto) {
+  async sendMyMessage(userId: string, dto: SendChatMessageDto, context?: string) {
     if (!dto.content?.trim() && !dto.mediaKey) {
       throw new BadRequestException('Message must have text or an image');
     }
-    const thread = await this.getOrCreateThread(userId);
+    const thread = await this.getOrCreateThread(userId, context);
     const { content, wasRedacted } = dto.content ? redactPersonalInfo(dto.content) : { content: '', wasRedacted: false };
 
     let replyToRow: { id: string; senderType: string; content: string; mediaKey: string | null; deletedAt: Date | null } | null = null;

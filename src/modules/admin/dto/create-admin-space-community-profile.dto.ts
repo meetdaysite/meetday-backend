@@ -71,6 +71,11 @@ export class CreateAdminSpaceCommunityProfileDto {
   @IsString()
   videoLink?: string;
 
+  @ApiPropertyOptional({ description: 'GCS object key for the optional proposal PDF' })
+  @IsOptional()
+  @IsString()
+  proposalPdfKey?: string;
+
   // Written onto the space partner's own profile (not the community profile row) — same shape
   // as the space-partner-side socialLinks field.
   @ApiPropertyOptional({ type: SocialLinksDto })

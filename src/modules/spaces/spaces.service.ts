@@ -116,6 +116,7 @@ export class SpacesService {
   private async withSpaceCommunityMediaUrls(profile: {
     logoKey: string;
     posterKey?: string | null;
+    proposalPdfKey?: string | null;
     centreShowcaseImageKeys?: string[];
     pendingRevision?: Prisma.JsonValue;
     pastEvents?: Prisma.JsonValue;
@@ -124,9 +125,10 @@ export class SpacesService {
     [key: string]: unknown;
   }) {
     const { categories, ...rest } = profile;
-    const [logoUrl, posterUrl, centreShowcaseUrls] = await Promise.all([
+    const [logoUrl, posterUrl, proposalPdfUrl, centreShowcaseUrls] = await Promise.all([
       profile.logoKey ? this.storageService.getPresignedDownloadUrl(profile.logoKey) : null,
       profile.posterKey ? this.storageService.getPresignedDownloadUrl(profile.posterKey) : null,
+      profile.proposalPdfKey ? this.storageService.getPresignedDownloadUrl(profile.proposalPdfKey) : null,
       Promise.all((profile.centreShowcaseImageKeys ?? []).map((key) => this.storageService.getPresignedDownloadUrl(key))),
     ]);
 
@@ -159,6 +161,7 @@ export class SpacesService {
       ...rest,
       logoUrl,
       posterUrl,
+      proposalPdfUrl,
       centreShowcaseUrls,
       pendingRevision: pendingRevision ?? null,
       pastEvents: await this.withPastEventImageUrls(profile.pastEvents as PastEventLike[] | undefined),
