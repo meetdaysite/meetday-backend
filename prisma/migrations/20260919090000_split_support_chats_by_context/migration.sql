@@ -9,6 +9,10 @@ END $$;
 ALTER TABLE "meetday_chat_threads"
   ADD COLUMN "context" "MeetdayChatContext" NOT NULL DEFAULT 'HOST';
 
+-- The original schema allowed only one support thread per user. Remove that
+-- constraint before creating the additional Space Partner thread below.
+DROP INDEX IF EXISTS "meetday_chat_threads_userId_key";
+
 -- Existing threads historically represented the host/community account. Create a fresh
 -- Hub-scoped thread for users that also have a Space Partner profile; old history remains
 -- with the Community thread instead of being shown in the Hub support chat.
