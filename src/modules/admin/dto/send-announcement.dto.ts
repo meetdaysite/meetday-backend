@@ -53,7 +53,6 @@ export class SendAnnouncementDto {
   @ApiProperty({ example: "We've just launched a new feature..." })
   @IsString()
   @MinLength(1)
-  @MaxLength(5000)
   message: string;
 
   @ApiPropertyOptional({
