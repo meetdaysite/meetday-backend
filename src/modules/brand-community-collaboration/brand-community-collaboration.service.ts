@@ -3,10 +3,15 @@ import { CommunityCollaborationStatus } from '@prisma/client'
 import { PrismaService } from '../../prisma/prisma.service'
 import { StorageService } from '../../common/storage/storage.service'
 import { CreateCollaborationMessageDto } from '../community-collaboration/dto/create-collaboration-message.dto'
+import { NotificationsService } from '../notifications/notifications.service'
 
 @Injectable()
 export class BrandCommunityCollaborationService {
-  constructor(private readonly prisma: PrismaService, private readonly storage: StorageService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: StorageService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   async getIdentityByFirebaseUid(firebaseUid: string) {
     const user = await this.prisma.user.findUnique({ where: { firebaseUid }, select: { id: true } })
@@ -158,6 +163,19 @@ export class BrandCommunityCollaborationService {
       include: { sender: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } } },
     })
     await this.prisma.brandCommunityCollaborationInterest.update({ where: { id: interest.id }, data: { lastMessageAt: message.createdAt } })
+
+    const recipientUserId = isBrand
+      ? interest.targetCommunity.hostProfile?.userId
+      : interest.requesterBrand.userId
+    if (recipientUserId && recipientUserId !== userId) {
+      await this.notifications.create(
+        recipientUserId,
+        'brand_community_chat_message',
+        isBrand ? `${interest.requesterBrand.brandName} sent a message` : `${interest.targetCommunity.name} sent a message`,
+        message.content || 'Sent an attachment',
+        { brandCommunityInterestId: interest.id, interestId: interest.id, collaborationType: 'BRAND_COMMUNITY' },
+      )
+    }
     return { ...message, mediaUrl: message.mediaKey ? await this.storage.getPresignedDownloadUrl(message.mediaKey) : null }
   }
 }
