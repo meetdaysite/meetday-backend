@@ -65,14 +65,18 @@ export class BrandCommunityCollaborationService {
     return { message: 'Collaboration request sent', alreadyInterested: false, interestId: interest.id, chatStatus: interest.chatStatus }
   }
 
-  private async findForUser(interestId: string, userId: string) {
+  private async findForUser(interestId: string, userId: string, preferredRole?: 'BRAND' | 'COMMUNITY') {
     const { brand, community } = await this.getIdentity(userId)
     const interest = await this.prisma.brandCommunityCollaborationInterest.findUnique({
       where: { id: interestId },
       include: { requesterBrand: true, targetCommunity: { include: { hostProfile: true } } },
     })
     if (!interest) throw new NotFoundException('Collaboration chat not found')
-    const isBrand = !!brand && interest.requesterBrandId === brand.id
+    const isBrand = preferredRole === 'COMMUNITY'
+      ? false
+      : preferredRole === 'BRAND'
+        ? !!brand && interest.requesterBrandId === brand.id
+        : !!brand && interest.requesterBrandId === brand.id
     const isCommunity = !!community && interest.targetCommunityId === community.id
     if (!isBrand && !isCommunity) throw new UnauthorizedException('You are not part of this chat')
     return { interest, isBrand }
@@ -100,21 +104,22 @@ export class BrandCommunityCollaborationService {
     }
   }
 
-  async getChats(userId: string, status?: CommunityCollaborationStatus) {
+  async getChats(userId: string, status?: CommunityCollaborationStatus, preferredRole?: 'BRAND' | 'COMMUNITY') {
     const { brand, community } = await this.getIdentity(userId)
     if (!brand && !community) throw new UnauthorizedException('Brand or Community profile required')
     const where: any = { ...(status ? { chatStatus: status } : {}) }
-    where[brand ? 'requesterBrandId' : 'targetCommunityId'] = brand ? brand.id : community.id
+    const actingAsBrand = preferredRole === 'BRAND' ? !!brand : preferredRole === 'COMMUNITY' ? false : !!brand
+    where[actingAsBrand ? 'requesterBrandId' : 'targetCommunityId'] = actingAsBrand ? brand!.id : community!.id
     const interests = await this.prisma.brandCommunityCollaborationInterest.findMany({
       where,
       include: { requesterBrand: true, targetCommunity: true, chatMessages: { where: { deletedAt: null }, orderBy: { createdAt: 'desc' }, take: 1 } },
       orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
     })
-    return Promise.all(interests.map((interest) => this.formatThread(interest, !!brand)))
+    return Promise.all(interests.map((interest) => this.formatThread(interest, actingAsBrand)))
   }
 
-  async getMessages(interestId: string, userId: string) {
-    const { interest, isBrand } = await this.findForUser(interestId, userId)
+  async getMessages(interestId: string, userId: string, preferredRole?: 'BRAND' | 'COMMUNITY') {
+    const { interest, isBrand } = await this.findForUser(interestId, userId, preferredRole)
     const messages = await this.prisma.brandCommunityCollaborationMessage.findMany({
       where: { collaborationId: interestId },
       orderBy: { createdAt: 'asc' },
@@ -130,23 +135,23 @@ export class BrandCommunityCollaborationService {
     }
   }
 
-  async accept(interestId: string, userId: string) {
-    const { interest, isBrand } = await this.findForUser(interestId, userId)
+  async accept(interestId: string, userId: string, preferredRole?: 'BRAND' | 'COMMUNITY') {
+    const { interest, isBrand } = await this.findForUser(interestId, userId, preferredRole)
     if (isBrand) throw new BadRequestException('Only the community can accept this request')
     const updated = await this.prisma.brandCommunityCollaborationInterest.update({ where: { id: interest.id }, data: { chatStatus: 'ACCEPTED', chatAcceptedAt: new Date() } })
     return { message: 'Collaboration request accepted', chatStatus: updated.chatStatus }
   }
 
-  async decline(interestId: string, userId: string) {
-    const { interest, isBrand } = await this.findForUser(interestId, userId)
+  async decline(interestId: string, userId: string, preferredRole?: 'BRAND' | 'COMMUNITY') {
+    const { interest, isBrand } = await this.findForUser(interestId, userId, preferredRole)
     if (isBrand) throw new BadRequestException('Only the community can decline this request')
     const updated = await this.prisma.brandCommunityCollaborationInterest.update({ where: { id: interest.id }, data: { chatStatus: 'DECLINED' } })
     return { message: 'Collaboration request declined', chatStatus: updated.chatStatus }
   }
 
-  async sendMessage(interestId: string, userId: string, dto: CreateCollaborationMessageDto) {
+  async sendMessage(interestId: string, userId: string, dto: CreateCollaborationMessageDto, preferredRole?: 'BRAND' | 'COMMUNITY') {
     if (!dto.content?.trim() && !dto.mediaKey) throw new BadRequestException('Message must have text or an image')
-    const { interest, isBrand } = await this.findForUser(interestId, userId)
+    const { interest, isBrand } = await this.findForUser(interestId, userId, preferredRole)
     if (interest.chatStatus !== 'ACCEPTED') throw new BadRequestException('Accept the request before sending messages')
     const message = await this.prisma.brandCommunityCollaborationMessage.create({
       data: { collaborationId: interest.id, senderType: isBrand ? 'REQUESTER' : 'TARGET', senderId: userId, content: dto.content?.trim() ?? '', mediaKey: dto.mediaKey },

@@ -19,32 +19,32 @@ export class BrandCommunityCollaborationController {
   }
 
   @Get('chats')
-  async getChats(@Request() req: any, @Query('status') status?: CommunityCollaborationStatus) {
+  async getChats(@Request() req: any, @Query('status') status?: CommunityCollaborationStatus, @Query('asRole') asRole?: 'BRAND' | 'COMMUNITY') {
     const identity = await this.service.getIdentityByFirebaseUid(req.user.uid)
-    return this.service.getChats(identity.id, status)
+    return this.service.getChats(identity.id, status, asRole)
   }
 
   @Get('chats/:interestId/messages')
-  async getMessages(@Param('interestId') interestId: string, @Request() req: any) {
+  async getMessages(@Param('interestId') interestId: string, @Request() req: any, @Query('asRole') asRole?: 'BRAND' | 'COMMUNITY') {
     const identity = await this.service.getIdentityByFirebaseUid(req.user.uid)
-    return this.service.getMessages(interestId, identity.id)
+    return this.service.getMessages(interestId, identity.id, asRole)
   }
 
   @Post('chats/:interestId/accept')
-  async accept(@Param('interestId') interestId: string, @Request() req: any) {
+  async accept(@Param('interestId') interestId: string, @Request() req: any, @Query('asRole') asRole?: 'BRAND' | 'COMMUNITY') {
     const identity = await this.service.getIdentityByFirebaseUid(req.user.uid)
-    return this.service.accept(interestId, identity.id)
+    return this.service.accept(interestId, identity.id, asRole)
   }
 
   @Post('chats/:interestId/decline')
-  async decline(@Param('interestId') interestId: string, @Request() req: any) {
+  async decline(@Param('interestId') interestId: string, @Request() req: any, @Query('asRole') asRole?: 'BRAND' | 'COMMUNITY') {
     const identity = await this.service.getIdentityByFirebaseUid(req.user.uid)
-    return this.service.decline(interestId, identity.id)
+    return this.service.decline(interestId, identity.id, asRole)
   }
 
   @Post('chats/:interestId/messages')
-  async sendMessage(@Param('interestId') interestId: string, @Body() dto: CreateCollaborationMessageDto, @Request() req: any) {
+  async sendMessage(@Param('interestId') interestId: string, @Body() dto: CreateCollaborationMessageDto, @Request() req: any, @Query('asRole') asRole?: 'BRAND' | 'COMMUNITY') {
     const identity = await this.service.getIdentityByFirebaseUid(req.user.uid)
-    return this.service.sendMessage(interestId, identity.id, dto)
+    return this.service.sendMessage(interestId, identity.id, dto, asRole)
   }
 }
