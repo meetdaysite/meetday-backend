@@ -109,6 +109,26 @@ export class BrandCommunityCollaborationService {
     }
   }
 
+  private async getParticipantUserIds(interest: any): Promise<string[]> {
+    const [brand, host] = await Promise.all([
+      this.prisma.brandProfile.findUnique({
+        where: { id: interest.requesterBrandId },
+        select: { userId: true, teamMembers: { where: { status: 'ACTIVE', userId: { not: null } }, select: { userId: true } } },
+      }),
+      this.prisma.hostProfile.findUnique({
+        where: { id: interest.targetCommunity.hostProfileId },
+        select: { userId: true, teamMembers: { where: { status: 'ACTIVE', userId: { not: null } }, select: { userId: true } } },
+      }),
+    ])
+
+    return [
+      brand?.userId,
+      ...(brand?.teamMembers ?? []).map((member) => member.userId),
+      host?.userId,
+      ...(host?.teamMembers ?? []).map((member) => member.userId),
+    ].filter((id): id is string => Boolean(id))
+  }
+
   async getChats(userId: string, status?: CommunityCollaborationStatus, preferredRole?: 'BRAND' | 'COMMUNITY') {
     const { brand, community } = await this.getIdentity(userId)
     if (!brand && !community) throw new UnauthorizedException('Brand or Community profile required')
@@ -164,18 +184,15 @@ export class BrandCommunityCollaborationService {
     })
     await this.prisma.brandCommunityCollaborationInterest.update({ where: { id: interest.id }, data: { lastMessageAt: message.createdAt } })
 
-    const recipientUserId = isBrand
-      ? interest.targetCommunity.hostProfile?.userId
-      : interest.requesterBrand.userId
-    if (recipientUserId && recipientUserId !== userId) {
-      await this.notifications.create(
-        recipientUserId,
-        'brand_community_chat_message',
-        isBrand ? `${interest.requesterBrand.brandName} sent a message` : `${interest.targetCommunity.name} sent a message`,
-        message.content || 'Sent an attachment',
-        { brandCommunityInterestId: interest.id, interestId: interest.id, collaborationType: 'BRAND_COMMUNITY' },
-      )
-    }
+    const participantUserIds = await this.getParticipantUserIds(interest)
+    const recipientUserIds = participantUserIds.filter((participantId) => participantId !== userId)
+    await Promise.all(recipientUserIds.map((recipientUserId) => this.notifications.create(
+      recipientUserId,
+      'brand_community_chat_message',
+      isBrand ? `${interest.requesterBrand.brandName} sent a message` : `${interest.targetCommunity.name} sent a message`,
+      message.content || 'Sent an attachment',
+      { brandCommunityInterestId: interest.id, interestId: interest.id, collaborationType: 'BRAND_COMMUNITY' },
+    )))
     return { ...message, mediaUrl: message.mediaKey ? await this.storage.getPresignedDownloadUrl(message.mediaKey) : null }
   }
 }
