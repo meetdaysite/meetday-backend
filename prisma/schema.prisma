@@ -117,6 +117,7 @@ model User {
   communityDealReportsSubmitted SpaceHostDealReport[]  @relation("SpaceHostDealReportSubmittedBy")
 
   communityCollaborationMessages CommunityCollaborationMessage[] @relation("CommunityChatMessageSender")
+  brandCommunityCollaborationMessages BrandCommunityCollaborationMessage[] @relation("BrandCommunityChatMessageSender")
 
   meetdayChatThreads  MeetdayChatThread[]  @relation("MeetdayChatThreadUser")
   meetdayChatMessages MeetdayChatMessage[] @relation("MeetdayChatMessageSender")
@@ -484,6 +485,7 @@ model BrandProfile {
   spaceInterests SpaceInterest[]
   campaigns      Campaign[]
   teamMembers    BrandTeamMember[]
+  brandCommunityCollaborationInterests BrandCommunityCollaborationInterest[]
 
   approvalStatus HostApprovalStatus @default(PENDING)
 
@@ -1834,6 +1836,7 @@ model HostCommunityProfile {
   // Community Collaboration relationships
   collaborationsAsRequester CommunityCollaborationInterest[] @relation("CommunityCollaborationRequester")
   collaborationsAsTarget    CommunityCollaborationInterest[] @relation("CommunityCollaborationTarget")
+  brandCommunityCollaborationTargets BrandCommunityCollaborationInterest[] @relation("BrandCommunityCollaborationTarget")
 
   activatedAt DateTime @default(now())
   createdAt   DateTime @default(now())
@@ -3566,4 +3569,43 @@ model CommunityCollaborationMessage {
 
   @@index([communityCollaborationId, createdAt])
   @@map("community_collaboration_messages")
+}
+
+model BrandCommunityCollaborationInterest {
+  id                  String @id @default(uuid())
+  requesterBrandId    String
+  requesterBrand      BrandProfile @relation(fields: [requesterBrandId], references: [id], onDelete: Cascade)
+  targetCommunityId   String
+  targetCommunity     HostCommunityProfile @relation("BrandCommunityCollaborationTarget", fields: [targetCommunityId], references: [id], onDelete: Cascade)
+  chatStatus          CommunityCollaborationStatus @default(REQUESTED)
+  chatAcceptedAt      DateTime?
+  lastMessageAt       DateTime?
+  requesterLastReadAt DateTime?
+  targetLastReadAt    DateTime?
+  chatMessages        BrandCommunityCollaborationMessage[]
+  createdAt           DateTime @default(now())
+
+  @@unique([requesterBrandId, targetCommunityId])
+  @@index([requesterBrandId])
+  @@index([targetCommunityId])
+  @@index([chatStatus])
+  @@map("brand_community_collaboration_interests")
+}
+
+model BrandCommunityCollaborationMessage {
+  id                  String @id @default(uuid())
+  collaborationId     String
+  collaboration       BrandCommunityCollaborationInterest @relation(fields: [collaborationId], references: [id], onDelete: Cascade)
+  senderType          String
+  senderId            String
+  sender              User @relation("BrandCommunityChatMessageSender", fields: [senderId], references: [id])
+  messageType         ChatMessageType @default(TEXT)
+  content             String @db.Text
+  mediaKey            String?
+  replyToId           String?
+  deletedAt           DateTime?
+  createdAt           DateTime @default(now())
+
+  @@index([collaborationId, createdAt])
+  @@map("brand_community_collaboration_messages")
 }
