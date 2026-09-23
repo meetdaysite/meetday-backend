@@ -67,6 +67,18 @@ export class BrandCommunityCollaborationService {
     })
     if (existing) return { message: 'Collaboration request already exists', alreadyInterested: true, interestId: existing.id, chatStatus: existing.chatStatus }
     const interest = await this.prisma.brandCommunityCollaborationInterest.create({ data: { requesterBrandId: brand.id, targetCommunityId: target.id } })
+
+    const communityRecipientUserIds = await this.getCommunityMemberUserIds(target.id)
+    const uniqueRecipientUserIds = [...new Set(communityRecipientUserIds.filter((recipientUserId) => recipientUserId !== brandUserId))]
+
+    await Promise.all(uniqueRecipientUserIds.map((recipientUserId) => this.notifications.create(
+      recipientUserId,
+      'brand_community_chat_message',
+      `${brand.brandName} wants to collaborate`,
+      `Tap to view the collaboration request from ${brand.brandName}`,
+      { brandCommunityInterestId: interest.id, interestId: interest.id, collaborationType: 'BRAND_COMMUNITY' },
+    )))
+
     return { message: 'Collaboration request sent', alreadyInterested: false, interestId: interest.id, chatStatus: interest.chatStatus }
   }
 
@@ -109,24 +121,44 @@ export class BrandCommunityCollaborationService {
     }
   }
 
-  private async getParticipantUserIds(interest: any): Promise<string[]> {
-    const [brand, host] = await Promise.all([
-      this.prisma.brandProfile.findUnique({
-        where: { id: interest.requesterBrandId },
-        select: { userId: true, teamMembers: { where: { status: 'ACTIVE', userId: { not: null } }, select: { userId: true } } },
-      }),
-      this.prisma.hostProfile.findUnique({
-        where: { id: interest.targetCommunity.hostProfileId },
-        select: { userId: true, teamMembers: { where: { status: 'ACTIVE', userId: { not: null } }, select: { userId: true } } },
-      }),
-    ])
+  private async getBrandMemberUserIds(brandProfileId: string): Promise<string[]> {
+    const brand = await this.prisma.brandProfile.findUnique({
+      where: { id: brandProfileId },
+      select: { userId: true, teamMembers: { where: { status: 'ACTIVE', userId: { not: null } }, select: { userId: true } } },
+    })
 
     return [
       brand?.userId,
       ...(brand?.teamMembers ?? []).map((member) => member.userId),
+    ].filter((id): id is string => Boolean(id))
+  }
+
+  private async getCommunityMemberUserIds(communityProfileId: string): Promise<string[]> {
+    const community = await this.prisma.hostCommunityProfile.findUnique({
+      where: { id: communityProfileId },
+      select: { hostProfileId: true },
+    })
+
+    const host = community?.hostProfileId
+      ? await this.prisma.hostProfile.findUnique({
+        where: { id: community.hostProfileId },
+        select: { userId: true, teamMembers: { where: { status: 'ACTIVE', userId: { not: null } }, select: { userId: true } } },
+      })
+      : null
+
+    return [
       host?.userId,
       ...(host?.teamMembers ?? []).map((member) => member.userId),
     ].filter((id): id is string => Boolean(id))
+  }
+
+  private async getParticipantUserIds(interest: any): Promise<string[]> {
+    const [brandUserIds, hostUserIds] = await Promise.all([
+      this.getBrandMemberUserIds(interest.requesterBrandId),
+      this.getCommunityMemberUserIds(interest.targetCommunityId),
+    ])
+
+    return [...new Set([...brandUserIds, ...hostUserIds])]
   }
 
   async getChats(userId: string, status?: CommunityCollaborationStatus, preferredRole?: 'BRAND' | 'COMMUNITY') {
@@ -164,6 +196,17 @@ export class BrandCommunityCollaborationService {
     const { interest, isBrand } = await this.findForUser(interestId, userId, preferredRole)
     if (isBrand) throw new BadRequestException('Only the community can accept this request')
     const updated = await this.prisma.brandCommunityCollaborationInterest.update({ where: { id: interest.id }, data: { chatStatus: 'ACCEPTED', chatAcceptedAt: new Date() } })
+
+    const brandRecipientUserIds = await this.getBrandMemberUserIds(interest.requesterBrandId)
+    const uniqueRecipientUserIds = [...new Set(brandRecipientUserIds.filter((recipientUserId) => recipientUserId !== userId))]
+    await Promise.all(uniqueRecipientUserIds.map((recipientUserId) => this.notifications.create(
+      recipientUserId,
+      'brand_community_chat_message',
+      `${interest.targetCommunity.name} accepted your collaboration request`,
+      `Your collaboration request with ${interest.targetCommunity.name} is now active.`,
+      { brandCommunityInterestId: interest.id, interestId: interest.id, collaborationType: 'BRAND_COMMUNITY' },
+    )))
+
     return { message: 'Collaboration request accepted', chatStatus: updated.chatStatus }
   }
 
@@ -171,6 +214,17 @@ export class BrandCommunityCollaborationService {
     const { interest, isBrand } = await this.findForUser(interestId, userId, preferredRole)
     if (isBrand) throw new BadRequestException('Only the community can decline this request')
     const updated = await this.prisma.brandCommunityCollaborationInterest.update({ where: { id: interest.id }, data: { chatStatus: 'DECLINED' } })
+
+    const brandRecipientUserIds = await this.getBrandMemberUserIds(interest.requesterBrandId)
+    const uniqueRecipientUserIds = [...new Set(brandRecipientUserIds.filter((recipientUserId) => recipientUserId !== userId))]
+    await Promise.all(uniqueRecipientUserIds.map((recipientUserId) => this.notifications.create(
+      recipientUserId,
+      'brand_community_chat_message',
+      `${interest.targetCommunity.name} declined your collaboration request`,
+      `Your collaboration request with ${interest.targetCommunity.name} was not accepted.`,
+      { brandCommunityInterestId: interest.id, interestId: interest.id, collaborationType: 'BRAND_COMMUNITY' },
+    )))
+
     return { message: 'Collaboration request declined', chatStatus: updated.chatStatus }
   }
 

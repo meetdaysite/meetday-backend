@@ -117,7 +117,9 @@ export class NotificationsService {
         .filter((n) => {
           const m = (n.metadata as any) || {};
           const tId =
+            m.spaceInterestId ||
             m.sponsorshipInterestId ||
+            m.brandCommunityInterestId ||
             m.threadId ||
             m.interestId ||
             m.chatId ||
