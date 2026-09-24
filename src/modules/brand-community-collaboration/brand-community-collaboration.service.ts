@@ -104,6 +104,15 @@ export class BrandCommunityCollaborationService {
     const logoKey = isBrand ? interest.targetCommunity.logoKey : interest.requesterBrand.logoKey
     const messages = interest.chatMessages || []
     const last = messages[0]
+    const lastReadAt = isBrand ? interest.requesterLastReadAt : interest.targetLastReadAt
+    const unreadCount = await this.prisma.brandCommunityCollaborationMessage.count({
+      where: {
+        collaborationId: interest.id,
+        deletedAt: null,
+        senderType: isBrand ? 'TARGET' : 'REQUESTER',
+        ...(lastReadAt ? { createdAt: { gt: lastReadAt } } : {}),
+      },
+    })
     return {
       id: interest.id,
       collaborationType: 'BRAND_COMMUNITY',
@@ -117,7 +126,7 @@ export class BrandCommunityCollaborationService {
       lastMessagePreview: last ? last.content || (last.mediaKey ? '📎 Attachment' : '') : null,
       lastMessageAt: interest.lastMessageAt,
       createdAt: interest.createdAt,
-      unreadCount: 0,
+      unreadCount,
     }
   }
 
@@ -183,6 +192,7 @@ export class BrandCommunityCollaborationService {
       include: { sender: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } } },
     })
     await this.prisma.brandCommunityCollaborationInterest.update({ where: { id: interestId }, data: isBrand ? { requesterLastReadAt: new Date() } : { targetLastReadAt: new Date() } })
+    await this.notifications.markAllReadForThread(userId, interestId)
     return {
       messages: await Promise.all(messages.map(async (message) => ({ ...message, mediaUrl: message.mediaKey ? await this.storage.getPresignedDownloadUrl(message.mediaKey) : null }))),
       chatStatus: interest.chatStatus,

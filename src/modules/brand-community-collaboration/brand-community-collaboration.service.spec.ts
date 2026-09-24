@@ -12,15 +12,24 @@ describe('BrandCommunityCollaborationService', () => {
       hostCommunityProfile: { findFirst: jest.fn(), findUnique: jest.fn(), findMany: jest.fn() },
       brandCommunityCollaborationInterest: {
         findUnique: jest.fn(),
+        findMany: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+      },
+      brandCommunityCollaborationMessage: {
+        count: jest.fn(),
+        findMany: jest.fn(),
+        create: jest.fn(),
       },
       brandProfile: { findUnique: jest.fn() },
       hostProfile: { findUnique: jest.fn() },
     };
 
     storage = { getPresignedDownloadUrl: jest.fn() };
-    notifications = { create: jest.fn().mockResolvedValue(undefined) };
+    notifications = {
+      create: jest.fn().mockResolvedValue(undefined),
+      markAllReadForThread: jest.fn().mockResolvedValue(undefined),
+    };
 
     service = new BrandCommunityCollaborationService(prisma, storage, notifications);
   });
@@ -124,4 +133,70 @@ describe('BrandCommunityCollaborationService', () => {
       }),
     );
   });
+
+  it('computes unreadCount from messages sent by counterpart since lastReadAt in getChats', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'brand-user-1',
+      brandProfile: { id: 'brand-1', brandName: 'Brand Co.', logoKey: null },
+      hostProfile: null,
+      hostTeamMemberships: [],
+    });
+
+    const lastRead = new Date('2026-09-20T10:00:00Z');
+    prisma.brandCommunityCollaborationInterest.findMany.mockResolvedValue([
+      {
+        id: 'interest-1',
+        requesterBrandId: 'brand-1',
+        targetCommunityId: 'community-1',
+        chatStatus: 'ACCEPTED',
+        requesterLastReadAt: lastRead,
+        targetLastReadAt: null,
+        requesterBrand: { brandName: 'Brand Co.', logoKey: null },
+        targetCommunity: { name: 'Sunset House', logoKey: null },
+        chatMessages: [{ content: 'Hello', mediaKey: null, createdAt: new Date() }],
+        createdAt: new Date('2026-09-19T10:00:00Z'),
+        lastMessageAt: new Date(),
+      },
+    ]);
+
+    prisma.brandCommunityCollaborationMessage.count.mockResolvedValue(3);
+
+    const chats = await service.getChats('brand-user-1', undefined, 'BRAND');
+
+    expect(prisma.brandCommunityCollaborationMessage.count).toHaveBeenCalledWith({
+      where: {
+        collaborationId: 'interest-1',
+        deletedAt: null,
+        senderType: 'TARGET',
+        createdAt: { gt: lastRead },
+      },
+    });
+    expect(chats[0].unreadCount).toBe(3);
+  });
+
+  it('marks thread notifications as read when getMessages is called', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'brand-user-1',
+      brandProfile: { id: 'brand-1', brandName: 'Brand Co.', logoKey: null },
+      hostProfile: null,
+      hostTeamMemberships: [],
+    });
+
+    prisma.brandCommunityCollaborationInterest.findUnique.mockResolvedValue({
+      id: 'interest-1',
+      requesterBrandId: 'brand-1',
+      targetCommunityId: 'community-1',
+      chatStatus: 'ACCEPTED',
+      requesterBrand: { brandName: 'Brand Co.', logoKey: null },
+      targetCommunity: { name: 'Sunset House', logoKey: null, hostProfile: { id: 'host-1' } },
+    });
+
+    prisma.brandCommunityCollaborationMessage.findMany.mockResolvedValue([]);
+    prisma.brandCommunityCollaborationInterest.update.mockResolvedValue({});
+
+    await service.getMessages('interest-1', 'brand-user-1', 'BRAND');
+
+    expect(notifications.markAllReadForThread).toHaveBeenCalledWith('brand-user-1', 'interest-1');
+  });
 });
+
