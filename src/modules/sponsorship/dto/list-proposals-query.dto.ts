@@ -9,13 +9,13 @@ export class ListProposalsQueryDto {
   status?: SponsorshipStatus;
 
   @ApiPropertyOptional({
-    enum: ['HOST', 'SPACE'],
+    enum: ['HOST', 'SPACE', 'BRAND'],
     description:
       'Disambiguates which profile to act as when the same account has both a Host and a Space ' +
       'Partner profile — the frontend knows which dashboard it is calling from, the backend cannot ' +
       'infer it from the account alone in that case.',
   })
   @IsOptional()
-  @IsIn(['HOST', 'SPACE'])
-  actorType?: 'HOST' | 'SPACE';
+  @IsIn(['HOST', 'SPACE', 'BRAND'])
+  actorType?: 'HOST' | 'SPACE' | 'BRAND';
 }
