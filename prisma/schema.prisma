@@ -486,6 +486,7 @@ model BrandProfile {
   campaigns      Campaign[]
   teamMembers    BrandTeamMember[]
   brandCommunityCollaborationInterests BrandCommunityCollaborationInterest[]
+  sponsorships   SponsorshipProposal[]
 
   approvalStatus HostApprovalStatus @default(PENDING)
 
@@ -1478,6 +1479,7 @@ model SponsorshipProposal {
   id             String  @id @default(uuid())
   hostProfileId  String?
   spaceProfileId String?
+  brandProfileId String?
 
   name            String
   about           String    @db.Text
@@ -1520,10 +1522,12 @@ model SponsorshipProposal {
 
   hostProfile  HostProfile?          @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
   spaceProfile SpaceProfile?         @relation(fields: [spaceProfileId], references: [id], onDelete: Cascade)
+  brandProfile BrandProfile?         @relation(fields: [brandProfileId], references: [id], onDelete: Cascade)
   interests    SponsorshipInterest[]
 
   @@index([hostProfileId])
   @@index([spaceProfileId])
+  @@index([brandProfileId])
   @@index([status])
   @@map("sponsorship_proposals")
 }

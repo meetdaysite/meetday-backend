@@ -1891,7 +1891,11 @@ export class AdminService {
   async approveSponsorship(id: string, adminId: string) {
     const proposal = await this.prisma.sponsorshipProposal.findUnique({
       where: { id },
-      include: { hostProfile: { include: { user: { select: { id: true, email: true, firstName: true } } } } },
+      include: {
+        hostProfile: { include: { user: { select: { id: true, email: true, firstName: true } } } },
+        spaceProfile: { include: { user: { select: { id: true, email: true, firstName: true } } } },
+        brandProfile: { include: { user: { select: { id: true, email: true, firstName: true } } } },
+      },
     });
     if (!proposal) throw new NotFoundException('Sponsorship proposal not found');
     if (proposal.status !== 'UNDER_REVIEW')
@@ -1904,7 +1908,7 @@ export class AdminService {
     if (count === 0)
       throw new BadRequestException('Proposal is no longer under review — it may have just been edited');
 
-    const hostUser = proposal.hostProfile.user;
+    const ownerUser = proposal.hostProfile?.user ?? proposal.spaceProfile?.user ?? proposal.brandProfile?.user;
 
     this.auditLogService.log({
       actorId: adminId,
@@ -1915,15 +1919,17 @@ export class AdminService {
       metadata: { name: proposal.name },
     });
 
-    void this.notificationsService
-      .create(
-        hostUser.id,
-        'sponsorship_approved',
-        'Sponsorship Proposal Approved',
-        `Your proposal "${proposal.name}" has been approved and is now published.`,
-        { proposalId: id },
-      )
-      .catch((err) => this.logger.error('Failed to create sponsorship_approved notification', err));
+    if (ownerUser) {
+      void this.notificationsService
+        .create(
+          ownerUser.id,
+          'sponsorship_approved',
+          'Sponsorship Proposal Approved',
+          `Your proposal "${proposal.name}" has been approved and is now published.`,
+          { proposalId: id },
+        )
+        .catch((err) => this.logger.error('Failed to create sponsorship_approved notification', err));
+    }
 
     return { message: 'Sponsorship proposal approved successfully' };
   }
@@ -1931,7 +1937,11 @@ export class AdminService {
   async rejectSponsorship(id: string, adminId: string, dto: RejectEventDto) {
     const proposal = await this.prisma.sponsorshipProposal.findUnique({
       where: { id },
-      include: { hostProfile: { include: { user: { select: { id: true, email: true, firstName: true } } } } },
+      include: {
+        hostProfile: { include: { user: { select: { id: true, email: true, firstName: true } } } },
+        spaceProfile: { include: { user: { select: { id: true, email: true, firstName: true } } } },
+        brandProfile: { include: { user: { select: { id: true, email: true, firstName: true } } } },
+      },
     });
     if (!proposal) throw new NotFoundException('Sponsorship proposal not found');
     if (proposal.status !== 'UNDER_REVIEW')
@@ -1944,7 +1954,7 @@ export class AdminService {
     if (count === 0)
       throw new BadRequestException('Proposal is no longer under review — it may have just been edited');
 
-    const hostUser = proposal.hostProfile.user;
+    const ownerUser = proposal.hostProfile?.user ?? proposal.spaceProfile?.user ?? proposal.brandProfile?.user;
 
     this.auditLogService.log({
       actorId: adminId,
@@ -1955,15 +1965,17 @@ export class AdminService {
       metadata: { name: proposal.name, remark: dto.remark },
     });
 
-    void this.notificationsService
-      .create(
-        hostUser.id,
-        'sponsorship_rejected',
-        'Sponsorship Proposal Not Approved',
-        `Your proposal "${proposal.name}" was not approved. Remark: ${dto.remark}`,
-        { proposalId: id },
-      )
-      .catch((err) => this.logger.error('Failed to create sponsorship_rejected notification', err));
+    if (ownerUser) {
+      void this.notificationsService
+        .create(
+          ownerUser.id,
+          'sponsorship_rejected',
+          'Sponsorship Proposal Not Approved',
+          `Your proposal "${proposal.name}" was not approved. Remark: ${dto.remark}`,
+          { proposalId: id },
+        )
+        .catch((err) => this.logger.error('Failed to create sponsorship_rejected notification', err));
+    }
 
     return { message: 'Sponsorship proposal rejected successfully' };
   }
