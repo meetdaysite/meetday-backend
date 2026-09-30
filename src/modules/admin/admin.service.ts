@@ -1671,6 +1671,13 @@ export class AdminService {
             user: { select: { id: true, firstName: true, lastName: true, email: true } },
           },
         },
+        brandProfile: {
+          select: {
+            id: true,
+            brandName: true,
+            user: { select: { id: true, firstName: true, lastName: true, email: true } },
+          },
+        },
         interests: {
           orderBy: { createdAt: 'desc' },
           select: {
