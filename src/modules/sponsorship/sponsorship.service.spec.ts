@@ -665,7 +665,6 @@ describe('SponsorshipService — TriChat', () => {
           where: expect.objectContaining({
             AND: expect.arrayContaining([
               expect.objectContaining({ status: 'PUBLISHED' }),
-              expect.objectContaining({ brandProfileId: null }),
               expect.objectContaining({
                 OR: expect.arrayContaining([
                   expect.objectContaining({ eventEndDate: expect.objectContaining({ gte: expect.any(Date) }) }),

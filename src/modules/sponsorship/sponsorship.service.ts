@@ -573,9 +573,6 @@ export class SponsorshipService {
       where: {
         AND: [
           { status: SponsorshipStatus.PUBLISHED },
-          // Brand-authored proposals stay in the creator's My Proposals area for now;
-          // Curated Experiences remains limited to community and hub proposals.
-          { brandProfileId: null },
           // A community/space an admin has hidden must not surface in brand browse/discovery at all.
           {
             NOT: {
