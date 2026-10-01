@@ -223,9 +223,8 @@ export class SponsorshipService {
       return { type: 'HOST', hostProfileId };
     }
     if (actorType === 'BRAND') {
-      const brandProfile = await this.prisma.brandProfile.findUnique({ where: { userId }, select: { id: true } });
-      if (!brandProfile) throw new NotFoundException('Brand profile not found');
-      return { type: 'BRAND', brandProfileId: brandProfile.id };
+      const brandProfileId = await this.teamAccessService.resolveBrandProfileId(userId);
+      return { type: 'BRAND', brandProfileId };
     }
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: { select: { name: true } } } });
     if (user?.role?.name === 'SPACE_PARTNER') {
@@ -234,9 +233,8 @@ export class SponsorshipService {
       return { type: 'SPACE', spaceProfileId: spaceProfile.id };
     }
     if (user?.role?.name === 'BRAND') {
-      const brandProfile = await this.prisma.brandProfile.findUnique({ where: { userId }, select: { id: true } });
-      if (!brandProfile) throw new NotFoundException('Brand profile not found');
-      return { type: 'BRAND', brandProfileId: brandProfile.id };
+      const brandProfileId = await this.teamAccessService.resolveBrandProfileId(userId);
+      return { type: 'BRAND', brandProfileId };
     }
     const hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
     return { type: 'HOST', hostProfileId };

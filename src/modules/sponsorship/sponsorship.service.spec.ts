@@ -154,6 +154,20 @@ describe('SponsorshipService — TriChat', () => {
     });
   });
 
+  describe('getMyProposals()', () => {
+    it('resolves Brand team members to the Brand profile that owns their proposals', async () => {
+      mockTeamAccessService.resolveBrandProfileId.mockResolvedValue('brand-team-1');
+      prisma.sponsorshipProposal.findMany.mockResolvedValue([]);
+
+      await service.getMyProposals('brand-member-user', { actorType: 'BRAND' });
+
+      expect(mockTeamAccessService.resolveBrandProfileId).toHaveBeenCalledWith('brand-member-user');
+      expect(prisma.sponsorshipProposal.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ brandProfileId: 'brand-team-1' }) }),
+      );
+    });
+  });
+
   describe('deleteProposal()', () => {
     it('deletes a proposal with no brand interests', async () => {
       prisma.sponsorshipProposal.findUnique.mockResolvedValue({ id: 'prop-1', hostProfile: { userId: 'host-user' } });
