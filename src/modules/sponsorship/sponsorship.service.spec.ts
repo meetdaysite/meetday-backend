@@ -677,6 +677,28 @@ describe('SponsorshipService — TriChat', () => {
       );
     });
 
+    it('keeps community and hub proposals visible to brands while excluding their own proposals', async () => {
+      prisma.brandProfile.findUnique.mockResolvedValue({ id: 'brand-1' });
+      prisma.sponsorshipProposal.findMany.mockResolvedValue([]);
+
+      await service.getAllPublishedProposals({}, 'brand-user');
+
+      expect(prisma.sponsorshipProposal.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            AND: expect.arrayContaining([
+              expect.objectContaining({
+                OR: [
+                  { brandProfileId: null },
+                  { brandProfileId: { not: 'brand-1' } },
+                ],
+              }),
+            ]),
+          }),
+        }),
+      );
+    });
+
     it('getPublishedProposalDetail allows brand that already expressed interest even if proposal is expired', async () => {
       const pastDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
       prisma.sponsorshipProposal.findUnique.mockResolvedValue({

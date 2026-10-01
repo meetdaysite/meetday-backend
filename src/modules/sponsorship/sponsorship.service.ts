@@ -588,16 +588,9 @@ export class SponsorshipService {
               { eventEndDate: null, eventDate: { gte: startOfToday } },
             ],
           },
-          // Exclude self brand proposals (brand shouldn't see own proposals in Curated Experiences)
+          // Keep community/hub proposals (brandProfileId is NULL) while excluding the current brand's own proposals.
           ...(userBrandProfileId
-            ? [
-                {
-                  OR: [
-                    { brandProfileId: null },
-                    { brandProfileId: { not: userBrandProfileId } },
-                  ],
-                },
-              ]
+            ? [{ OR: [{ brandProfileId: null }, { brandProfileId: { not: userBrandProfileId } }] }]
             : []),
           ...(query.categoryId
             ? [
