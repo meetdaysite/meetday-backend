@@ -589,7 +589,16 @@ export class SponsorshipService {
             ],
           },
           // Exclude self brand proposals (brand shouldn't see own proposals in Curated Experiences)
-          ...(userBrandProfileId ? [{ NOT: { brandProfileId: userBrandProfileId } }] : []),
+          ...(userBrandProfileId
+            ? [
+                {
+                  OR: [
+                    { brandProfileId: null },
+                    { brandProfileId: { not: userBrandProfileId } },
+                  ],
+                },
+              ]
+            : []),
           ...(query.categoryId
             ? [
                 {
