@@ -1595,13 +1595,6 @@ export class AdminService {
         user: { select: { id: true, firstName: true, lastName: true, email: true } },
       },
     },
-    brandProfile: {
-      select: {
-        id: true,
-        brandName: true,
-        user: { select: { id: true, firstName: true, lastName: true, email: true } },
-      },
-    },
   } as const;
 
   async listPendingSponsorships(page: number, limit: number) {
@@ -2636,13 +2629,6 @@ export class AdminService {
                 communityProfile: { select: { name: true, logoKey: true } },
               },
             },
-            brandProfile: {
-              select: {
-                id: true,
-                brandName: true,
-                logoKey: true,
-              },
-            },
           },
         },
         campaign: {
@@ -2711,11 +2697,9 @@ export class AdminService {
         const brandProfile = t.brandProfile ?? t.campaign?.brandProfile;
         const hostProfile = t.hostProfile ?? t.sponsorshipProposal?.hostProfile;
         const spaceProfile = !isCampaign ? t.sponsorshipProposal?.spaceProfile : null;
-        const brandOwnedProposal = !isCampaign ? t.sponsorshipProposal?.brandProfile : null;
         const isSpaceOwned = !!spaceProfile;
-        const isBrandOwned = !!brandOwnedProposal;
 
-        const brandLogoKey = brandProfile?.logoKey ?? brandOwnedProposal?.logoKey ?? null;
+        const brandLogoKey = brandProfile?.logoKey ?? null;
         const communityLogoKey = isSpaceOwned
           ? (spaceProfile?.communityProfile?.logoKey ?? null)
           : (hostProfile?.communityProfile?.logoKey ?? null);
@@ -2725,13 +2709,11 @@ export class AdminService {
           communityLogoKey ? this.storageService.getPresignedDownloadUrl(communityLogoKey) : null,
         ]);
 
-        const brandName = brandProfile?.brandName ?? brandOwnedProposal?.brandName ?? 'Brand';
+        const brandName = brandProfile?.brandName ?? 'Brand';
         const communityName = isSpaceOwned
           ? (spaceProfile?.communityProfile?.name ?? spaceProfile?.businessName ?? 'Community Space')
-          : isBrandOwned
-            ? (brandOwnedProposal?.brandName ?? 'Brand')
-            : (hostProfile?.communityProfile?.name ?? hostProfile?.displayName ?? 'Community');
-        const ownerType: 'HOST' | 'SPACE' | 'BRAND' = isSpaceOwned ? 'SPACE' : isBrandOwned ? 'BRAND' : 'HOST';
+          : (hostProfile?.communityProfile?.name ?? hostProfile?.displayName ?? 'Community');
+        const ownerType: 'HOST' | 'SPACE' = isSpaceOwned ? 'SPACE' : 'HOST';
 
         const senderRole: 'BRAND' | 'HOST' = isCampaign ? 'HOST' : 'BRAND';
         const senderName = isCampaign ? communityName : brandName;

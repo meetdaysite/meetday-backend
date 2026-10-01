@@ -93,7 +93,7 @@ describe('SponsorshipService — TriChat', () => {
       );
     });
 
-    it('includes interests received by the brand and interests on its own proposals', async () => {
+    it('filters by the caller’s brandProfileId when they are a brand', async () => {
       prisma.hostProfile.findUnique.mockResolvedValue(null);
       prisma.brandProfile.findUnique.mockResolvedValue({ id: 'brand-1' });
       prisma.sponsorshipInterest.findMany.mockResolvedValue([]);
@@ -101,14 +101,7 @@ describe('SponsorshipService — TriChat', () => {
       await service.listMyChats('user-2', {});
 
       expect(prisma.sponsorshipInterest.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            OR: [
-              { brandProfileId: 'brand-1' },
-              { sponsorshipProposal: { brandProfileId: 'brand-1' } },
-            ],
-          }),
-        }),
+        expect.objectContaining({ where: expect.objectContaining({ brandProfileId: 'brand-1' }) }),
       );
     });
 
@@ -146,7 +139,7 @@ describe('SponsorshipService — TriChat', () => {
         expect.objectContaining({
           where: expect.objectContaining({
             sponsorshipInterestId: 'interest-1',
-            senderId: { not: 'user-1' },
+            senderType: { not: 'HOST' },
           }),
         }),
       );
