@@ -207,6 +207,29 @@ describe('SponsorshipService — TriChat', () => {
       expect(mockNotifications.create).toHaveBeenCalledWith('brand-user', expect.any(String), expect.any(String), expect.any(String), expect.any(Object));
     });
 
+    it('sends Brand-owned proposal messages as BRAND to the interested Brand', async () => {
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue({
+        id: 'brand-interest-1',
+        chatStatus: 'ACCEPTED',
+        sponsorshipProposal: {
+          id: 'brand-proposal-1',
+          name: 'Co-sponsored Event',
+          brandProfile: { id: 'brand-a', userId: 'brand-a-user', brandName: 'Brand A' },
+        },
+        brandProfile: { id: 'brand-b', userId: 'brand-b-user', brandName: 'Brand B' },
+      });
+      prisma.sponsorshipChatMessage.create.mockResolvedValue({ id: 'brand-msg-1', createdAt: new Date() });
+
+      await service.sendChatMessage('brand-a-user', 'brand-interest-1', { content: 'Let us collaborate' });
+
+      expect(prisma.sponsorshipChatMessage.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ sponsorshipInterestId: 'brand-interest-1', senderType: 'BRAND', senderId: 'brand-a-user' }),
+        }),
+      );
+      expect(mockNotifications.create).toHaveBeenCalledWith('brand-b-user', expect.any(String), expect.any(String), expect.any(String), expect.any(Object));
+    });
+
     it('rejects a participant not on this thread', async () => {
       prisma.sponsorshipInterest.findUnique.mockResolvedValue(baseInterest);
       await expect(service.sendChatMessage('someone-else', 'interest-1', { content: 'hi' })).rejects.toThrow(ForbiddenException);

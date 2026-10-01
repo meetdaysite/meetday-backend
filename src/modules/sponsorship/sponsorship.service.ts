@@ -1437,6 +1437,8 @@ export class SponsorshipService {
         ? ChatSenderType[preferredRole]
         : isSpace
         ? ChatSenderType.SPACE
+        : isOwnerBrand
+        ? ChatSenderType.BRAND
         : isOwnerSide
         ? ChatSenderType.HOST
         : ChatSenderType.BRAND;
@@ -1672,11 +1674,17 @@ export class SponsorshipService {
     return this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
   }
 
-  private async postDealSystemMessage(interestId: string, senderType: ChatSenderType, senderId: string, content: string) {
+  private async postDealSystemMessage(
+    interestId: string,
+    senderType: ChatSenderType,
+    senderId: string,
+    content: string,
+    ownerSideOverride?: boolean,
+  ) {
     const message = await this.prisma.sponsorshipChatMessage.create({
       data: { sponsorshipInterestId: interestId, senderType, senderId, content, messageType: 'SYSTEM' },
     });
-    const isOwnerSenderType = senderType === ChatSenderType.HOST || senderType === ChatSenderType.SPACE;
+    const isOwnerSenderType = ownerSideOverride ?? (senderType === ChatSenderType.HOST || senderType === ChatSenderType.SPACE);
     await this.prisma.sponsorshipInterest.update({
       where: { id: interestId },
       data: {
@@ -1753,6 +1761,7 @@ export class SponsorshipService {
       isCampaign
         ? `${creatorName} shared a campaign deal for your approval.`
         : `${creatorName} shared a deal proposal for your approval.`,
+      isOwnerSide,
     );
 
     if (targetUserId) {
@@ -1824,6 +1833,7 @@ export class SponsorshipService {
       isCampaign
         ? `${creatorName} updated the campaign deal.`
         : `${creatorName} updated the deal proposal.`,
+      isOwnerSide,
     );
 
     if (targetUserId && targetUserId !== userId) {
@@ -1869,7 +1879,7 @@ export class SponsorshipService {
       data: { status: 'APPROVED', approvedAt: new Date(), paymentExpiresAt },
     });
 
-    await this.postDealSystemMessage(interest.id, senderType, userId, 'Congratulations! The deal is locked.');
+    await this.postDealSystemMessage(interest.id, senderType, userId, 'Congratulations! The deal is locked.', isCampaign);
 
     const hostName = this.hostNameOf(interest);
     const brandName = interest.campaign?.brandProfile?.brandName ?? interest.brandProfile?.brandName ?? 'The brand';
@@ -1945,6 +1955,7 @@ export class SponsorshipService {
       senderType,
       userId,
       `${requesterName} requested changes to the deal${noteSuffix}`,
+      isCampaign,
     );
 
     if (targetUserId) {
@@ -2057,6 +2068,7 @@ export class SponsorshipService {
         interest.campaignId ? ChatSenderType.HOST : SponsorshipService.ownerSenderType(interest.sponsorshipProposal ?? {}),
         userId,
         `${this.hostNameOf(interest)} submitted the deliverables report.`,
+        true,
       );
 
       const brandUserId = interest.campaignId ? (interest.campaign?.brandProfile?.userId ?? interest.brandProfile?.userId) : interest.brandProfile?.userId;
@@ -2079,6 +2091,7 @@ export class SponsorshipService {
         ChatSenderType.BRAND,
         userId,
         `${brandName} ${brandStatus} the deliverables report.`,
+        false,
       );
 
       const hostUserId = interest.campaignId ? interest.hostProfile?.userId : SponsorshipService.ownerUserId(interest.sponsorshipProposal ?? {});
@@ -2150,8 +2163,8 @@ export class SponsorshipService {
   }
 
   async verifyDealPayment(userId: string, interestId: string, dto: VerifySponsorshipDealPaymentDto) {
-    const { interest, senderType } = await this.getInterestForParticipant(userId, interestId);
-    if (senderType !== ChatSenderType.BRAND) throw new ForbiddenException('Only the brand can pay for this deal');
+    const { interest, senderType, isOwnerSide } = await this.getInterestForParticipant(userId, interestId);
+    if (senderType !== ChatSenderType.BRAND || isOwnerSide) throw new ForbiddenException('Only the interested brand can pay for this deal');
 
     const deal = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
     if (!deal) throw new NotFoundException('No deal found for this chat');
@@ -2177,6 +2190,7 @@ export class SponsorshipService {
       ChatSenderType.BRAND,
       userId,
       `${interest.brandProfile.brandName} paid ₹${paidAmount.toLocaleString('en-IN')} for the deal.`,
+      false,
     );
 
     void this.notificationsService
