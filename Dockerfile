@@ -59,7 +59,7 @@ COPY --from=builder /app/dist ./dist
 
 # Copy and permission the entrypoint
 COPY docker-entrypoint.sh ./
-RUN chmod +x docker-entrypoint.sh && chown -R nestjs:nodejs /app
+RUN chmod +x docker-entrypoint.sh && chown nestjs:nodejs /app /app/docker-entrypoint.sh
 
 USER nestjs
 
