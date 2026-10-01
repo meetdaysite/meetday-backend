@@ -810,7 +810,7 @@ export class SponsorshipService {
         brandName: true,
         socialLinks: true,
         approvalStatus: true,
-        user: { select: { email: true } },
+        user: { select: { id: true, email: true } },
         categories: { select: { category: { select: { name: true } } } },
       },
     });
@@ -844,6 +844,11 @@ export class SponsorshipService {
             communityProfile: { select: { name: true } },
           },
         },
+        brandProfile: {
+          include: {
+            user: { select: { id: true } },
+          },
+        },
       },
     });
     if (!proposal || proposal.status !== SponsorshipStatus.PUBLISHED)
@@ -865,46 +870,67 @@ export class SponsorshipService {
       data: { sponsorshipProposalId: proposalId, brandProfileId: brandProfile.id },
     });
 
-    // Owner (Community or Community Space) notification now reveals the brand's name — TriChat
-    // needs the owner to know who is interested so they can decide whether to accept and chat.
-    const ownerUserId = SponsorshipService.ownerUserId(proposal);
-    if (ownerUserId) {
+    // Check if proposal is created by a brand (brand-to-brand collaboration)
+    const isBrandProposal = !!proposal.brandProfile;
+
+    if (isBrandProposal) {
+      // Brand-to-brand interest notification
+      const proposerUserId = proposal.brandProfile!.user.id;
       void this.notificationsService
         .create(
-          ownerUserId,
+          proposerUserId,
           'brand_interested_in_sponsorship',
           `${brandProfile.brandName} is interested!`,
           'This brand is interested in your proposal. Check your Chats to respond.',
           { proposalId, sponsorshipInterestId: interest.id },
         )
-        .catch((err) => this.logger.error('Failed to notify owner of brand interest', err));
+        .catch((err) => this.logger.error('Failed to notify brand proposer of interest', err));
+    } else {
+      // Existing Community/Space notification
+      const ownerUserId = SponsorshipService.ownerUserId(proposal);
+      if (ownerUserId) {
+        void this.notificationsService
+          .create(
+            ownerUserId,
+            'brand_interested_in_sponsorship',
+            `${brandProfile.brandName} is interested!`,
+            'This brand is interested in your proposal. Check your Chats to respond.',
+            { proposalId, sponsorshipInterestId: interest.id },
+          )
+          .catch((err) => this.logger.error('Failed to notify owner of brand interest', err));
+      }
     }
 
-    // Confirms back to the brand itself that the community has been notified — persisted so it
-    // shows up in their Notifications page, not just an ephemeral success toast.
+    // Confirms back to the brand itself that interest was sent
+    const recipientName = isBrandProposal
+      ? proposal.brandProfile!.brandName
+      : SponsorshipService.ownerDisplayName(proposal);
     void this.notificationsService
       .create(
         userId,
         'brand_interest_confirmed',
         'Interest sent!',
-        'The community is notified of your interest.',
+        `${recipientName} is notified of your interest.`,
         { proposalId },
       )
       .catch((err) => this.logger.error('Failed to notify brand of confirmed interest', err));
 
-    const communityName = SponsorshipService.ownerDisplayName(proposal);
-    for (const to of ADMIN_ALERT_EMAILS) {
-      void this.mailQueue
-        .add('brand-interest', {
-          to,
-          communityName,
-          proposalName: proposal.name || 'Untitled proposal',
-          brandName: brandProfile.brandName,
-          brandEmail: brandProfile.user.email,
-          categories: categoryNames,
-          socialLinks,
-        })
-        .catch((err) => this.logger.error('Failed to enqueue brand-interest mail job', err));
+    // Only send admin alert for non-brand proposals (existing behavior)
+    if (!isBrandProposal) {
+      const communityName = SponsorshipService.ownerDisplayName(proposal);
+      for (const to of ADMIN_ALERT_EMAILS) {
+        void this.mailQueue
+          .add('brand-interest', {
+            to,
+            communityName,
+            proposalName: proposal.name || 'Untitled proposal',
+            brandName: brandProfile.brandName,
+            brandEmail: brandProfile.user.email,
+            categories: categoryNames,
+            socialLinks,
+          })
+          .catch((err) => this.logger.error('Failed to enqueue brand-interest mail job', err));
+      }
     }
 
     return { message: 'Interest recorded', alreadyInterested: false };
