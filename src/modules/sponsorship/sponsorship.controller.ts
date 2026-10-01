@@ -182,8 +182,8 @@ export class SponsorshipController {
       'data room link; full proposal detail still requires a BRAND account.',
   })
   @ApiOkResponse({ description: 'List of published proposals.' })
-  getAllPublished(@Query() query: ListPublishedQueryDto, @GetUser('id') userId?: string) {
-    return this.sponsorshipService.getAllPublishedProposals(query, userId);
+  getAllPublished(@Query() query: ListPublishedQueryDto) {
+    return this.sponsorshipService.getAllPublishedProposals(query);
   }
 
   @Get('communities')

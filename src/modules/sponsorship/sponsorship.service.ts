@@ -556,16 +556,9 @@ export class SponsorshipService {
   // Optionally filtered by category, matched against the owner's APPROVED community profile
   // categories (either HostCommunityProfile or SpaceCommunityProfile, whichever applies).
   // Filters out proposals whose event has already ended (eventEndDate or eventDate < start of today).
-  async getAllPublishedProposals(query: ListPublishedQueryDto, userId?: string) {
+  async getAllPublishedProposals(query: ListPublishedQueryDto) {
     const startOfToday = new Date();
     startOfToday.setUTCHours(0, 0, 0, 0);
-
-    // If userId is provided and user is a brand, fetch their brand profile ID to exclude self
-    let userBrandProfileId: string | null = null;
-    if (userId) {
-      const brandProfiles = await this.teamAccessService.getBrandProfileIds(userId);
-      userBrandProfileId = brandProfiles[0] || null;
-    }
 
     const proposals = await this.prisma.sponsorshipProposal.findMany({
       where: {
@@ -586,8 +579,6 @@ export class SponsorshipService {
               { eventEndDate: null, eventDate: { gte: startOfToday } },
             ],
           },
-          // Exclude self brand proposals (brand shouldn't see own proposals in Curated Experiences)
-          ...(userBrandProfileId ? [{ NOT: { brandProfileId: userBrandProfileId } }] : []),
           ...(query.categoryId
             ? [
                 {
