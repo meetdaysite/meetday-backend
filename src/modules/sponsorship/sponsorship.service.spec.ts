@@ -18,7 +18,7 @@ function makePrisma() {
     sponsorshipInterest: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}), count: jest.fn().mockResolvedValue(0) },
     sponsorshipChatMessage: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), count: jest.fn().mockResolvedValue(0) },
     sponsorshipDeal: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
-    user: { findMany: jest.fn().mockResolvedValue([]) },
+    user: { findMany: jest.fn().mockResolvedValue([]), findUnique: jest.fn().mockResolvedValue({ firstName: 'Brand' }) },
   };
   return prisma;
 }
@@ -165,6 +165,43 @@ describe('SponsorshipService — TriChat', () => {
       expect(prisma.sponsorshipProposal.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: expect.objectContaining({ brandProfileId: 'brand-team-1' }) }),
       );
+    });
+  });
+
+  describe('submitProposal()', () => {
+    it('allows an approved Brand proposal to submit without a pitch document', async () => {
+      const brandProposal = {
+        id: 'brand-proposal-1',
+        status: 'DRAFT',
+        brandProfileId: 'brand-1',
+        brandProfile: { userId: 'brand-user' },
+        hostProfile: null,
+        spaceProfile: null,
+        name: 'Co-sponsored Showcase',
+        about: 'A joint event proposal for two brands.',
+        imageKey: 'brand-proposals/cover.jpg',
+        docKey: null,
+        eventDate: new Date('2026-12-01T00:00:00.000Z'),
+        eventEndDate: new Date('2026-12-01T00:00:00.000Z'),
+        venue: 'Central Hall',
+        city: 'Bengaluru',
+        audienceProfile: ['Founders'],
+        ageGroup: '25-40',
+        guestCount: '200',
+        sponsorshipType: 'CASH',
+        sponsorTiers: [{ name: 'Partner', price: '50000' }],
+        pendingRevision: null,
+      };
+      prisma.sponsorshipProposal.findUnique.mockResolvedValue(brandProposal);
+      prisma.brandProfile.findUnique.mockResolvedValue({ approvalStatus: 'APPROVED' });
+      prisma.sponsorshipProposal.update.mockResolvedValue({ ...brandProposal, status: 'UNDER_REVIEW' });
+
+      const submitted = await service.submitProposal('brand-user', 'brand-proposal-1');
+
+      expect(prisma.sponsorshipProposal.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'brand-proposal-1' }, data: expect.objectContaining({ status: 'UNDER_REVIEW' }) }),
+      );
+      expect(submitted.status).toBe('UNDER_REVIEW');
     });
   });
 

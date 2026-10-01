@@ -1060,7 +1060,7 @@ export class SponsorshipService {
     if (!proposal.ageGroup) missing.push('ageGroup');
     if (!proposal.guestCount) missing.push('guestCount');
     const sponsorshipType = proposal.sponsorshipType || 'CASH';
-    if (!isSpace && !proposal.docKey) missing.push('docKey');
+    if (!isSpace && !isBrand && !proposal.docKey) missing.push('docKey');
     if (sponsorshipType !== 'BARTER' && !(proposal.sponsorTiers as unknown[])?.length) {
       missing.push('sponsorTiers');
     }
