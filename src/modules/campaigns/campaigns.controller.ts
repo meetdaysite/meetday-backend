@@ -87,7 +87,7 @@ export class CampaignsController {
   }
 
   @Get('published')
-  @Roles('HOST', 'BRAND')
+  @Roles('HOST', 'BRAND', 'SPACE_PARTNER')
   @ApiOperation({ summary: 'List all published campaigns' })
   @ApiOkResponse({ description: 'List of published campaigns.' })
   getPublishedCampaigns() {
@@ -95,7 +95,7 @@ export class CampaignsController {
   }
 
   @Get('published/:id')
-  @Roles('HOST', 'BRAND')
+  @Roles('HOST', 'BRAND', 'SPACE_PARTNER')
   @ApiOperation({ summary: 'Get details of a published campaign' })
   @ApiOkResponse({ description: 'Campaign details.' })
   getPublishedCampaign(@Param('id', ParseUUIDPipe) campaignId: string) {
