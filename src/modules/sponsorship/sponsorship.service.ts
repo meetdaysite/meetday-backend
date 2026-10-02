@@ -1135,7 +1135,12 @@ export class SponsorshipService {
             ],
           }
         : spaceProfile
-          ? { sponsorshipProposal: { spaceProfileId: spaceProfile.id } }
+            ? {
+                OR: [
+                  { sponsorshipProposal: { spaceProfileId: spaceProfile.id } },
+                  { spaceProfileId: spaceProfile.id },
+                ],
+              }
           : { brandProfileId: brandProfile!.id }),
     };
 
@@ -1161,6 +1166,14 @@ export class SponsorshipService {
           select: {
             id: true,
             displayName: true,
+            communityProfile: { select: { name: true, logoKey: true } },
+          },
+        },
+        spaceProfile: {
+          select: {
+            id: true,
+            userId: true,
+            businessName: true,
             communityProfile: { select: { name: true, logoKey: true } },
           },
         },
@@ -1194,7 +1207,9 @@ export class SponsorshipService {
         const myKeywords: string[] = [];
         if (spaceProfile) {
           myKeywords.push('space');
-          const spaceName = i.sponsorshipProposal?.spaceProfile?.communityProfile?.name ?? i.sponsorshipProposal?.spaceProfile?.businessName;
+          const spaceName = i.campaignId
+            ? i.spaceProfile?.communityProfile?.name ?? i.spaceProfile?.businessName
+            : i.sponsorshipProposal?.spaceProfile?.communityProfile?.name ?? i.sponsorshipProposal?.spaceProfile?.businessName;
           if (spaceName) myKeywords.push(spaceName.toLowerCase());
         } else if (isOwnerSide) {
           myKeywords.push('host', 'community');
@@ -1235,7 +1250,7 @@ export class SponsorshipService {
           counterpartLogoKey = isCampaign ? i.campaign?.brandProfile.logoKey : i.brandProfile.logoKey;
         } else {
           counterpartLogoKey = isCampaign
-            ? i.hostProfile?.communityProfile?.logoKey || null
+            ? i.spaceProfile?.communityProfile?.logoKey || i.hostProfile?.communityProfile?.logoKey || null
             : (i.sponsorshipProposal?.hostProfile?.communityProfile?.logoKey || i.sponsorshipProposal?.spaceProfile?.communityProfile?.logoKey || null);
         }
 
@@ -1247,7 +1262,7 @@ export class SponsorshipService {
           counterpartName = isCampaign ? i.campaign?.brandProfile.brandName : i.brandProfile.brandName;
         } else {
           counterpartName = isCampaign
-            ? i.hostProfile?.communityProfile?.name ?? i.hostProfile?.displayName ?? 'Community'
+            ? i.spaceProfile?.communityProfile?.name ?? i.spaceProfile?.businessName ?? i.hostProfile?.communityProfile?.name ?? i.hostProfile?.displayName ?? 'Community'
             : i.sponsorshipProposal?.hostProfile?.communityProfile?.name ??
               i.sponsorshipProposal?.hostProfile?.displayName ??
               i.sponsorshipProposal?.spaceProfile?.communityProfile?.name ??
@@ -1261,7 +1276,7 @@ export class SponsorshipService {
           proposalName,
           // Lets Brand-side threads show whether the counterpart is a Community or a Community
           // Space, per the "segregate/tag chats" requirement.
-          counterpartType: isCampaign ? 'HOST' : i.sponsorshipProposal?.spaceProfile ? 'SPACE' : 'HOST',
+          counterpartType: isCampaign ? (i.spaceProfileId ? 'SPACE' : 'HOST') : i.sponsorshipProposal?.spaceProfile ? 'SPACE' : 'HOST',
           chatStatus: i.chatStatus,
           createdAt: i.createdAt,
           chatAcceptedAt: i.chatAcceptedAt,
@@ -1328,6 +1343,14 @@ export class SponsorshipService {
             communityProfile: { select: { name: true } },
           },
         },
+        spaceProfile: {
+          select: {
+            id: true,
+            userId: true,
+            businessName: true,
+            communityProfile: { select: { name: true } },
+          },
+        },
         brandProfile: { select: { id: true, userId: true, brandName: true } },
       },
     });
@@ -1336,17 +1359,21 @@ export class SponsorshipService {
     const isCampaign = !!interest.campaignId;
     const isSpaceProposal = !isCampaign && !!interest.sponsorshipProposal?.spaceProfile;
     const participantHostProfileId = isCampaign
-      ? interest.hostProfile?.id
+      ? interest.spaceProfileId ? undefined : interest.hostProfile?.id
       : isSpaceProposal
         ? undefined
         : interest.sponsorshipProposal?.hostProfile?.id;
     const participantHostUserId = isCampaign
-      ? interest.hostProfile?.userId
+      ? interest.spaceProfileId ? undefined : interest.hostProfile?.userId
       : isSpaceProposal
         ? undefined
         : interest.sponsorshipProposal?.hostProfile?.userId;
-    const participantSpaceProfileId = isSpaceProposal ? interest.sponsorshipProposal?.spaceProfile?.id : undefined;
-    const participantSpaceUserId = isSpaceProposal ? interest.sponsorshipProposal?.spaceProfile?.userId : undefined;
+    const participantSpaceProfileId = isCampaign
+      ? interest.spaceProfile?.id
+      : isSpaceProposal ? interest.sponsorshipProposal?.spaceProfile?.id : undefined;
+    const participantSpaceUserId = isCampaign
+      ? interest.spaceProfile?.userId
+      : isSpaceProposal ? interest.sponsorshipProposal?.spaceProfile?.userId : undefined;
     const participantBrandProfileId = isCampaign ? (interest.campaign?.brandProfile?.id ?? interest.brandProfile?.id) : interest.brandProfile?.id;
     const participantBrandUserId = isCampaign ? (interest.campaign?.brandProfile?.userId ?? interest.brandProfile?.userId) : interest.brandProfile?.userId;
 
@@ -1523,14 +1550,14 @@ export class SponsorshipService {
 
     const isCampaign = !!interest.campaignId;
     const ownerUserId = isCampaign
-      ? interest.hostProfile?.userId
+      ? interest.spaceProfile?.userId ?? interest.hostProfile?.userId
       : SponsorshipService.ownerUserId(interest.sponsorshipProposal ?? {});
     const recipientUserId = isOwnerSenderType ? interest.brandProfile.userId : ownerUserId;
 
     let senderName = 'The community';
     if (isOwnerSenderType) {
       senderName = isCampaign
-        ? (interest.hostProfile?.communityProfile?.name ?? interest.hostProfile?.displayName ?? 'The community')
+        ? (interest.spaceProfile?.communityProfile?.name ?? interest.spaceProfile?.businessName ?? interest.hostProfile?.communityProfile?.name ?? interest.hostProfile?.displayName ?? 'The community')
         : SponsorshipService.ownerDisplayName(interest.sponsorshipProposal ?? {});
     } else {
       senderName = interest.brandProfile.brandName;
@@ -1575,7 +1602,7 @@ export class SponsorshipService {
     });
 
     const hostUserId = isCampaign
-      ? (interest.hostProfile?.userId ?? interest.sponsorshipProposal?.hostProfile?.userId)
+      ? (interest.spaceProfile?.userId ?? interest.hostProfile?.userId ?? interest.sponsorshipProposal?.hostProfile?.userId)
       : SponsorshipService.ownerUserId(interest.sponsorshipProposal ?? {});
     const brandUserId = isCampaign ? (interest.campaign?.brandProfile?.userId ?? interest.brandProfile?.userId) : interest.brandProfile?.userId;
     const recipientUserId = isCampaign ? hostUserId : brandUserId;
@@ -1626,7 +1653,10 @@ export class SponsorshipService {
 
   private hostNameOf(interest: any) {
     if (interest.campaignId && interest.hostProfile) {
-      return interest.hostProfile.communityProfile?.name ?? interest.hostProfile.displayName ?? 'The community';
+      return interest.spaceProfile?.communityProfile?.name ?? interest.spaceProfile?.businessName ?? interest.hostProfile.communityProfile?.name ?? interest.hostProfile.displayName ?? 'The community';
+    }
+    if (interest.campaignId && interest.spaceProfile) {
+      return interest.spaceProfile.communityProfile?.name ?? interest.spaceProfile.businessName ?? 'The Hub';
     }
     return SponsorshipService.ownerDisplayName(interest.sponsorshipProposal ?? {});
   }
@@ -1680,7 +1710,7 @@ export class SponsorshipService {
     const brandName = interest.campaign?.brandProfile?.brandName ?? interest.brandProfile?.brandName ?? 'The brand';
     const creatorName = isCampaign ? brandName : hostName;
     const targetUserId = isCampaign
-      ? (interest.hostProfile?.userId ?? interest.sponsorshipProposal?.hostProfile?.userId)
+      ? (interest.spaceProfile?.userId ?? interest.hostProfile?.userId ?? interest.sponsorshipProposal?.hostProfile?.userId)
       : interest.brandProfile?.userId;
 
     await this.postDealSystemMessage(
@@ -1751,7 +1781,7 @@ export class SponsorshipService {
     const brandName = interest.campaign?.brandProfile?.brandName ?? interest.brandProfile?.brandName ?? 'The brand';
     const creatorName = isCampaign ? brandName : hostName;
     const targetUserId = isCampaign
-      ? (interest.hostProfile?.userId ?? SponsorshipService.ownerUserId(interest.sponsorshipProposal ?? {}))
+      ? (interest.spaceProfile?.userId ?? interest.hostProfile?.userId ?? SponsorshipService.ownerUserId(interest.sponsorshipProposal ?? {}))
       : interest.brandProfile?.userId;
 
     await this.postDealSystemMessage(
@@ -1781,18 +1811,20 @@ export class SponsorshipService {
   }
 
   async approveDeal(userId: string, interestId: string) {
-    const { interest, isHost, isBrand } = await this.getInterestForParticipant(userId, interestId);
+    const { interest, isHost, isSpace, isBrand } = await this.getInterestForParticipant(userId, interestId);
     const isCampaign = !!interest.campaignId;
     if (isCampaign) {
-      if (!isHost) {
-        throw new ForbiddenException('Only the community can accept the deal for a campaign');
+      if (!isHost && !isSpace) {
+        throw new ForbiddenException('Only the community or Hub can accept the deal for a campaign');
       }
     } else {
       if (!isBrand) {
         throw new ForbiddenException('Only the brand can approve the deal');
       }
     }
-    const senderType = isCampaign ? ChatSenderType.HOST : ChatSenderType.BRAND;
+    const senderType = isCampaign
+      ? interest.spaceProfileId ? ChatSenderType.SPACE : ChatSenderType.HOST
+      : ChatSenderType.BRAND;
 
     const existing = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
     if (!existing) throw new NotFoundException('No deal found for this chat');
@@ -1847,18 +1879,20 @@ export class SponsorshipService {
   }
 
   async requestDealChanges(userId: string, interestId: string, dto: RequestDealChangesDto) {
-    const { interest, isHost, isBrand } = await this.getInterestForParticipant(userId, interestId);
+    const { interest, isHost, isSpace, isBrand } = await this.getInterestForParticipant(userId, interestId);
     const isCampaign = !!interest.campaignId;
     if (isCampaign) {
-      if (!isHost) {
-        throw new ForbiddenException('Only the community can request changes for a campaign');
+      if (!isHost && !isSpace) {
+        throw new ForbiddenException('Only the community or Hub can request changes for a campaign');
       }
     } else {
       if (!isBrand) {
         throw new ForbiddenException('Only the brand can request changes');
       }
     }
-    const senderType = isCampaign ? ChatSenderType.HOST : ChatSenderType.BRAND;
+    const senderType = isCampaign
+      ? interest.spaceProfileId ? ChatSenderType.SPACE : ChatSenderType.HOST
+      : ChatSenderType.BRAND;
 
     const existing = await this.prisma.sponsorshipDeal.findUnique({ where: { sponsorshipInterestId: interest.id } });
     if (!existing) throw new NotFoundException('No deal found for this chat');
@@ -1992,7 +2026,9 @@ export class SponsorshipService {
     if (finalStatus === 'PENDING') {
       await this.postDealSystemMessage(
         interest.id,
-        interest.campaignId ? ChatSenderType.HOST : SponsorshipService.ownerSenderType(interest.sponsorshipProposal ?? {}),
+        interest.campaignId
+          ? interest.spaceProfileId ? ChatSenderType.SPACE : ChatSenderType.HOST
+          : SponsorshipService.ownerSenderType(interest.sponsorshipProposal ?? {}),
         userId,
         `${this.hostNameOf(interest)} submitted the deliverables report.`,
       );
@@ -2019,7 +2055,9 @@ export class SponsorshipService {
         `${brandName} ${brandStatus} the deliverables report.`,
       );
 
-      const hostUserId = interest.campaignId ? interest.hostProfile?.userId : SponsorshipService.ownerUserId(interest.sponsorshipProposal ?? {});
+      const hostUserId = interest.campaignId
+        ? interest.spaceProfile?.userId ?? interest.hostProfile?.userId
+        : SponsorshipService.ownerUserId(interest.sponsorshipProposal ?? {});
       if (hostUserId) {
         void this.notificationsService
           .create(
@@ -2119,7 +2157,9 @@ export class SponsorshipService {
 
     void this.notificationsService
       .create(
-        interest.campaignId ? interest.hostProfile?.userId : SponsorshipService.ownerUserId(interest.sponsorshipProposal ?? {}),
+        interest.campaignId
+          ? interest.spaceProfile?.userId ?? interest.hostProfile?.userId
+          : SponsorshipService.ownerUserId(interest.sponsorshipProposal ?? {}),
         'sponsorship_deal_paid',
         interest.brandProfile.brandName,
         `💳 Paid ₹${paidAmount.toLocaleString('en-IN')} for the deal: ${deal.projectName}`,
@@ -2177,6 +2217,9 @@ export class SponsorshipService {
             hostProfile: {
               select: { id: true, displayName: true, communityProfile: { select: { name: true } } },
             },
+            spaceProfile: {
+              select: { businessName: true, communityProfile: { select: { name: true } } },
+            },
           },
         },
       },
@@ -2201,7 +2244,12 @@ export class SponsorshipService {
 
         let communityName = 'Community';
         if (isCampaign) {
-          communityName = d.sponsorshipInterest.hostProfile?.communityProfile?.name ?? d.sponsorshipInterest.hostProfile?.displayName ?? 'Community';
+          communityName =
+            d.sponsorshipInterest.spaceProfile?.communityProfile?.name ??
+            d.sponsorshipInterest.spaceProfile?.businessName ??
+            d.sponsorshipInterest.hostProfile?.communityProfile?.name ??
+            d.sponsorshipInterest.hostProfile?.displayName ??
+            'Community';
         } else {
           communityName = SponsorshipService.ownerDisplayName(d.sponsorshipInterest.sponsorshipProposal ?? {});
         }

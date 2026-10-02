@@ -9,6 +9,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -141,14 +142,15 @@ export class CampaignsController {
   }
 
   @Post('published/:id/interest')
-  @Roles('HOST')
+  @Roles('HOST', 'SPACE_PARTNER')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Express interest in a brand campaign' })
   @ApiCreatedResponse({ description: 'Interest recorded.' })
   markInterest(
     @GetUser('id') userId: string,
     @Param('id', ParseUUIDPipe) campaignId: string,
+    @Query('role') role?: 'HOST' | 'SPACE',
   ) {
-    return this.campaignsService.markInterest(userId, campaignId);
+    return this.campaignsService.markInterest(userId, campaignId, role);
   }
 }
