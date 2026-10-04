@@ -53,6 +53,7 @@ function makePrisma() {
     hostPayoutAccount: { findUnique: jest.fn(), update: jest.fn() },
     hostCommunityProfile: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn(), create: jest.fn() },
     brandProfile: { findMany: jest.fn() },
+    campaign: { findUnique: jest.fn(), update: jest.fn() },
     adminAnnouncement: { create: jest.fn().mockResolvedValue({ id: 'announcement-uuid' }), findMany: jest.fn(), count: jest.fn() },
     sponsorshipInterest: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn(), count: jest.fn() },
     sponsorshipDeal: { findMany: jest.fn() },
@@ -1522,6 +1523,52 @@ describe('AdminService', () => {
       expect(result).toEqual([
         expect.objectContaining({ id: 'deal-camp-1', proposalName: 'Campus Campaign', communityName: 'Coding Community', brandName: 'TechBrand', status: 'APPROVED' }),
       ]);
+    });
+  });
+
+  describe('updateCampaign()', () => {
+    const campaign = {
+      id: 'camp-1',
+      name: 'Campus Campaign',
+      status: 'PUBLISHED',
+      startDate: new Date('2026-10-10T00:00:00.000Z'),
+      endDate: new Date('2026-10-20T00:00:00.000Z'),
+      brandProfile: { userId: 'brand-user' },
+    };
+
+    it('updates campaign brief fields, records an audit event, and notifies the brand without changing status', async () => {
+      prisma.campaign.findUnique
+        .mockResolvedValueOnce(campaign)
+        .mockResolvedValueOnce({ ...campaign, name: 'Updated Campaign' });
+      prisma.campaign.update.mockResolvedValue({ ...campaign, name: 'Updated Campaign' });
+
+      await service.updateCampaign('camp-1', adminId, { name: 'Updated Campaign', budgetAmount: 75000 });
+
+      expect(prisma.campaign.update).toHaveBeenCalledWith({
+        where: { id: 'camp-1' },
+        data: { name: 'Updated Campaign', budgetAmount: 75000 },
+      });
+      expect(mockAuditLog.log).toHaveBeenCalledWith(expect.objectContaining({
+        actorId: adminId,
+        action: 'CAMPAIGN_EDITED_BY_ADMIN',
+        entityType: 'CAMPAIGN',
+        entityId: 'camp-1',
+        metadata: expect.objectContaining({ changedFields: ['name', 'budgetAmount'] }),
+      }));
+      expect((service as any).notificationsService.create).toHaveBeenCalledWith(
+        'brand-user',
+        'campaign_updated_by_admin',
+        'Campaign Updated',
+        expect.stringContaining('Updated Campaign'),
+        { campaignId: 'camp-1', changedFields: ['name', 'budgetAmount'] },
+      );
+    });
+
+    it('rejects an end date before the start date', async () => {
+      prisma.campaign.findUnique.mockResolvedValue(campaign);
+
+      await expect(service.updateCampaign('camp-1', adminId, { endDate: '2026-10-01T00:00:00.000Z' })).rejects.toThrow(BadRequestException);
+      expect(prisma.campaign.update).not.toHaveBeenCalled();
     });
   });
 

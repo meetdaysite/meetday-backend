@@ -2332,6 +2332,9 @@ enum AuditAction {
   BRAND_PROFILE_APPROVED
   BRAND_PROFILE_REJECTED
 
+  // Brand campaign lifecycle
+  CAMPAIGN_EDITED_BY_ADMIN
+
   // Orders / payments (PMLA / GST)
   ORDER_CREATED
   ORDER_CONFIRMED
