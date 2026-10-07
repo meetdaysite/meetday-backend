@@ -32,6 +32,7 @@ import { UpdateInterestDto } from './dto/update-interest.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
 import { ListSponsorshipsQueryDto } from './dto/list-sponsorships-query.dto';
 import { ListCampaignsQueryDto } from './dto/list-campaigns-query.dto';
+import { UpdateAdminCampaignDto } from './dto/update-admin-campaign.dto';
 import { ListCommunityProfilesQueryDto } from './dto/list-community-profiles-query.dto';
 import { MarkSponsorshipDealPaidOfflineDto } from './dto/mark-sponsorship-deal-paid-offline.dto';
 import { ListBrandsQueryDto, BrandProfileStatus } from './dto/list-brands-query.dto';
@@ -61,7 +62,6 @@ import { SendSpaceChatMessageDto } from '../spaces/dto/send-space-chat-message.d
 import { ListSpaceHostChatsQueryDto } from '../space-host-interest/dto/list-space-host-chats-query.dto';
 import { SendSpaceHostChatMessageDto } from '../space-host-interest/dto/send-space-host-chat-message.dto';
 import { CreateCollaborationMessageDto } from '../community-collaboration/dto/create-collaboration-message.dto';
-import { UpdateCampaignDto } from '../campaigns/dto/update-campaign.dto';
 import { SponsorshipInvoicePdfService } from '../sponsorship/sponsorship-invoice-pdf.service';
 import { SponsorshipReportPdfService } from '../sponsorship/sponsorship-report-pdf.service';
 import { RESOLVED_SYSTEM_MESSAGE } from '../meetday-chat/meetday-chat.service';
@@ -1672,6 +1672,13 @@ export class AdminService {
             user: { select: { id: true, firstName: true, lastName: true, email: true } },
           },
         },
+        brandProfile: {
+          select: {
+            id: true,
+            brandName: true,
+            user: { select: { id: true, firstName: true, lastName: true, email: true } },
+          },
+        },
         interests: {
           orderBy: { createdAt: 'desc' },
           select: {
@@ -1892,7 +1899,11 @@ export class AdminService {
   async approveSponsorship(id: string, adminId: string) {
     const proposal = await this.prisma.sponsorshipProposal.findUnique({
       where: { id },
-      include: { hostProfile: { include: { user: { select: { id: true, email: true, firstName: true } } } } },
+      include: {
+        hostProfile: { include: { user: { select: { id: true, email: true, firstName: true } } } },
+        spaceProfile: { include: { user: { select: { id: true, email: true, firstName: true } } } },
+        brandProfile: { include: { user: { select: { id: true, email: true, firstName: true } } } },
+      },
     });
     if (!proposal) throw new NotFoundException('Sponsorship proposal not found');
     if (proposal.status !== 'UNDER_REVIEW')
@@ -1905,7 +1916,7 @@ export class AdminService {
     if (count === 0)
       throw new BadRequestException('Proposal is no longer under review — it may have just been edited');
 
-    const hostUser = proposal.hostProfile.user;
+    const ownerUser = proposal.hostProfile?.user ?? proposal.spaceProfile?.user ?? proposal.brandProfile?.user;
 
     this.auditLogService.log({
       actorId: adminId,
@@ -1916,15 +1927,17 @@ export class AdminService {
       metadata: { name: proposal.name },
     });
 
-    void this.notificationsService
-      .create(
-        hostUser.id,
-        'sponsorship_approved',
-        'Sponsorship Proposal Approved',
-        `Your proposal "${proposal.name}" has been approved and is now published.`,
-        { proposalId: id },
-      )
-      .catch((err) => this.logger.error('Failed to create sponsorship_approved notification', err));
+    if (ownerUser) {
+      void this.notificationsService
+        .create(
+          ownerUser.id,
+          'sponsorship_approved',
+          'Sponsorship Proposal Approved',
+          `Your proposal "${proposal.name}" has been approved and is now published.`,
+          { proposalId: id },
+        )
+        .catch((err) => this.logger.error('Failed to create sponsorship_approved notification', err));
+    }
 
     return { message: 'Sponsorship proposal approved successfully' };
   }
@@ -1932,7 +1945,11 @@ export class AdminService {
   async rejectSponsorship(id: string, adminId: string, dto: RejectEventDto) {
     const proposal = await this.prisma.sponsorshipProposal.findUnique({
       where: { id },
-      include: { hostProfile: { include: { user: { select: { id: true, email: true, firstName: true } } } } },
+      include: {
+        hostProfile: { include: { user: { select: { id: true, email: true, firstName: true } } } },
+        spaceProfile: { include: { user: { select: { id: true, email: true, firstName: true } } } },
+        brandProfile: { include: { user: { select: { id: true, email: true, firstName: true } } } },
+      },
     });
     if (!proposal) throw new NotFoundException('Sponsorship proposal not found');
     if (proposal.status !== 'UNDER_REVIEW')
@@ -1945,7 +1962,7 @@ export class AdminService {
     if (count === 0)
       throw new BadRequestException('Proposal is no longer under review — it may have just been edited');
 
-    const hostUser = proposal.hostProfile.user;
+    const ownerUser = proposal.hostProfile?.user ?? proposal.spaceProfile?.user ?? proposal.brandProfile?.user;
 
     this.auditLogService.log({
       actorId: adminId,
@@ -1956,15 +1973,17 @@ export class AdminService {
       metadata: { name: proposal.name, remark: dto.remark },
     });
 
-    void this.notificationsService
-      .create(
-        hostUser.id,
-        'sponsorship_rejected',
-        'Sponsorship Proposal Not Approved',
-        `Your proposal "${proposal.name}" was not approved. Remark: ${dto.remark}`,
-        { proposalId: id },
-      )
-      .catch((err) => this.logger.error('Failed to create sponsorship_rejected notification', err));
+    if (ownerUser) {
+      void this.notificationsService
+        .create(
+          ownerUser.id,
+          'sponsorship_rejected',
+          'Sponsorship Proposal Not Approved',
+          `Your proposal "${proposal.name}" was not approved. Remark: ${dto.remark}`,
+          { proposalId: id },
+        )
+        .catch((err) => this.logger.error('Failed to create sponsorship_rejected notification', err));
+    }
 
     return { message: 'Sponsorship proposal rejected successfully' };
   }
@@ -5434,6 +5453,57 @@ export class AdminService {
     return { message: 'Campaign rejected successfully' };
   }
 
+  async updateCampaign(id: string, adminId: string, dto: UpdateAdminCampaignDto) {
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id },
+      include: { brandProfile: { select: { userId: true } } },
+    });
+    if (!campaign) throw new NotFoundException('Campaign not found');
+
+    const startDate = dto.startDate !== undefined ? new Date(dto.startDate) : campaign.startDate;
+    const endDate = dto.endDate !== undefined ? new Date(dto.endDate) : campaign.endDate;
+    if (endDate < startDate) throw new BadRequestException('End date cannot be before start date');
+
+    const data: Prisma.CampaignUpdateInput = {
+      ...(dto.name !== undefined && { name: dto.name }),
+      ...(dto.goal !== undefined && { goal: dto.goal }),
+      ...(dto.locations !== undefined && { locations: dto.locations }),
+      ...(dto.audience !== undefined && { audience: dto.audience }),
+      ...(dto.startDate !== undefined && { startDate }),
+      ...(dto.endDate !== undefined && { endDate }),
+      ...(dto.offerType !== undefined && { offerType: dto.offerType }),
+      ...(dto.budgetAmount !== undefined && { budgetAmount: dto.budgetAmount }),
+      ...(dto.budgetCurrency !== undefined && { budgetCurrency: dto.budgetCurrency }),
+      ...(dto.barterElements !== undefined && { barterElements: dto.barterElements }),
+      ...(dto.description !== undefined && { description: dto.description }),
+    };
+    const changedFields = Object.keys(data);
+    if (!changedFields.length) throw new BadRequestException('No campaign changes provided');
+
+    await this.prisma.campaign.update({ where: { id }, data });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'CAMPAIGN_EDITED_BY_ADMIN',
+      entityType: 'CAMPAIGN',
+      entityId: id,
+      metadata: { name: campaign.name, changedFields },
+    });
+
+    void this.notificationsService
+      .create(
+        campaign.brandProfile.userId,
+        'campaign_updated_by_admin',
+        'Campaign Updated',
+        `Meetday updated your campaign "${dto.name ?? campaign.name}".`,
+        { campaignId: id, changedFields },
+      )
+      .catch((err) => this.logger.error('Failed to create campaign_updated_by_admin notification', err));
+
+    return this.getCampaignDetail(id);
+  }
+
   async listPendingCampaigns(page: number, limit: number) {
     const where = { status: 'UNDER_REVIEW' as const };
     const [campaigns, total] = await Promise.all([
@@ -5473,72 +5543,6 @@ export class AdminService {
     });
     if (!campaign) throw new NotFoundException('Campaign not found');
     return campaign;
-  }
-
-  async updateCampaignAsAdmin(id: string, adminId: string, dto: UpdateCampaignDto) {
-    const existing = await this.prisma.campaign.findUnique({
-      where: { id },
-      include: {
-        brandProfile: {
-          select: {
-            id: true,
-            brandName: true,
-            user: { select: { id: true, firstName: true, lastName: true, email: true } },
-          },
-        },
-      },
-    });
-    if (!existing) throw new NotFoundException('Campaign not found');
-
-    const updated = await this.prisma.campaign.update({
-      where: { id },
-      data: {
-        ...(dto.name !== undefined && { name: dto.name }),
-        ...(dto.goal !== undefined && { goal: dto.goal }),
-        ...(dto.locations !== undefined && { locations: dto.locations }),
-        ...(dto.audience !== undefined && { audience: dto.audience }),
-        ...(dto.startDate !== undefined && { startDate: dto.startDate ? new Date(dto.startDate) : undefined }),
-        ...(dto.endDate !== undefined && { endDate: dto.endDate ? new Date(dto.endDate) : undefined }),
-        ...(dto.offerType !== undefined && { offerType: dto.offerType }),
-        ...(dto.budgetAmount !== undefined && { budgetAmount: dto.budgetAmount }),
-        ...(dto.budgetCurrency !== undefined && { budgetCurrency: dto.budgetCurrency }),
-        ...(dto.barterElements !== undefined && { barterElements: dto.barterElements }),
-        ...(dto.description !== undefined && { description: dto.description }),
-        ...(dto.status !== undefined && { status: dto.status }),
-      },
-      include: {
-        brandProfile: {
-          select: {
-            id: true,
-            brandName: true,
-            user: { select: { firstName: true, lastName: true, email: true } },
-          },
-        },
-      },
-    });
-
-    this.auditLogService.log({
-      actorId: adminId,
-      actorRole: 'ADMIN',
-      action: 'CAMPAIGN_UPDATED' as any,
-      entityType: 'CAMPAIGN',
-      entityId: id,
-      metadata: { name: updated.name },
-    });
-
-    if (existing.brandProfile?.user?.id) {
-      void this.notificationsService
-        .create(
-          existing.brandProfile.user.id,
-          'campaign_updated',
-          'Campaign Updated',
-          `Your campaign "${updated.name}" has been updated by an admin.`,
-          { campaignId: id },
-        )
-        .catch((err) => this.logger.error('Failed to create campaign_updated notification', err));
-    }
-
-    return updated;
   }
 
   async listAllCampaigns(query: ListCampaignsQueryDto) {

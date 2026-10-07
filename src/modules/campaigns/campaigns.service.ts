@@ -183,17 +183,33 @@ export class CampaignsService {
     return campaign;
   }
 
-  async markInterest(userId: string, campaignId: string) {
-    const hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
-    const hostProfile = await this.prisma.hostProfile.findUnique({
-      where: { id: hostProfileId },
-      include: { communityProfile: true },
-    });
-    if (!hostProfile) {
-      throw new NotFoundException('Host profile not found');
-    }
-    if (hostProfile.approvalStatus !== 'APPROVED') {
-      throw new ForbiddenException('Your community profile must be approved by an admin to express interest in a campaign.');
+  async markInterest(userId: string, campaignId: string, role: 'HOST' | 'SPACE' = 'HOST') {
+    let hostProfileId: string | undefined;
+    let spaceProfileId: string | undefined;
+    let interestedPartyName = 'A community';
+
+    if (role === 'SPACE') {
+      const spaceProfile = await this.prisma.spaceProfile.findUnique({
+        where: { userId },
+        include: { communityProfile: true },
+      });
+      if (!spaceProfile) throw new NotFoundException('Space Partner profile not found');
+      if (spaceProfile.communityProfile?.approvalStatus !== 'APPROVED') {
+        throw new ForbiddenException('Your Hub profile must be approved by an admin to express interest in a campaign.');
+      }
+      spaceProfileId = spaceProfile.id;
+      interestedPartyName = spaceProfile.communityProfile.name || spaceProfile.businessName || 'A Hub';
+    } else {
+      hostProfileId = await this.teamAccessService.resolveHostProfileId(userId);
+      const hostProfile = await this.prisma.hostProfile.findUnique({
+        where: { id: hostProfileId },
+        include: { communityProfile: true },
+      });
+      if (!hostProfile) throw new NotFoundException('Host profile not found');
+      if (hostProfile.approvalStatus !== 'APPROVED') {
+        throw new ForbiddenException('Your community profile must be approved by an admin to express interest in a campaign.');
+      }
+      interestedPartyName = hostProfile.communityProfile?.name ?? hostProfile.displayName ?? interestedPartyName;
     }
 
     const campaign = await this.prisma.campaign.findUnique({
@@ -207,7 +223,7 @@ export class CampaignsService {
     const existingInterest = await this.prisma.sponsorshipInterest.findFirst({
       where: {
         campaignId,
-        hostProfileId: hostProfile.id,
+        ...(spaceProfileId ? { spaceProfileId } : { hostProfileId }),
       },
     });
 
@@ -218,21 +234,19 @@ export class CampaignsService {
     const interest = await this.prisma.sponsorshipInterest.create({
       data: {
         campaignId,
-        hostProfileId: hostProfile.id,
+        ...(spaceProfileId ? { spaceProfileId } : { hostProfileId }),
         brandProfileId: campaign.brandProfileId,
         chatStatus: 'REQUESTED',
       },
     });
 
-    const communityName = hostProfile.communityProfile?.name ?? hostProfile.displayName ?? 'A community';
-
-    // Notify the Brand of host interest in their campaign
+    const isHub = role === 'SPACE';
     void this.notificationsService
       .create(
         campaign.brandProfile.userId,
-        'host_interested_in_campaign',
-        `${communityName} is interested!`,
-        `This community is interested in your campaign: "${campaign.name}". Check your campaign requests.`,
+        isHub ? 'space_interested_in_campaign' : 'host_interested_in_campaign',
+        `${interestedPartyName} is interested!`,
+        `${interestedPartyName} is interested in your campaign: "${campaign.name}". Check your campaign requests.`,
         { campaignId, sponsorshipInterestId: interest.id },
       )
       .catch((err) => this.logger.error('Failed to notify brand of host interest', err));
@@ -241,7 +255,7 @@ export class CampaignsService {
     void this.notificationsService
       .create(
         userId,
-        'host_interest_confirmed',
+        isHub ? 'space_interest_confirmed' : 'host_interest_confirmed',
         'Interest sent!',
         'The brand has been notified of your interest.',
         { campaignId, sponsorshipInterestId: interest.id },

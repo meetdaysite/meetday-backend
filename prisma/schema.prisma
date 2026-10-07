@@ -486,6 +486,7 @@ model BrandProfile {
   campaigns      Campaign[]
   teamMembers    BrandTeamMember[]
   brandCommunityCollaborationInterests BrandCommunityCollaborationInterest[]
+  sponsorships   SponsorshipProposal[]
 
   approvalStatus HostApprovalStatus @default(PENDING)
 
@@ -539,6 +540,7 @@ model SpaceProfile {
 
   communityProfile     SpaceCommunityProfile?
   sponsorshipProposals SponsorshipProposal[]
+  campaignInterests    SponsorshipInterest[]
 
   // Requests this Space Partner sent to Communities wanting to partner (reverse of SpaceInterest,
   // where this Space is the target/owner instead of the requester).
@@ -1478,6 +1480,7 @@ model SponsorshipProposal {
   id             String  @id @default(uuid())
   hostProfileId  String?
   spaceProfileId String?
+  brandProfileId String?
 
   name            String
   about           String    @db.Text
@@ -1520,10 +1523,12 @@ model SponsorshipProposal {
 
   hostProfile  HostProfile?          @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
   spaceProfile SpaceProfile?         @relation(fields: [spaceProfileId], references: [id], onDelete: Cascade)
+  brandProfile BrandProfile?         @relation(fields: [brandProfileId], references: [id], onDelete: Cascade)
   interests    SponsorshipInterest[]
 
   @@index([hostProfileId])
   @@index([spaceProfileId])
+  @@index([brandProfileId])
   @@index([status])
   @@map("sponsorship_proposals")
 }
@@ -1544,11 +1549,13 @@ model SponsorshipInterest {
   campaignId            String?
   brandProfileId        String
   hostProfileId         String?
+  spaceProfileId        String?
 
   sponsorshipProposal SponsorshipProposal? @relation(fields: [sponsorshipProposalId], references: [id], onDelete: Cascade)
   brandProfile        BrandProfile         @relation(fields: [brandProfileId], references: [id], onDelete: Cascade)
   campaign            Campaign?            @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   hostProfile         HostProfile?         @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
+  spaceProfile        SpaceProfile?        @relation(fields: [spaceProfileId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
 
@@ -1571,8 +1578,10 @@ model SponsorshipInterest {
   deal SponsorshipDeal?
 
   @@unique([sponsorshipProposalId, brandProfileId])
+  @@unique([campaignId, spaceProfileId])
   @@index([sponsorshipProposalId])
   @@index([brandProfileId])
+  @@index([spaceProfileId])
   @@index([chatStatus])
   @@map("sponsorship_interests")
 }
@@ -2322,6 +2331,9 @@ enum AuditAction {
   // Brand profile lifecycle
   BRAND_PROFILE_APPROVED
   BRAND_PROFILE_REJECTED
+
+  // Brand campaign lifecycle
+  CAMPAIGN_EDITED_BY_ADMIN
 
   // Orders / payments (PMLA / GST)
   ORDER_CREATED

@@ -116,13 +116,13 @@ export class CreateProposalDto {
   sponsorshipType?: string;
 
   @ApiPropertyOptional({
-    enum: ['HOST', 'SPACE'],
+    enum: ['HOST', 'SPACE', 'BRAND'],
     description:
       'Disambiguates which profile to create/act as when the same account has both a Host and a ' +
       'Space Partner profile. Only used on create (POST) — ignored on update/submit/delete, which ' +
       'are scoped to an existing proposal id instead.',
   })
   @IsOptional()
-  @IsIn(['HOST', 'SPACE'])
-  actorType?: 'HOST' | 'SPACE';
+  @IsIn(['HOST', 'SPACE', 'BRAND'])
+  actorType?: 'HOST' | 'SPACE' | 'BRAND';
 }

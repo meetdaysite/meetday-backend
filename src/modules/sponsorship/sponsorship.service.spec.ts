@@ -186,6 +186,33 @@ describe('SponsorshipService — TriChat', () => {
       expect(mockNotifications.create).toHaveBeenCalledWith('brand-user', expect.any(String), expect.any(String), expect.any(String), expect.any(Object));
     });
 
+    it('sends as SPACE when the caller owns a Hub campaign interest', async () => {
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue({
+        id: 'campaign-interest-1',
+        chatStatus: 'ACCEPTED',
+        campaignId: 'campaign-1',
+        campaign: { id: 'campaign-1', name: 'Summer campaign', brandProfile: { id: 'brand-1', userId: 'brand-user', brandName: 'Acme' } },
+        spaceProfileId: 'space-1',
+        spaceProfile: { id: 'space-1', userId: 'space-user', businessName: 'Central Hub', communityProfile: { name: 'Central Hub' } },
+        hostProfile: null,
+        brandProfile: { id: 'brand-1', userId: 'brand-user', brandName: 'Acme' },
+      });
+      prisma.sponsorshipChatMessage.create.mockResolvedValue({ id: 'msg-space', createdAt: new Date() });
+
+      await service.sendChatMessage('space-user', 'campaign-interest-1', { content: 'Ready to discuss the campaign' });
+
+      expect(prisma.sponsorshipChatMessage.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            sponsorshipInterestId: 'campaign-interest-1',
+            senderType: 'SPACE',
+            senderId: 'space-user',
+          }),
+        }),
+      );
+      expect(mockNotifications.create).toHaveBeenCalledWith('brand-user', expect.any(String), expect.any(String), expect.any(String), expect.any(Object));
+    });
+
     it('rejects a participant not on this thread', async () => {
       prisma.sponsorshipInterest.findUnique.mockResolvedValue(baseInterest);
       await expect(service.sendChatMessage('someone-else', 'interest-1', { content: 'hi' })).rejects.toThrow(ForbiddenException);
@@ -565,6 +592,19 @@ describe('SponsorshipService — TriChat', () => {
       brandProfile: { id: 'brand-1', userId: 'brand-user', brandName: 'Acme Brand' },
     };
 
+    const hubCampaignInterest = {
+      ...campaignInterest,
+      id: 'interest-hub-camp',
+      hostProfile: null,
+      spaceProfileId: 'space-1',
+      spaceProfile: {
+        id: 'space-1',
+        userId: 'space-user',
+        businessName: 'Central Hub',
+        communityProfile: { name: 'Central Hub' },
+      },
+    };
+
     const dealDto = {
       projectName: 'Summer Campaign Deal',
       startDate: '2026-06-01',
@@ -630,6 +670,23 @@ describe('SponsorshipService — TriChat', () => {
 
         const result = await service.approveDeal('host-user', 'interest-camp');
         expect(result.status).toBe('APPROVED');
+      });
+
+      it('allows Hub to approve a campaign deal and records the SPACE sender identity', async () => {
+        prisma.sponsorshipInterest.findUnique.mockResolvedValue(hubCampaignInterest);
+        prisma.sponsorshipDeal.findUnique.mockResolvedValue({ id: 'deal-hub', status: 'PENDING_APPROVAL', projectName: 'Campaign Deal' });
+        prisma.sponsorshipDeal.update.mockResolvedValue({ id: 'deal-hub', status: 'APPROVED' });
+        prisma.sponsorshipChatMessage.create.mockResolvedValue({ id: 'msg-hub', createdAt: new Date() });
+        prisma.sponsorshipInterest.update.mockResolvedValue({});
+        prisma.user.findMany.mockResolvedValue([]);
+
+        const result = await service.approveDeal('space-user', 'interest-hub-camp');
+
+        expect(result.status).toBe('APPROVED');
+        expect(prisma.sponsorshipChatMessage.create).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ senderType: 'SPACE', senderId: 'space-user' }) }),
+        );
+        expect(mockNotifications.create).toHaveBeenCalledWith('brand-user', 'sponsorship_deal_locked', expect.any(String), expect.any(String), expect.any(Object));
       });
     });
 

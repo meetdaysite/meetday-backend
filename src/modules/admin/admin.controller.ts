@@ -56,6 +56,7 @@ import { SetInterestCategoriesDto } from './dto/set-interest-categories.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
 import { ListSponsorshipsQueryDto } from './dto/list-sponsorships-query.dto';
 import { ListCampaignsQueryDto } from './dto/list-campaigns-query.dto';
+import { UpdateAdminCampaignDto } from './dto/update-admin-campaign.dto';
 import { ListCommunityProfilesQueryDto } from './dto/list-community-profiles-query.dto';
 import { ListBrandsQueryDto } from './dto/list-brands-query.dto';
 import { CreateAdminSponsorshipDto } from './dto/create-admin-sponsorship.dto';
@@ -88,7 +89,6 @@ import { SendChatMessageDto } from '../sponsorship/dto/send-chat-message.dto';
 import { UpdateChatMessageDto } from '../sponsorship/dto/update-chat-message.dto';
 import { ListSponsorshipDealsQueryDto } from '../sponsorship/dto/list-sponsorship-deals-query.dto';
 import { MarkSponsorshipDealPaidOfflineDto } from './dto/mark-sponsorship-deal-paid-offline.dto';
-import { UpdateCampaignDto } from '../campaigns/dto/update-campaign.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth('firebase-token')
@@ -2473,16 +2473,21 @@ export class AdminController {
 
   @Patch('campaigns/:id')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN')
-  @ApiOperation({ summary: 'Update a brand campaign directly (admin)' })
+  @ApiOperation({
+    summary: 'Edit a brand campaign',
+    description: 'Updates campaign brief fields without changing its review or publication status.',
+  })
   @ApiParam({ name: 'id', description: 'Campaign UUID' })
-  @ApiOkResponse({ description: 'Campaign updated.' })
+  @ApiBody({ type: UpdateAdminCampaignDto })
+  @ApiOkResponse({ description: 'Updated campaign details.' })
   @ApiNotFoundResponse({ description: 'Campaign not found.' })
+  @ApiBadRequestResponse({ description: 'Invalid campaign details.' })
   updateCampaign(
     @Param('id', ParseUUIDPipe) id: string,
     @GetUser('id') adminId: string,
-    @Body() dto: UpdateCampaignDto,
+    @Body() dto: UpdateAdminCampaignDto,
   ) {
-    return this.adminService.updateCampaignAsAdmin(id, adminId, dto);
+    return this.adminService.updateCampaign(id, adminId, dto);
   }
 
   @Post('community-profiles/:id/approve')
