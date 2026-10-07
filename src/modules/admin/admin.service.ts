@@ -61,6 +61,7 @@ import { SendSpaceChatMessageDto } from '../spaces/dto/send-space-chat-message.d
 import { ListSpaceHostChatsQueryDto } from '../space-host-interest/dto/list-space-host-chats-query.dto';
 import { SendSpaceHostChatMessageDto } from '../space-host-interest/dto/send-space-host-chat-message.dto';
 import { CreateCollaborationMessageDto } from '../community-collaboration/dto/create-collaboration-message.dto';
+import { UpdateCampaignDto } from '../campaigns/dto/update-campaign.dto';
 import { SponsorshipInvoicePdfService } from '../sponsorship/sponsorship-invoice-pdf.service';
 import { SponsorshipReportPdfService } from '../sponsorship/sponsorship-report-pdf.service';
 import { RESOLVED_SYSTEM_MESSAGE } from '../meetday-chat/meetday-chat.service';
@@ -2157,6 +2158,10 @@ export class AdminService {
     centreShowcaseImageKeys: true,
     videoLink: true,
     proposalPdfKey: true,
+    popupDays: true,
+    popupPrice: true,
+    brandingDays: true,
+    brandingPrice: true,
     pastEvents: true,
     brandsWorkedWith: true,
     approvalStatus: true,
@@ -4660,6 +4665,11 @@ export class AdminService {
         activeLocations: dto.activeLocations ?? [],
         centreShowcaseImageKeys: dto.centreShowcaseImageKeys ?? [],
         videoLink: dto.videoLink,
+        proposalPdfKey: dto.proposalPdfKey,
+        popupDays: dto.popupDays,
+        popupPrice: dto.popupPrice,
+        brandingDays: dto.brandingDays,
+        brandingPrice: dto.brandingPrice,
         approvalStatus: 'APPROVED',
         reviewedBy: adminId,
         reviewedAt: new Date(),
@@ -4738,6 +4748,11 @@ export class AdminService {
         ...(dto.activeLocations !== undefined && { activeLocations: dto.activeLocations }),
         ...(dto.centreShowcaseImageKeys !== undefined && { centreShowcaseImageKeys: dto.centreShowcaseImageKeys }),
         ...(dto.videoLink !== undefined && { videoLink: dto.videoLink }),
+        ...(dto.proposalPdfKey !== undefined && { proposalPdfKey: dto.proposalPdfKey || null }),
+        ...(dto.popupDays !== undefined && { popupDays: dto.popupDays || null }),
+        ...(dto.popupPrice !== undefined && { popupPrice: dto.popupPrice || null }),
+        ...(dto.brandingDays !== undefined && { brandingDays: dto.brandingDays || null }),
+        ...(dto.brandingPrice !== undefined && { brandingPrice: dto.brandingPrice || null }),
         ...(dto.categoryIds !== undefined && {
           categories: {
             deleteMany: {},
@@ -4922,6 +4937,11 @@ export class AdminService {
           ...(fieldChanges.activeLocations !== undefined && { activeLocations: fieldChanges.activeLocations }),
           ...(fieldChanges.centreShowcaseImageKeys !== undefined && { centreShowcaseImageKeys: fieldChanges.centreShowcaseImageKeys }),
           ...(fieldChanges.videoLink !== undefined && { videoLink: fieldChanges.videoLink }),
+          ...(fieldChanges.proposalPdfKey !== undefined && { proposalPdfKey: fieldChanges.proposalPdfKey }),
+          ...(fieldChanges.popupDays !== undefined && { popupDays: fieldChanges.popupDays }),
+          ...(fieldChanges.popupPrice !== undefined && { popupPrice: fieldChanges.popupPrice }),
+          ...(fieldChanges.brandingDays !== undefined && { brandingDays: fieldChanges.brandingDays }),
+          ...(fieldChanges.brandingPrice !== undefined && { brandingPrice: fieldChanges.brandingPrice }),
           ...(fieldChanges.pastEvents !== undefined && {
             pastEvents: JSON.parse(JSON.stringify(fieldChanges.pastEvents)) as Prisma.InputJsonValue,
           }),
@@ -5453,6 +5473,72 @@ export class AdminService {
     });
     if (!campaign) throw new NotFoundException('Campaign not found');
     return campaign;
+  }
+
+  async updateCampaignAsAdmin(id: string, adminId: string, dto: UpdateCampaignDto) {
+    const existing = await this.prisma.campaign.findUnique({
+      where: { id },
+      include: {
+        brandProfile: {
+          select: {
+            id: true,
+            brandName: true,
+            user: { select: { id: true, firstName: true, lastName: true, email: true } },
+          },
+        },
+      },
+    });
+    if (!existing) throw new NotFoundException('Campaign not found');
+
+    const updated = await this.prisma.campaign.update({
+      where: { id },
+      data: {
+        ...(dto.name !== undefined && { name: dto.name }),
+        ...(dto.goal !== undefined && { goal: dto.goal }),
+        ...(dto.locations !== undefined && { locations: dto.locations }),
+        ...(dto.audience !== undefined && { audience: dto.audience }),
+        ...(dto.startDate !== undefined && { startDate: dto.startDate ? new Date(dto.startDate) : undefined }),
+        ...(dto.endDate !== undefined && { endDate: dto.endDate ? new Date(dto.endDate) : undefined }),
+        ...(dto.offerType !== undefined && { offerType: dto.offerType }),
+        ...(dto.budgetAmount !== undefined && { budgetAmount: dto.budgetAmount }),
+        ...(dto.budgetCurrency !== undefined && { budgetCurrency: dto.budgetCurrency }),
+        ...(dto.barterElements !== undefined && { barterElements: dto.barterElements }),
+        ...(dto.description !== undefined && { description: dto.description }),
+        ...(dto.status !== undefined && { status: dto.status }),
+      },
+      include: {
+        brandProfile: {
+          select: {
+            id: true,
+            brandName: true,
+            user: { select: { firstName: true, lastName: true, email: true } },
+          },
+        },
+      },
+    });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'CAMPAIGN_UPDATED' as any,
+      entityType: 'CAMPAIGN',
+      entityId: id,
+      metadata: { name: updated.name },
+    });
+
+    if (existing.brandProfile?.user?.id) {
+      void this.notificationsService
+        .create(
+          existing.brandProfile.user.id,
+          'campaign_updated',
+          'Campaign Updated',
+          `Your campaign "${updated.name}" has been updated by an admin.`,
+          { campaignId: id },
+        )
+        .catch((err) => this.logger.error('Failed to create campaign_updated notification', err));
+    }
+
+    return updated;
   }
 
   async listAllCampaigns(query: ListCampaignsQueryDto) {

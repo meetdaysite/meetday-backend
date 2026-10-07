@@ -76,6 +76,26 @@ export class CreateAdminSpaceCommunityProfileDto {
   @IsString()
   proposalPdfKey?: string;
 
+  @ApiPropertyOptional({ description: 'Sponsorship offering — number of days for a Pop-up activation slot' })
+  @IsOptional()
+  @IsString()
+  popupDays?: string;
+
+  @ApiPropertyOptional({ description: 'Sponsorship offering — price for a Pop-up activation slot' })
+  @IsOptional()
+  @IsString()
+  popupPrice?: string;
+
+  @ApiPropertyOptional({ description: 'Sponsorship offering — number of days for a Branding slot' })
+  @IsOptional()
+  @IsString()
+  brandingDays?: string;
+
+  @ApiPropertyOptional({ description: 'Sponsorship offering — price for a Branding slot' })
+  @IsOptional()
+  @IsString()
+  brandingPrice?: string;
+
   // Written onto the space partner's own profile (not the community profile row) — same shape
   // as the space-partner-side socialLinks field.
   @ApiPropertyOptional({ type: SocialLinksDto })

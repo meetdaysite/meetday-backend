@@ -77,6 +77,26 @@ export class UpdateAdminSpaceCommunityProfileDto {
   @IsString()
   proposalPdfKey?: string;
 
+  @ApiPropertyOptional({ description: 'Sponsorship offering — number of days for a Pop-up activation slot' })
+  @IsOptional()
+  @IsString()
+  popupDays?: string;
+
+  @ApiPropertyOptional({ description: 'Sponsorship offering — price for a Pop-up activation slot' })
+  @IsOptional()
+  @IsString()
+  popupPrice?: string;
+
+  @ApiPropertyOptional({ description: 'Sponsorship offering — number of days for a Branding slot' })
+  @IsOptional()
+  @IsString()
+  brandingDays?: string;
+
+  @ApiPropertyOptional({ description: 'Sponsorship offering — price for a Branding slot' })
+  @IsOptional()
+  @IsString()
+  brandingPrice?: string;
+
   @ApiPropertyOptional({ description: 'Hide (true) or unhide (false) this space from brand/community browse — does not affect the partner\'s own access.' })
   @IsOptional()
   @IsBoolean()

@@ -88,6 +88,7 @@ import { SendChatMessageDto } from '../sponsorship/dto/send-chat-message.dto';
 import { UpdateChatMessageDto } from '../sponsorship/dto/update-chat-message.dto';
 import { ListSponsorshipDealsQueryDto } from '../sponsorship/dto/list-sponsorship-deals-query.dto';
 import { MarkSponsorshipDealPaidOfflineDto } from './dto/mark-sponsorship-deal-paid-offline.dto';
+import { UpdateCampaignDto } from '../campaigns/dto/update-campaign.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth('firebase-token')
@@ -2468,6 +2469,20 @@ export class AdminController {
   @ApiNotFoundResponse({ description: 'Campaign not found.' })
   getCampaignDetail(@Param('id', ParseUUIDPipe) id: string) {
     return this.adminService.getCampaignDetail(id);
+  }
+
+  @Patch('campaigns/:id')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @ApiOperation({ summary: 'Update a brand campaign directly (admin)' })
+  @ApiParam({ name: 'id', description: 'Campaign UUID' })
+  @ApiOkResponse({ description: 'Campaign updated.' })
+  @ApiNotFoundResponse({ description: 'Campaign not found.' })
+  updateCampaign(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') adminId: string,
+    @Body() dto: UpdateCampaignDto,
+  ) {
+    return this.adminService.updateCampaignAsAdmin(id, adminId, dto);
   }
 
   @Post('community-profiles/:id/approve')
