@@ -1,3 +1,5 @@
+/// <reference types="jest" />
+
 import { Test } from '@nestjs/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { getQueueToken } from '@nestjs/bull';
@@ -18,6 +20,7 @@ function makePrisma() {
     sponsorshipInterest: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}), count: jest.fn().mockResolvedValue(0) },
     sponsorshipChatMessage: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), count: jest.fn().mockResolvedValue(0) },
     sponsorshipDeal: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
+    sponsorshipDealReport: { findUnique: jest.fn(), upsert: jest.fn() },
     user: { findMany: jest.fn().mockResolvedValue([]) },
   };
   return prisma;
@@ -701,6 +704,93 @@ describe('SponsorshipService — TriChat', () => {
         const result = await service.requestDealChanges('host-user', 'interest-camp', { note: 'Please increase barter amount' });
         expect(result.status).toBe('CHANGES_REQUESTED');
       });
+    });
+  });
+
+  describe('Campaign Deal Report Flow', () => {
+    const campaignInterest = {
+      id: 'interest-campaign-report',
+      chatStatus: 'ACCEPTED',
+      campaignId: 'campaign-1',
+      campaign: { id: 'campaign-1', name: 'Summer Campaign', brandProfile: { id: 'brand-1', userId: 'brand-user', brandName: 'Acme' } },
+      hostProfile: { id: 'host-1', userId: 'host-user', displayName: 'Community', communityProfile: { name: 'Community' } },
+      brandProfile: { id: 'brand-1', userId: 'brand-user', brandName: 'Acme' },
+    };
+    const hubCampaignInterest = {
+      ...campaignInterest,
+      id: 'interest-hub-report',
+      hostProfile: null,
+      spaceProfileId: 'space-1',
+      spaceProfile: { id: 'space-1', userId: 'space-user', businessName: 'Hub', communityProfile: { name: 'Hub' } },
+    };
+    const approvedDeal = { id: 'deal-1', status: 'APPROVED', projectName: 'Campaign Deal' };
+    const reportPayload = {
+      projectName: 'Campaign Event',
+      eventDate: '2026-10-20',
+      venue: 'Delhi',
+      summary: JSON.stringify({ projectName: 'Campaign Event', status: 'PENDING' }),
+      status: 'PENDING',
+    };
+
+    it('allows the Community owner to submit a report only after deal approval', async () => {
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue(campaignInterest);
+      prisma.sponsorshipDeal.findUnique.mockResolvedValue(approvedDeal);
+      prisma.sponsorshipDealReport.findUnique.mockResolvedValue(null);
+      prisma.sponsorshipDealReport.upsert.mockResolvedValue({ id: 'report-1', proofKeys: [], status: 'PENDING' });
+      prisma.sponsorshipChatMessage.create.mockResolvedValue({ id: 'system-1', createdAt: new Date() });
+
+      await service.upsertDealReport('host-user', campaignInterest.id, reportPayload as any);
+
+      expect(prisma.sponsorshipDealReport.upsert).toHaveBeenCalledWith(expect.objectContaining({
+        create: expect.objectContaining({ sponsorshipDealId: 'deal-1', submittedById: 'host-user', status: 'PENDING' }),
+      }));
+      expect(prisma.sponsorshipChatMessage.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ senderType: 'HOST', messageType: 'SYSTEM' }),
+      }));
+    });
+
+    it('allows an approved Hub to submit a campaign report as SPACE', async () => {
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue(hubCampaignInterest);
+      prisma.sponsorshipDeal.findUnique.mockResolvedValue(approvedDeal);
+      prisma.sponsorshipDealReport.findUnique.mockResolvedValue(null);
+      prisma.sponsorshipDealReport.upsert.mockResolvedValue({ id: 'report-hub', proofKeys: [], status: 'PENDING' });
+      prisma.sponsorshipChatMessage.create.mockResolvedValue({ id: 'system-hub', createdAt: new Date() });
+
+      await service.upsertDealReport('space-user', hubCampaignInterest.id, reportPayload as any);
+
+      expect(prisma.sponsorshipDealReport.upsert).toHaveBeenCalledWith(expect.objectContaining({
+        create: expect.objectContaining({ sponsorshipDealId: 'deal-1', submittedById: 'space-user', status: 'PENDING' }),
+      }));
+      expect(prisma.sponsorshipChatMessage.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ senderType: 'SPACE', messageType: 'SYSTEM' }),
+      }));
+    });
+
+    it('lets the Brand review an existing report but not create one', async () => {
+      prisma.sponsorshipInterest.findUnique.mockResolvedValue(campaignInterest);
+      prisma.sponsorshipDeal.findUnique.mockResolvedValue(approvedDeal);
+      prisma.sponsorshipDealReport.findUnique.mockResolvedValue(null);
+
+      await expect(service.upsertDealReport('brand-user', campaignInterest.id, {
+        ...reportPayload,
+        status: 'APPROVED',
+      } as any)).rejects.toThrow(ForbiddenException);
+      expect(prisma.sponsorshipDealReport.upsert).not.toHaveBeenCalled();
+
+      prisma.sponsorshipDealReport.findUnique.mockResolvedValue({ id: 'report-1', status: 'PENDING' });
+      prisma.sponsorshipDealReport.upsert.mockResolvedValue({ id: 'report-1', proofKeys: [], status: 'APPROVED' });
+      prisma.sponsorshipChatMessage.create.mockResolvedValue({ id: 'system-brand', createdAt: new Date() });
+
+      const result = await service.upsertDealReport('brand-user', campaignInterest.id, {
+        ...reportPayload,
+        status: 'APPROVED',
+        summary: JSON.stringify({ projectName: 'Campaign Event', status: 'APPROVED' }),
+      } as any);
+
+      expect(result.status).toBe('APPROVED');
+      expect(prisma.sponsorshipDealReport.upsert).toHaveBeenCalledWith(expect.objectContaining({
+        update: expect.objectContaining({ status: 'APPROVED', submittedById: 'brand-user' }),
+      }));
     });
   });
 
