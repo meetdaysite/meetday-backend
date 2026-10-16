@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Param, Body, UseGuards, Request, Query, UnauthorizedException } from '@nestjs/common'
+import { Controller, Post, Get, Param, Body, UseGuards, Request, Query, UnauthorizedException, Patch, Delete, HttpCode, HttpStatus } from '@nestjs/common'
 import { CommunityCollaborationService } from './community-collaboration.service'
 import { CreateCollaborationMessageDto } from './dto/create-collaboration-message.dto'
 import { CommunityCollaborationStatus } from '@prisma/client'
@@ -76,6 +76,28 @@ export class CommunityCollaborationController {
   ) {
     const { communityId, userId } = await this.getCommunityContext(req)
     return this.service.sendCollaborationMessage(interestId, communityId, userId, payload)
+  }
+
+  @Patch('chats/:interestId/messages/:messageId')
+  async editMessage(
+    @Param('interestId') interestId: string,
+    @Param('messageId') messageId: string,
+    @Body() payload: CreateCollaborationMessageDto,
+    @Request() req: any,
+  ) {
+    const { communityId, userId } = await this.getCommunityContext(req)
+    return this.service.editCollaborationMessage(interestId, communityId, userId, messageId, payload)
+  }
+
+  @Delete('chats/:interestId/messages/:messageId')
+  @HttpCode(HttpStatus.OK)
+  async deleteMessage(
+    @Param('interestId') interestId: string,
+    @Param('messageId') messageId: string,
+    @Request() req: any,
+  ) {
+    const { communityId, userId } = await this.getCommunityContext(req)
+    return this.service.deleteCollaborationMessage(interestId, communityId, userId, messageId)
   }
 
   @Get('chats/partner/:partnerId')

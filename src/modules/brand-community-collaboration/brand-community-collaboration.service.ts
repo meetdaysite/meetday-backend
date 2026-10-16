@@ -1,9 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common'
+import { BadRequestException, Injectable, NotFoundException, UnauthorizedException, ForbiddenException } from '@nestjs/common'
 import { CommunityCollaborationStatus } from '@prisma/client'
 import { PrismaService } from '../../prisma/prisma.service'
 import { StorageService } from '../../common/storage/storage.service'
 import { CreateCollaborationMessageDto } from '../community-collaboration/dto/create-collaboration-message.dto'
 import { NotificationsService } from '../notifications/notifications.service'
+import { redactPersonalInfo } from '../../common/utils/redact-personal-info.util'
 
 @Injectable()
 export class BrandCommunityCollaborationService {
@@ -258,5 +259,71 @@ export class BrandCommunityCollaborationService {
       { brandCommunityInterestId: interest.id, interestId: interest.id, collaborationType: 'BRAND_COMMUNITY' },
     )))
     return { ...message, mediaUrl: message.mediaKey ? await this.storage.getPresignedDownloadUrl(message.mediaKey) : null }
+  }
+
+  async editMessage(
+    interestId: string,
+    userId: string,
+    messageId: string,
+    dto: CreateCollaborationMessageDto,
+    preferredRole?: 'BRAND' | 'COMMUNITY',
+  ) {
+    const { interest } = await this.findForUser(interestId, userId, preferredRole)
+    const message = await this.prisma.brandCommunityCollaborationMessage.findUnique({
+      where: { id: messageId },
+    })
+
+    if (!message || message.collaborationId !== interestId) {
+      throw new NotFoundException('Message not found')
+    }
+
+    if (message.senderId !== userId) {
+      throw new ForbiddenException('You can only edit your own messages')
+    }
+
+    if (message.deletedAt) {
+      throw new BadRequestException('Cannot edit a deleted message')
+    }
+
+    const { content, wasRedacted } = redactPersonalInfo(dto.content)
+    const updated = await this.prisma.brandCommunityCollaborationMessage.update({
+      where: { id: messageId },
+      data: { content, editedAt: new Date() },
+      include: { sender: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } } },
+    })
+
+    const mediaUrl = message.mediaKey ? await this.storage.getPresignedDownloadUrl(message.mediaKey) : null
+    return { ...updated, mediaUrl, wasRedacted }
+  }
+
+  async deleteMessage(
+    interestId: string,
+    userId: string,
+    messageId: string,
+    preferredRole?: 'BRAND' | 'COMMUNITY',
+  ) {
+    const { interest } = await this.findForUser(interestId, userId, preferredRole)
+    const message = await this.prisma.brandCommunityCollaborationMessage.findUnique({
+      where: { id: messageId },
+    })
+
+    if (!message || message.collaborationId !== interestId) {
+      throw new NotFoundException('Message not found')
+    }
+
+    if (message.senderId !== userId) {
+      throw new ForbiddenException('You can only delete your own messages')
+    }
+
+    if (message.deletedAt) {
+      return { message: 'Already deleted', deleted: true }
+    }
+
+    await this.prisma.brandCommunityCollaborationMessage.update({
+      where: { id: messageId },
+      data: { deletedAt: new Date() },
+    })
+
+    return { message: 'Message deleted', deleted: true }
   }
 }

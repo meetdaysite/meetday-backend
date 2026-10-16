@@ -3,6 +3,7 @@ import * as firebaseAdmin from 'firebase-admin';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { DeleteAccountDto } from './dto/delete-account.dto';
+import { UpdateFcmTokenDto } from './dto/update-fcm-token.dto';
 
 @Injectable()
 export class UsersService {
@@ -142,5 +143,17 @@ export class UsersService {
       message:
         'Your account has been deleted and all personal data has been removed. Financial records are retained as required by applicable law.',
     };
+  }
+
+  async updateFcmToken(
+    userId: string,
+    dto: UpdateFcmTokenDto,
+  ): Promise<{ message: string }> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { fcmToken: dto.fcmToken },
+    });
+
+    return { message: 'FCM token updated successfully' };
   }
 }

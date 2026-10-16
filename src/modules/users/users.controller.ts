@@ -4,6 +4,7 @@ import {
   Delete,
   HttpCode,
   HttpStatus,
+  Post,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -24,6 +25,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { UsersService } from './users.service';
 import { DeleteAccountDto } from './dto/delete-account.dto';
+import { UpdateFcmTokenDto } from './dto/update-fcm-token.dto';
 
 @ApiTags('Users')
 @ApiBearerAuth('firebase-token')
@@ -32,6 +34,33 @@ import { DeleteAccountDto } from './dto/delete-account.dto';
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
+
+  @Post('fcm-token')
+  @HttpCode(HttpStatus.OK)
+  @Roles('USER', 'HOST', 'BRAND')
+  @ApiOperation({
+    summary: 'Update FCM token for push notifications',
+    description: 'Save the Firebase Cloud Messaging token for receiving push notifications on mobile devices.',
+  })
+  @ApiBody({ type: UpdateFcmTokenDto })
+  @ApiOkResponse({
+    description: 'FCM token updated successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          example: 'FCM token updated successfully',
+        },
+      },
+    },
+  })
+  updateFcmToken(
+    @GetUser('id') userId: string,
+    @Body() dto: UpdateFcmTokenDto,
+  ) {
+    return this.usersService.updateFcmToken(userId, dto);
+  }
 
   @Delete('me')
   @Throttle({ default: { limit: 3, ttl: 3_600_000 } })

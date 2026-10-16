@@ -20,6 +20,8 @@ describe('BrandCommunityCollaborationService', () => {
         count: jest.fn(),
         findMany: jest.fn(),
         create: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn(),
       },
       brandProfile: { findUnique: jest.fn() },
       hostProfile: { findUnique: jest.fn() },
@@ -197,6 +199,245 @@ describe('BrandCommunityCollaborationService', () => {
     await service.getMessages('interest-1', 'brand-user-1', 'BRAND');
 
     expect(notifications.markAllReadForThread).toHaveBeenCalledWith('brand-user-1', 'interest-1');
+  });
+
+  describe('editMessage', () => {
+    it('sender can edit their own message', async () => {
+      const userId = 'brand-user-1';
+      const interestId = 'interest-1';
+      const messageId = 'msg-1';
+      const newContent = 'Updated message';
+
+      prisma.user.findUnique.mockResolvedValue({
+        id: userId,
+        brandProfile: { id: 'brand-1' },
+        hostProfile: null,
+        hostTeamMemberships: [],
+      });
+
+      prisma.brandCommunityCollaborationInterest.findUnique.mockResolvedValue({
+        id: interestId,
+        requesterBrandId: 'brand-1',
+        targetCommunityId: 'community-1',
+        chatStatus: 'ACCEPTED',
+        requesterBrand: { brandName: 'Brand Co.' },
+        targetCommunity: { name: 'Sunset House', hostProfile: { userId: 'community-owner' } },
+      });
+
+      const existingMessage = {
+        id: messageId,
+        collaborationId: interestId,
+        senderId: userId,
+        content: 'Original message',
+        mediaKey: null,
+        deletedAt: null,
+      };
+
+      prisma.brandCommunityCollaborationMessage.findUnique.mockResolvedValue(existingMessage);
+      prisma.brandCommunityCollaborationMessage.update.mockResolvedValue({
+        ...existingMessage,
+        content: newContent,
+        editedAt: new Date(),
+        sender: { id: userId, firstName: 'John', lastName: 'Doe', avatarUrl: null },
+      });
+
+      const result = await service.editMessage(interestId, userId, messageId, { content: newContent });
+
+      expect(prisma.brandCommunityCollaborationMessage.update).toHaveBeenCalledWith({
+        where: { id: messageId },
+        data: { content: newContent, editedAt: expect.any(Date) },
+        include: { sender: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } } },
+      });
+      expect(result.editedAt).toBeDefined();
+    });
+
+    it('non-sender cannot edit message', async () => {
+      const userId = 'brand-user-1';
+      const interestId = 'interest-1';
+      const messageId = 'msg-1';
+
+      prisma.user.findUnique.mockResolvedValue({
+        id: userId,
+        brandProfile: { id: 'brand-1' },
+        hostProfile: null,
+        hostTeamMemberships: [],
+      });
+
+      prisma.brandCommunityCollaborationInterest.findUnique.mockResolvedValue({
+        id: interestId,
+        requesterBrandId: 'brand-1',
+        targetCommunityId: 'community-1',
+        chatStatus: 'ACCEPTED',
+        requesterBrand: { brandName: 'Brand Co.' },
+        targetCommunity: { name: 'Sunset House', hostProfile: { userId: 'community-owner' } },
+      });
+
+      prisma.brandCommunityCollaborationMessage.findUnique.mockResolvedValue({
+        id: messageId,
+        collaborationId: interestId,
+        senderId: 'different-user-id',
+        content: 'Original message',
+        mediaKey: null,
+        deletedAt: null,
+      });
+
+      await expect(service.editMessage(interestId, userId, messageId, { content: 'New content' }))
+        .rejects
+        .toThrow('You can only edit your own messages');
+    });
+
+    it('cannot edit deleted message', async () => {
+      const userId = 'brand-user-1';
+      const interestId = 'interest-1';
+      const messageId = 'msg-1';
+
+      prisma.user.findUnique.mockResolvedValue({
+        id: userId,
+        brandProfile: { id: 'brand-1' },
+        hostProfile: null,
+        hostTeamMemberships: [],
+      });
+
+      prisma.brandCommunityCollaborationInterest.findUnique.mockResolvedValue({
+        id: interestId,
+        requesterBrandId: 'brand-1',
+        targetCommunityId: 'community-1',
+        chatStatus: 'ACCEPTED',
+        requesterBrand: { brandName: 'Brand Co.' },
+        targetCommunity: { name: 'Sunset House', hostProfile: { userId: 'community-owner' } },
+      });
+
+      prisma.brandCommunityCollaborationMessage.findUnique.mockResolvedValue({
+        id: messageId,
+        collaborationId: interestId,
+        senderId: userId,
+        content: 'Original message',
+        mediaKey: null,
+        deletedAt: new Date(),
+      });
+
+      await expect(service.editMessage(interestId, userId, messageId, { content: 'New content' }))
+        .rejects
+        .toThrow('Cannot edit a deleted message');
+    });
+  });
+
+  describe('deleteMessage', () => {
+    it('sender can delete their own message', async () => {
+      const userId = 'brand-user-1';
+      const interestId = 'interest-1';
+      const messageId = 'msg-1';
+
+      prisma.user.findUnique.mockResolvedValue({
+        id: userId,
+        brandProfile: { id: 'brand-1' },
+        hostProfile: null,
+        hostTeamMemberships: [],
+      });
+
+      prisma.brandCommunityCollaborationInterest.findUnique.mockResolvedValue({
+        id: interestId,
+        requesterBrandId: 'brand-1',
+        targetCommunityId: 'community-1',
+        chatStatus: 'ACCEPTED',
+        requesterBrand: { brandName: 'Brand Co.' },
+        targetCommunity: { name: 'Sunset House', hostProfile: { userId: 'community-owner' } },
+      });
+
+      prisma.brandCommunityCollaborationMessage.findUnique.mockResolvedValue({
+        id: messageId,
+        collaborationId: interestId,
+        senderId: userId,
+        content: 'Original message',
+        mediaKey: null,
+        deletedAt: null,
+      });
+
+      prisma.brandCommunityCollaborationMessage.update.mockResolvedValue({
+        id: messageId,
+        deletedAt: new Date(),
+      });
+
+      const result = await service.deleteMessage(interestId, userId, messageId);
+
+      expect(prisma.brandCommunityCollaborationMessage.update).toHaveBeenCalledWith({
+        where: { id: messageId },
+        data: { deletedAt: expect.any(Date) },
+      });
+      expect(result.deleted).toBe(true);
+    });
+
+    it('non-sender cannot delete message', async () => {
+      const userId = 'brand-user-1';
+      const interestId = 'interest-1';
+      const messageId = 'msg-1';
+
+      prisma.user.findUnique.mockResolvedValue({
+        id: userId,
+        brandProfile: { id: 'brand-1' },
+        hostProfile: null,
+        hostTeamMemberships: [],
+      });
+
+      prisma.brandCommunityCollaborationInterest.findUnique.mockResolvedValue({
+        id: interestId,
+        requesterBrandId: 'brand-1',
+        targetCommunityId: 'community-1',
+        chatStatus: 'ACCEPTED',
+        requesterBrand: { brandName: 'Brand Co.' },
+        targetCommunity: { name: 'Sunset House', hostProfile: { userId: 'community-owner' } },
+      });
+
+      prisma.brandCommunityCollaborationMessage.findUnique.mockResolvedValue({
+        id: messageId,
+        collaborationId: interestId,
+        senderId: 'different-user-id',
+        content: 'Original message',
+        mediaKey: null,
+        deletedAt: null,
+      });
+
+      await expect(service.deleteMessage(interestId, userId, messageId))
+        .rejects
+        .toThrow('You can only delete your own messages');
+    });
+
+    it('idempotent deletion returns deleted state', async () => {
+      const userId = 'brand-user-1';
+      const interestId = 'interest-1';
+      const messageId = 'msg-1';
+
+      prisma.user.findUnique.mockResolvedValue({
+        id: userId,
+        brandProfile: { id: 'brand-1' },
+        hostProfile: null,
+        hostTeamMemberships: [],
+      });
+
+      prisma.brandCommunityCollaborationInterest.findUnique.mockResolvedValue({
+        id: interestId,
+        requesterBrandId: 'brand-1',
+        targetCommunityId: 'community-1',
+        chatStatus: 'ACCEPTED',
+        requesterBrand: { brandName: 'Brand Co.' },
+        targetCommunity: { name: 'Sunset House', hostProfile: { userId: 'community-owner' } },
+      });
+
+      prisma.brandCommunityCollaborationMessage.findUnique.mockResolvedValue({
+        id: messageId,
+        collaborationId: interestId,
+        senderId: userId,
+        content: 'Original message',
+        mediaKey: null,
+        deletedAt: new Date('2026-10-10T00:00:00Z'),
+      });
+
+      const result = await service.deleteMessage(interestId, userId, messageId);
+
+      expect(result.deleted).toBe(true);
+      expect(result.message).toBe('Already deleted');
+      expect(prisma.brandCommunityCollaborationMessage.update).not.toHaveBeenCalled();
+    });
   });
 });
 

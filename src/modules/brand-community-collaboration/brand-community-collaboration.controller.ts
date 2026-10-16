@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Request, UseGuards } from '@nestjs/common'
+import { Body, Controller, Get, Param, Post, Query, Request, UseGuards, Patch, Delete, HttpCode, HttpStatus } from '@nestjs/common'
 import { CommunityCollaborationStatus } from '@prisma/client'
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard'
 import { CreateCollaborationMessageDto } from '../community-collaboration/dto/create-collaboration-message.dto'
@@ -46,5 +46,18 @@ export class BrandCommunityCollaborationController {
   async sendMessage(@Param('interestId') interestId: string, @Body() dto: CreateCollaborationMessageDto, @Request() req: any, @Query('asRole') asRole?: 'BRAND' | 'COMMUNITY') {
     const identity = await this.service.getIdentityByFirebaseUid(req.user.uid)
     return this.service.sendMessage(interestId, identity.id, dto, asRole)
+  }
+
+  @Patch('chats/:interestId/messages/:messageId')
+  async editMessage(@Param('interestId') interestId: string, @Param('messageId') messageId: string, @Body() dto: CreateCollaborationMessageDto, @Request() req: any, @Query('asRole') asRole?: 'BRAND' | 'COMMUNITY') {
+    const identity = await this.service.getIdentityByFirebaseUid(req.user.uid)
+    return this.service.editMessage(interestId, identity.id, messageId, dto, asRole)
+  }
+
+  @Delete('chats/:interestId/messages/:messageId')
+  @HttpCode(HttpStatus.OK)
+  async deleteMessage(@Param('interestId') interestId: string, @Param('messageId') messageId: string, @Request() req: any, @Query('asRole') asRole?: 'BRAND' | 'COMMUNITY') {
+    const identity = await this.service.getIdentityByFirebaseUid(req.user.uid)
+    return this.service.deleteMessage(interestId, identity.id, messageId, asRole)
   }
 }

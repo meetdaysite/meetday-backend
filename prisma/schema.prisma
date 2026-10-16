@@ -168,6 +168,8 @@ model User {
   assignedTickets SupportTicket[] @relation("SupportTicketAssignee")
   resolvedTickets SupportTicket[] @relation("SupportTicketResolver")
 
+  fcmToken String? // Firebase Cloud Messaging token for push notifications
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -696,6 +698,7 @@ model SpaceChatMessage {
   replies   SpaceChatMessage[] @relation("SpaceMessageReplyTo")
 
   deletedAt DateTime? // soft delete — placeholder shown to both sides
+  editedAt  DateTime?
 
   createdAt DateTime @default(now())
 
@@ -851,6 +854,7 @@ model SpaceHostChatMessage {
   replies   SpaceHostChatMessage[] @relation("SpaceHostMessageReplyTo")
 
   deletedAt DateTime? // soft delete — placeholder shown to both sides
+  editedAt  DateTime?
 
   createdAt DateTime @default(now())
 
@@ -3575,6 +3579,7 @@ model CommunityCollaborationMessage {
   replyTo   CommunityCollaborationMessage?  @relation("CommunityChatMessageReplyTo", fields: [replyToId], references: [id])
   replies   CommunityCollaborationMessage[] @relation("CommunityChatMessageReplyTo")
 
+  editedAt  DateTime? // set when the sender edits their own message's content
   deletedAt DateTime? // soft delete — placeholder shown to both sides
 
   createdAt DateTime @default(now())
@@ -3615,6 +3620,7 @@ model BrandCommunityCollaborationMessage {
   content             String @db.Text
   mediaKey            String?
   replyToId           String?
+  editedAt            DateTime? // set when the sender edits their own message's content
   deletedAt           DateTime?
   createdAt           DateTime @default(now())
 
