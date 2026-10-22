@@ -42,6 +42,7 @@ export class CommunityOverviewService {
       select: {
         id: true, name: true, slug: true, type: true, status: true, access: true,
         description: true, iconKey: true, coverImageKey: true, memberCount: true, createdAt: true,
+        creator: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
       },
     });
     if (!community) throw new NotFoundException('Community not found');
@@ -77,6 +78,7 @@ export class CommunityOverviewService {
         status: community.status, access: community.access, description: community.description,
         iconUrl, coverUrl, createdAt: community.createdAt,
         url: `meetday.ai/communities/${community.slug}`,
+        creator: community.creator,
       },
       stats: {
         totalMembers: this.statFromSeries(memberSeries, community.memberCount),
@@ -100,7 +102,7 @@ export class CommunityOverviewService {
       orderBy: { role: 'asc' },
       select: {
         role: true,
-        user: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
+        user: { select: { id: true, firstName: true, lastName: true, avatarUrl: true, email: true, phone: true } },
       },
     });
     return Promise.all(
@@ -108,6 +110,8 @@ export class CommunityOverviewService {
         userId: m.user.id,
         firstName: m.user.firstName,
         lastName: m.user.lastName,
+        email: m.user.email,
+        phone: m.user.phone,
         avatarUrl: m.user.avatarUrl ? await this.storage.getPresignedDownloadUrl(m.user.avatarUrl) : null,
         role: m.role,
       })),

@@ -373,7 +373,7 @@ export class AdminService {
       this.prisma.hostProfile.findMany({
         where,
         include: {
-          user: { select: { id: true, email: true, firstName: true, lastName: true } },
+          user: { select: { id: true, email: true, firstName: true, lastName: true, phone: true } },
           categories: { include: { category: true } },
         },
         orderBy: { createdAt: 'desc' },
@@ -2141,7 +2141,7 @@ export class AdminService {
         kycStatus: true,
         panVerificationStatus: true,
         bankVerificationStatus: true,
-        user: { select: { id: true, firstName: true, lastName: true, email: true } },
+        user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
       },
     },
   } as const;
@@ -2197,7 +2197,7 @@ export class AdminService {
         businessName: true,
         operatingCities: true,
         socialLinks: true,
-        user: { select: { id: true, firstName: true, lastName: true, email: true } },
+        user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
       },
     },
   } as const;
@@ -4095,7 +4095,7 @@ export class AdminService {
           id: true,
           displayName: true,
           operatingCities: true,
-          user: { select: { id: true, firstName: true, lastName: true, email: true } },
+          user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
         },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
@@ -4551,7 +4551,7 @@ export class AdminService {
           id: true,
           businessName: true,
           operatingCities: true,
-          user: { select: { id: true, firstName: true, lastName: true, email: true } },
+          user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
         },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
