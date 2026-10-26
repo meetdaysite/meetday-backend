@@ -54,6 +54,7 @@ export class CommunityCollaborationService {
         size: true,
         avgGuestCount: true,
         experiencesPerYear: true,
+        audienceAge: true,
         pastEvents: true,
         brandsWorkedWith: true,
         categories: { select: { category: { select: { id: true, name: true } } } },
