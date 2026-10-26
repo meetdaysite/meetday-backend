@@ -2122,6 +2122,7 @@ export class AdminService {
     size: true,
     avgGuestCount: true,
     experiencesPerYear: true,
+    audienceAge: true,
     pastEvents: true,
     brandsWorkedWith: true,
     approvalStatus: true,
@@ -4143,6 +4144,7 @@ export class AdminService {
         size: dto.size,
         avgGuestCount: dto.avgGuestCount,
         experiencesPerYear: dto.experiencesPerYear,
+        audienceAge: dto.audienceAge ?? null,
         approvalStatus: 'APPROVED',
         reviewedBy: adminId,
         reviewedAt: new Date(),
@@ -4218,6 +4220,7 @@ export class AdminService {
         ...(dto.size !== undefined && { size: dto.size }),
         ...(dto.avgGuestCount !== undefined && { avgGuestCount: dto.avgGuestCount }),
         ...(dto.experiencesPerYear !== undefined && { experiencesPerYear: dto.experiencesPerYear }),
+        ...(dto.audienceAge !== undefined && { audienceAge: dto.audienceAge }),
         ...(dto.categoryIds !== undefined && {
           categories: {
             deleteMany: {},
@@ -4399,6 +4402,7 @@ export class AdminService {
           ...(fieldChanges.size !== undefined && { size: fieldChanges.size }),
           ...(fieldChanges.avgGuestCount !== undefined && { avgGuestCount: fieldChanges.avgGuestCount }),
           ...(fieldChanges.experiencesPerYear !== undefined && { experiencesPerYear: fieldChanges.experiencesPerYear }),
+          ...(fieldChanges.audienceAge !== undefined && { audienceAge: fieldChanges.audienceAge }),
           ...(fieldChanges.pastEvents !== undefined && {
             pastEvents: JSON.parse(JSON.stringify(fieldChanges.pastEvents)) as Prisma.InputJsonValue,
           }),

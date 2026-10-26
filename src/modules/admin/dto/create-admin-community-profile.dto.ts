@@ -43,6 +43,11 @@ export class CreateAdminCommunityProfileDto {
   @IsString()
   experiencesPerYear: string;
 
+  @ApiPropertyOptional({ example: '18-25', description: 'Target audience age range, e.g. 18-25 or 21 and above' })
+  @IsOptional()
+  @IsString()
+  audienceAge?: string | null;
+
   @ApiProperty({ type: [String], description: 'Category UUIDs from GET /categories' })
   @IsArray()
   @IsUUID('4', { each: true })

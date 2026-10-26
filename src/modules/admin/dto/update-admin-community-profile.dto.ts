@@ -45,6 +45,11 @@ export class UpdateAdminCommunityProfileDto {
   @IsString()
   experiencesPerYear?: string;
 
+  @ApiPropertyOptional({ example: '18-25', description: 'Target audience age range, e.g. 18-25 or 21 and above' })
+  @IsOptional()
+  @IsString()
+  audienceAge?: string | null;
+
   @ApiPropertyOptional({ type: [String], description: 'Category UUIDs from GET /categories' })
   @IsOptional()
   @IsArray()

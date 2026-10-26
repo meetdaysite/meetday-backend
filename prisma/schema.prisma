@@ -1814,6 +1814,7 @@ model HostCommunityProfile {
   size               String
   avgGuestCount      String
   experiencesPerYear String
+  audienceAge        String?
   secondaryImageKey  String?
 
   // Optional showcase of past events — array of { name?, description?, imageKeys: string[] }
