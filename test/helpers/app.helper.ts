@@ -9,7 +9,7 @@ import { PrismaService } from '../../src/prisma/prisma.service';
 // BullExplorer.onModuleInit() calls queue.process(), queue.on(), and checks
 // queue.isReady() during app.init(); all must exist or Bull throws on startup.
 export const mockMailQueue = {
-  add: jest.fn(),
+  add: jest.fn().mockResolvedValue(undefined), // Bull.add returns a promise
   process: jest.fn(),
   on: jest.fn(),
   close: jest.fn(),

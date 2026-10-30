@@ -78,6 +78,8 @@ async function seedPastEventWithConfirmedOrder(prisma: PrismaService, hostUserId
       subtotal: 500,
       discountAmount: 0,
       platformFee: 0,
+      taxAmount: 0,
+      netSubtotal: 500,
       totalAmount: 500,
       confirmedAt: new Date(),
       items: {

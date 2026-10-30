@@ -9,7 +9,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 function makePrisma() {
   const prisma: any = {
     meetdayChatThread: {
-      upsert: jest.fn(),
+      create: jest.fn(),
       update: jest.fn().mockResolvedValue({}),
       // Defaults to "not dormant" so unrelated sendMyMessage tests still attempt a (mocked-away)
       // classification fetch rather than skipping silently for a different reason.
@@ -54,14 +54,14 @@ describe('MeetdayChatService', () => {
 
   describe('getMyChat()', () => {
     it('gets-or-creates a thread and returns messages with signed media URLs', async () => {
-      prisma.meetdayChatThread.upsert.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
+      prisma.meetdayChatThread.findUnique.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
       prisma.meetdayChatMessage.findMany.mockResolvedValue([
         { id: 'm1', senderType: 'USER', senderId: 'user-1', content: 'hi', mediaKey: null, createdAt: new Date() },
       ]);
 
       const result = await service.getMyChat('user-1');
 
-      expect(prisma.meetdayChatThread.upsert).toHaveBeenCalledWith(
+      expect(prisma.meetdayChatThread.findUnique).toHaveBeenCalledWith(
         expect.objectContaining({ where: { userId_context: { userId: 'user-1', context: 'HOST' } } }),
       );
       expect(result.messages).toHaveLength(1);
@@ -71,12 +71,12 @@ describe('MeetdayChatService', () => {
 
   describe('sendMyMessage()', () => {
     it('rejects an empty message with no text and no image', async () => {
-      prisma.meetdayChatThread.upsert.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
+      prisma.meetdayChatThread.findUnique.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
       await expect(service.sendMyMessage('user-1', {})).rejects.toThrow(BadRequestException);
     });
 
     it('masks personal info before saving and flags wasRedacted', async () => {
-      prisma.meetdayChatThread.upsert.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
+      prisma.meetdayChatThread.findUnique.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
       prisma.meetdayChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
 
       const result = await service.sendMyMessage('user-1', { content: 'call me at 9876543210' });
@@ -88,7 +88,7 @@ describe('MeetdayChatService', () => {
     });
 
     it('allows an image-only message and returns a signed mediaUrl', async () => {
-      prisma.meetdayChatThread.upsert.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
+      prisma.meetdayChatThread.findUnique.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
       prisma.meetdayChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
 
       const result = await service.sendMyMessage('user-1', { mediaKey: 'meetday-chats/user-1/x.jpg' });
@@ -102,7 +102,7 @@ describe('MeetdayChatService', () => {
 
   describe('bot auto-reply', () => {
     it('stays silent when the thread is already dormant (handed off to a human)', async () => {
-      prisma.meetdayChatThread.upsert.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
+      prisma.meetdayChatThread.findUnique.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
       prisma.meetdayChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
       prisma.meetdayChatThread.findUnique.mockResolvedValue({ botDormant: true });
       const originalFetch = global.fetch;
@@ -117,7 +117,7 @@ describe('MeetdayChatService', () => {
     });
 
     it('replies with the greeting message when classified as GREETING', async () => {
-      prisma.meetdayChatThread.upsert.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
+      prisma.meetdayChatThread.findUnique.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
       prisma.meetdayChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
       const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
         ok: true,
@@ -137,7 +137,7 @@ describe('MeetdayChatService', () => {
     });
 
     it('asks for more detail when classified as NEEDS_DETAIL', async () => {
-      prisma.meetdayChatThread.upsert.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
+      prisma.meetdayChatThread.findUnique.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
       prisma.meetdayChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
       const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
         ok: true,
@@ -154,7 +154,7 @@ describe('MeetdayChatService', () => {
     });
 
     it('forces a handoff instead of asking a 3rd time when the classifier keeps returning NEEDS_DETAIL', async () => {
-      prisma.meetdayChatThread.upsert.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
+      prisma.meetdayChatThread.findUnique.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
       prisma.meetdayChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
       prisma.meetdayChatMessage.findMany.mockResolvedValue([
         { content: 'Please describe your issue/query in detail.' },
@@ -182,7 +182,7 @@ describe('MeetdayChatService', () => {
     });
 
     it('logs the issue, goes dormant, and notifies admins when classified as DETAILED', async () => {
-      prisma.meetdayChatThread.upsert.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
+      prisma.meetdayChatThread.findUnique.mockResolvedValue({ id: 'thread-1', userId: 'user-1' });
       prisma.meetdayChatMessage.create.mockResolvedValue({ id: 'msg-1', createdAt: new Date() });
       prisma.user.findMany.mockResolvedValue([{ id: 'admin-1' }, { id: 'admin-2' }]);
       const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
@@ -214,6 +214,82 @@ describe('MeetdayChatService', () => {
         { meetdayChatThreadId: 'thread-1' },
       );
       fetchSpy.mockRestore();
+    });
+  });
+  describe('regressions', () => {
+    it('returns the NEWEST 200 messages oldest-first, not the oldest 200', async () => {
+      prisma.meetdayChatThread.findUnique.mockResolvedValue({ id: 'thread-1', userId: 'user-1', lastMessageAt: null, userLastReadAt: null });
+      prisma.meetdayChatMessage.findMany.mockResolvedValue([]);
+
+      await service.getMyChat('user-1');
+
+      const args = prisma.meetdayChatMessage.findMany.mock.calls[0][0];
+      expect(args.take).toBe(200);
+      expect(args.orderBy).toEqual({ createdAt: 'desc' });
+    });
+
+    it('returns messages in chronological order after taking the newest page', async () => {
+      prisma.meetdayChatThread.findUnique.mockResolvedValue({ id: 'thread-1', userId: 'user-1', lastMessageAt: null, userLastReadAt: null });
+      // DB returns newest-first
+      prisma.meetdayChatMessage.findMany.mockResolvedValue([
+        { id: 'new', senderType: 'USER', senderId: 'user-1', content: 'b', mediaKey: null, createdAt: new Date(2) },
+        { id: 'old', senderType: 'USER', senderId: 'user-1', content: 'a', mediaKey: null, createdAt: new Date(1) },
+      ]);
+
+      const result = await service.getMyChat('user-1');
+
+      expect(result.messages.map((m) => m.id)).toEqual(['old', 'new']);
+    });
+
+    it('does not write the read marker on a poll when nothing is unread', async () => {
+      const readAt = new Date('2026-01-02T00:00:00Z');
+      prisma.meetdayChatThread.findUnique.mockResolvedValue({ id: 'thread-1', userId: 'user-1', lastMessageAt: readAt, userLastReadAt: readAt });
+      prisma.meetdayChatMessage.findMany.mockResolvedValue([]);
+
+      await service.getMyChat('user-1');
+
+      expect(prisma.meetdayChatThread.update).not.toHaveBeenCalled();
+    });
+
+    it('writes the read marker once when there is an unread message', async () => {
+      prisma.meetdayChatThread.findUnique.mockResolvedValue({
+        id: 'thread-1',
+        userId: 'user-1',
+        lastMessageAt: new Date('2026-01-03T00:00:00Z'),
+        userLastReadAt: new Date('2026-01-02T00:00:00Z'),
+      });
+      prisma.meetdayChatMessage.findMany.mockResolvedValue([]);
+
+      await service.getMyChat('user-1');
+
+      expect(prisma.meetdayChatThread.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('recovers from a concurrent thread-creation race by re-reading the winner row', async () => {
+      const { Prisma } = jest.requireActual('@prisma/client');
+      const p2002 = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: 'test',
+      });
+      prisma.meetdayChatThread.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'thread-winner', userId: 'user-1', lastMessageAt: null, userLastReadAt: null });
+      prisma.meetdayChatThread.create = jest.fn().mockRejectedValue(p2002);
+      prisma.meetdayChatMessage.findMany.mockResolvedValue([]);
+
+      await expect(service.getMyChat('user-1')).resolves.toEqual({ messages: [] });
+      expect(prisma.meetdayChatThread.create).toHaveBeenCalledWith({ data: { userId: 'user-1', context: 'HOST' } });
+    });
+
+    it('scopes thread lookup to the caller and the requested context (no cross-role reads)', async () => {
+      prisma.meetdayChatThread.findUnique.mockResolvedValue({ id: 'thread-b', userId: 'brand-1', lastMessageAt: null, userLastReadAt: null });
+      prisma.meetdayChatMessage.findMany.mockResolvedValue([]);
+
+      await service.getMyChat('brand-1', 'BRAND');
+
+      expect(prisma.meetdayChatThread.findUnique).toHaveBeenCalledWith({
+        where: { userId_context: { userId: 'brand-1', context: 'BRAND' } },
+      });
     });
   });
 });

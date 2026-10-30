@@ -198,7 +198,7 @@ export class RefundsService {
       // Roll back coupon usage only on a full cancellation
       if (willBeFullyCancelled && order.couponId) {
         await tx.$executeRaw`
-          UPDATE coupons SET usage_count = GREATEST(usage_count - 1, 0)
+          UPDATE coupons SET "usageCount" = GREATEST("usageCount" - 1, 0)
           WHERE id = ${order.couponId}
         `;
       }

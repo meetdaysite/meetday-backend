@@ -171,7 +171,8 @@ describe('Events (E2E)', () => {
       expect(res.status).toBe(200);
 
       const deleted = await prisma.event.findUnique({ where: { id: event.id } });
-      expect(deleted!.deletedAt).not.toBeNull();
+      // deleteEvent() is a hard delete (events.service.ts), so the row must be gone.
+      expect(deleted).toBeNull();
     });
 
     it('returns 403 when a PUBLISHED event is deleted without admin rights', async () => {

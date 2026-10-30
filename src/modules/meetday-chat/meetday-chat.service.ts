@@ -10,8 +10,9 @@ import { StorageService } from '../../common/storage/storage.service';
 import { SendChatMessageDto } from '../sponsorship/dto/send-chat-message.dto';
 import { redactPersonalInfo } from '../../common/utils/redact-personal-info.util';
 import { NotificationsService } from '../notifications/notifications.service';
-import { MeetdayChatContext } from '@prisma/client';
+import { MeetdayChatContext, Prisma } from '@prisma/client';
 
+const MESSAGE_PAGE_SIZE = 200;
 const ADMIN_ROLES = ['SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR'];
 const GREETING_MESSAGE = 'Hello, welcome to Meetday Support! How can we help you today?';
 const NEEDS_DETAIL_MESSAGE = 'Please describe your issue/query in detail.';
@@ -41,13 +42,26 @@ export class MeetdayChatService {
     return MeetdayChatContext.HOST;
   }
 
+  // Concurrent first requests (e.g. two tabs or a poll racing a send) can both see "no thread" and
+  // try to insert it. The unique (userId, context) index makes one insert win; the loser gets P2002
+  // and re-reads the row the winner created, so every caller ends up with the same thread.
   private async getOrCreateThread(userId: string, context?: string) {
     const chatContext = this.normalizeContext(context);
-    return this.prisma.meetdayChatThread.upsert({
-      where: { userId_context: { userId, context: chatContext } },
-      create: { userId, context: chatContext },
-      update: {},
-    });
+    const where = { userId_context: { userId, context: chatContext } };
+
+    const existing = await this.prisma.meetdayChatThread.findUnique({ where });
+    if (existing) return existing;
+
+    try {
+      return await this.prisma.meetdayChatThread.create({ data: { userId, context: chatContext } });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        const winner = await this.prisma.meetdayChatThread.findUnique({ where });
+        if (!winner) throw err;
+        return winner;
+      }
+      throw err;
+    }
   }
 
   private async withMediaUrls<T extends { mediaKey: string | null }>(
@@ -73,10 +87,11 @@ export class MeetdayChatService {
 
   async getMyChat(userId: string, context?: string) {
     const thread = await this.getOrCreateThread(userId, context);
-    const messages = await this.prisma.meetdayChatMessage.findMany({
+    // Newest-first so `take` keeps the most recent page; reversed below to return oldest-first.
+    const newestFirst = await this.prisma.meetdayChatMessage.findMany({
       where: { threadId: thread.id },
-      orderBy: { createdAt: 'asc' },
-      take: 200,
+      orderBy: { createdAt: 'desc' },
+      take: MESSAGE_PAGE_SIZE,
       select: {
         id: true,
         senderType: true,
@@ -90,9 +105,17 @@ export class MeetdayChatService {
       },
     });
 
-    void this.prisma.meetdayChatThread
-      .update({ where: { id: thread.id }, data: { userLastReadAt: new Date() } })
-      .catch((err) => this.logger.error('Failed to update Meetday chat read state', err));
+    const messages = newestFirst.reverse();
+
+    // Only write the read marker when there is something unread. Polling calls this endpoint every
+    // few seconds, so an unconditional write here turned every open chat into a steady DB write load.
+    const hasUnread =
+      !!thread.lastMessageAt && (!thread.userLastReadAt || thread.lastMessageAt > thread.userLastReadAt);
+    if (hasUnread) {
+      void this.prisma.meetdayChatThread
+        .update({ where: { id: thread.id }, data: { userLastReadAt: new Date() } })
+        .catch((err) => this.logger.error('Failed to update Meetday chat read state', err));
+    }
 
     const withMediaUrls = await Promise.all(
       messages.map(async ({ mediaKey, deletedAt, replyTo, ...m }) => {

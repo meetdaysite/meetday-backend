@@ -1,27 +1,36 @@
 import { PrismaService } from '../../src/prisma/prisma.service';
 
-// Truncate all user-data tables in child-first order to respect FK constraints.
-// Roles, Categories and SubscriptionPlans are preserved — they are re-seeded by
-// seedRefData() below.
+// Safety guard: these tests wipe rows from every table. Refuse to run unless the connected database
+// is clearly a test database, so a misconfigured env can never clear real (local dev or GCP) data.
+function assertTestDatabase(): void {
+  const url = process.env.DATABASE_URL ?? '';
+  let dbName = '';
+  try {
+    dbName = new URL(url).pathname.replace(/^\//, '');
+  } catch {
+    dbName = '';
+  }
+  if (!/test/i.test(dbName)) {
+    throw new Error(
+      `Refusing to clear database "${dbName || '(unknown)'}": e2e tests only run against a database whose name contains "test".`,
+    );
+  }
+}
+
+// Deletes all rows from every application table (no TRUNCATE, no schema changes). Foreign-key
+// checks are paused for this one transaction so tables can be cleared in any order, and the
+// migration history table is left alone.
 export async function truncateTables(prisma: PrismaService): Promise<void> {
-  await prisma.couponRedemption.deleteMany();
-  await prisma.hostPayoutAccountHistory.deleteMany();
-  await prisma.hostPayoutAccount.deleteMany();
-  await prisma.hostSubscription.deleteMany();
-  await prisma.coupon.deleteMany();
-  await prisma.hostExperienceCategory.deleteMany();
-  await prisma.userInterestAffinity.deleteMany();
-  await prisma.hostAddress.deleteMany();
-  await prisma.hostProfile.deleteMany();
-  await prisma.adminProfile.deleteMany();
-  await prisma.attendeeProfile.deleteMany();
-  await prisma.brandProfile.deleteMany();
-  await prisma.consentRecord.deleteMany();
-  // Bypass the soft-delete middleware by passing deletedAt as an explicit key.
-  await (prisma.user as any).deleteMany({ where: { deletedAt: undefined } });
-  await prisma.category.deleteMany();
-  await prisma.subscriptionPlan.deleteMany();
-  await prisma.role.deleteMany();
+  assertTestDatabase();
+  await prisma.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<{ tablename: string }[]>`
+      SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> '_prisma_migrations'
+    `;
+    await tx.$executeRawUnsafe(`SET LOCAL session_replication_role = replica`);
+    for (const { tablename } of rows) {
+      await tx.$executeRawUnsafe(`DELETE FROM "public"."${tablename}"`);
+    }
+  });
 }
 
 const ROLES = [

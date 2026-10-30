@@ -641,14 +641,14 @@ export class EventsService {
         for (const item of order.items) {
           await tx.$executeRaw`
             UPDATE event_tickets
-            SET sold_count = GREATEST(sold_count - ${item.quantity}, 0)
+            SET "soldCount" = GREATEST("soldCount" - ${item.quantity}, 0)
             WHERE id = ${item.ticketId}
           `;
         }
         if (order.couponId) {
           await tx.$executeRaw`
             UPDATE coupons
-            SET usage_count = GREATEST(usage_count - 1, 0)
+            SET "usageCount" = GREATEST("usageCount" - 1, 0)
             WHERE id = ${order.couponId}
           `;
         }

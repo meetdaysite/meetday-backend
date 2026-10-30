@@ -60,7 +60,12 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
       envFilePath: '.env',
       validate,
     }),
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
+    ThrottlerModule.forRoot({
+      throttlers: [{ ttl: 60_000, limit: 300 }],
+      // Rate limiting is a production protection. The e2e suite sends hundreds of requests per
+      // minute from one process, so it is skipped only when NODE_ENV is 'test'.
+      skipIf: () => process.env.NODE_ENV === 'test',
+    }),
     BullModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({

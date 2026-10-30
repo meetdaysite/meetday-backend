@@ -113,18 +113,6 @@ describe('Coupon Checkout (E2E)', () => {
   });
 
   beforeEach(async () => {
-    // Delete order/event/notification data not covered by shared truncateTables, in FK order
-    await prisma.notification.deleteMany();
-    await prisma.savedEvent.deleteMany();
-    await prisma.eventReview.deleteMany();
-    await prisma.hostPayoutLineItem.deleteMany();
-    await prisma.orderAttendee.deleteMany();
-    await prisma.orderItem.deleteMany();
-    await prisma.order.deleteMany();
-    await prisma.eventMedia.deleteMany();
-    await prisma.eventRefundPolicy.deleteMany();
-    await prisma.eventTicket.deleteMany();
-    await prisma.event.deleteMany();
     await truncateTables(prisma);
     await seedRefData(prisma);
     jest.clearAllMocks();
