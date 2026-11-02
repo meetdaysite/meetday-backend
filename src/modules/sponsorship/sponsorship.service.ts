@@ -658,6 +658,9 @@ export class SponsorshipService {
             id: true,
             brandName: true,
             logoKey: true,
+            companyType: true,
+            aboutCompany: true,
+            industry: true,
             socialLinks: true,
             categories: { include: { category: true } },
           },
@@ -727,12 +730,13 @@ export class SponsorshipService {
 
     if (isBrand) {
       const { categories, logoKey, ...brandRest } = brandProfile!;
-      ownerProfile = brandRest;
       const logoUrl = logoKey ? await this.storageService.getPresignedDownloadUrl(logoKey) : null;
-      community = {
+      ownerProfile = {
+        ...brandRest,
         logoUrl,
         categories: categories.map((c) => c.category),
       };
+      community = null;
     } else if (isSpace) {
       const { communityProfile, ...spaceRest } = spaceProfile!;
       ownerProfile = spaceRest;
