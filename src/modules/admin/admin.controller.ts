@@ -1477,6 +1477,22 @@ export class AdminController {
     return this.adminService.updateSponsorshipAsAdmin(id, adminId, dto);
   }
 
+  @Patch('sponsorships/:id/visibility')
+  @Roles('SUPER_ADMIN', 'CITY_ADMIN')
+  @ApiOperation({
+    summary: 'Toggle sponsorship proposal visibility (hide/unhide from brands/explore)',
+  })
+  @ApiParam({ name: 'id', description: 'Proposal UUID' })
+  @ApiOkResponse({ description: 'Proposal visibility updated.' })
+  @ApiNotFoundResponse({ description: 'Proposal not found.' })
+  setSponsorshipProposalVisibility(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetCommunityProfileVisibilityDto,
+    @GetUser('id') adminId: string,
+  ) {
+    return this.adminService.setSponsorshipProposalVisibility(id, adminId, dto.isHidden);
+  }
+
   @Get('sponsorships/brands/interested')
   @Roles('SUPER_ADMIN', 'CITY_ADMIN', 'MODERATOR')
   @ApiOperation({

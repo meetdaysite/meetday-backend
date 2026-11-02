@@ -564,6 +564,7 @@ export class SponsorshipService {
       where: {
         AND: [
           { status: SponsorshipStatus.PUBLISHED },
+          { isHidden: false },
           // A community/space an admin has hidden must not surface in brand browse/discovery at all.
           {
             NOT: {
@@ -663,7 +664,7 @@ export class SponsorshipService {
         },
       },
     });
-    if (!proposal || proposal.status !== SponsorshipStatus.PUBLISHED)
+    if (!proposal || proposal.status !== SponsorshipStatus.PUBLISHED || proposal.isHidden)
       throw new NotFoundException('Sponsorship proposal not found');
     const isSpace = !!proposal.spaceProfile;
     const isBrand = !!proposal.brandProfile;
@@ -837,7 +838,7 @@ export class SponsorshipService {
         },
       },
     });
-    if (!proposal || proposal.status !== SponsorshipStatus.PUBLISHED)
+    if (!proposal || proposal.status !== SponsorshipStatus.PUBLISHED || proposal.isHidden)
       throw new NotFoundException('Sponsorship proposal not found');
 
     const effectiveEndDate = proposal.eventEndDate ?? proposal.eventDate;

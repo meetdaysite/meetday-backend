@@ -1582,6 +1582,7 @@ export class AdminService {
     createdAt: true,
     updatedAt: true,
     pendingRevision: true,
+    isHidden: true,
     hostProfile: {
       select: {
         id: true,
@@ -1894,6 +1895,26 @@ export class AdminService {
     ]);
 
     return { ...proposal, imageUrl, docUrl };
+  }
+
+  // Quick one-click hide/unhide from the sponsorship proposals list — prevents brands from discovering
+  // or viewing the proposal in explore/browse, while keeping the proposal intact.
+  async setSponsorshipProposalVisibility(id: string, adminId: string, isHidden: boolean) {
+    const existing = await this.prisma.sponsorshipProposal.findUnique({ where: { id }, select: { id: true, name: true } });
+    if (!existing) throw new NotFoundException('Sponsorship proposal not found');
+
+    await this.prisma.sponsorshipProposal.update({ where: { id }, data: { isHidden } });
+
+    this.auditLogService.log({
+      actorId: adminId,
+      actorRole: 'ADMIN',
+      action: 'SPONSORSHIP_PROPOSAL_EDITED_BY_ADMIN',
+      entityType: 'SPONSORSHIP_PROPOSAL',
+      entityId: id,
+      metadata: { name: existing.name, isHidden },
+    });
+
+    return this.getSponsorshipDetail(id);
   }
 
   async approveSponsorship(id: string, adminId: string) {

@@ -1522,6 +1522,8 @@ model SponsorshipProposal {
   reviewedAt           DateTime?
   submittedAt          DateTime?
 
+  isHidden Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
