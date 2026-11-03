@@ -21,6 +21,16 @@ export class UpdateAdminSponsorshipDto {
   @IsUUID()
   hostProfileId?: string;
 
+  @ApiPropertyOptional({ description: 'Reassign the proposal to a different existing space partner/hub' })
+  @IsOptional()
+  @IsUUID()
+  spaceProfileId?: string;
+
+  @ApiPropertyOptional({ description: 'Reassign the proposal to a different existing brand' })
+  @IsOptional()
+  @IsUUID()
+  brandProfileId?: string;
+
   @ApiPropertyOptional({ example: 'Sunset Music Festival' })
   @IsOptional()
   @IsString()

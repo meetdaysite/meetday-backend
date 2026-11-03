@@ -33,6 +33,16 @@ export class CreateAdminSponsorshipDto {
   @IsUUID()
   hostProfileId?: string;
 
+  @ApiPropertyOptional({ description: 'Attribute the proposal to a specific space partner/hub profile' })
+  @IsOptional()
+  @IsUUID()
+  spaceProfileId?: string;
+
+  @ApiPropertyOptional({ description: 'Attribute the proposal to a specific brand profile' })
+  @IsOptional()
+  @IsUUID()
+  brandProfileId?: string;
+
   @ApiProperty({ example: 'Sunset Music Festival' })
   @IsString()
   name: string;

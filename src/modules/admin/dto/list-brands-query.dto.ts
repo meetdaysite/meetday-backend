@@ -9,6 +9,10 @@ export enum BrandProfileStatus {
 }
 
 export class ListBrandsQueryDto {
+  @ApiPropertyOptional({ description: 'Search by brand name, user email, or user name' })
+  @IsOptional()
+  search?: string;
+
   @ApiPropertyOptional({ enum: BrandProfileStatus })
   @IsOptional()
   @IsEnum(BrandProfileStatus)
