@@ -3597,6 +3597,7 @@ model BrandCommunityCollaborationInterest {
   requesterBrand      BrandProfile @relation(fields: [requesterBrandId], references: [id], onDelete: Cascade)
   targetCommunityId   String
   targetCommunity     HostCommunityProfile @relation("BrandCommunityCollaborationTarget", fields: [targetCommunityId], references: [id], onDelete: Cascade)
+  interestDomain      String?                       @default("SPONSORSHIP") // "SPONSORSHIP" | "BRANDED_CONTENT" | "SAMPLING"
   chatStatus          CommunityCollaborationStatus @default(REQUESTED)
   chatAcceptedAt      DateTime?
   lastMessageAt       DateTime?

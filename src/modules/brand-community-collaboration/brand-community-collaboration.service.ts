@@ -3,6 +3,7 @@ import { CommunityCollaborationStatus } from '@prisma/client'
 import { PrismaService } from '../../prisma/prisma.service'
 import { StorageService } from '../../common/storage/storage.service'
 import { CreateCollaborationMessageDto } from '../community-collaboration/dto/create-collaboration-message.dto'
+import { MarkBrandCommunityInterestDto } from './dto/mark-brand-community-interest.dto'
 import { NotificationsService } from '../notifications/notifications.service'
 import { redactPersonalInfo } from '../../common/utils/redact-personal-info.util'
 
@@ -56,7 +57,7 @@ export class BrandCommunityCollaborationService {
     }
   }
 
-  async markInterest(targetCommunityId: string, brandUserId: string) {
+  async markInterest(targetCommunityId: string, brandUserId: string, dto?: MarkBrandCommunityInterestDto) {
     const { brand } = await this.getIdentity(brandUserId)
     if (!brand) throw new UnauthorizedException('Brand profile required')
     const target = await this.prisma.hostCommunityProfile.findFirst({
@@ -66,21 +67,57 @@ export class BrandCommunityCollaborationService {
     const existing = await this.prisma.brandCommunityCollaborationInterest.findUnique({
       where: { requesterBrandId_targetCommunityId: { requesterBrandId: brand.id, targetCommunityId: target.id } },
     })
-    if (existing) return { message: 'Collaboration request already exists', alreadyInterested: true, interestId: existing.id, chatStatus: existing.chatStatus }
-    const interest = await this.prisma.brandCommunityCollaborationInterest.create({ data: { requesterBrandId: brand.id, targetCommunityId: target.id } })
+    const domain = dto?.domain || 'SPONSORSHIP'
+
+    if (existing) {
+      if (dto?.domain && existing.interestDomain !== dto.domain) {
+        await this.prisma.brandCommunityCollaborationInterest.update({
+          where: { id: existing.id },
+          data: { interestDomain: dto.domain },
+        })
+      }
+      return {
+        message: 'Collaboration request already exists',
+        alreadyInterested: true,
+        interestId: existing.id,
+        chatStatus: existing.chatStatus,
+        interestDomain: dto?.domain || existing.interestDomain || 'SPONSORSHIP',
+      }
+    }
+
+    const interest = await this.prisma.brandCommunityCollaborationInterest.create({
+      data: {
+        requesterBrandId: brand.id,
+        targetCommunityId: target.id,
+        interestDomain: domain,
+      },
+    })
 
     const communityRecipientUserIds = await this.getCommunityMemberUserIds(target.id)
     const uniqueRecipientUserIds = [...new Set(communityRecipientUserIds.filter((recipientUserId) => recipientUserId !== brandUserId))]
 
+    const domainLabels: Record<string, string> = {
+      SPONSORSHIP: 'Sponsorship',
+      BRANDED_CONTENT: 'Branded Content',
+      SAMPLING: 'Sampling',
+    }
+    const domainLabel = domainLabels[domain] || 'Collaboration'
+
     await Promise.all(uniqueRecipientUserIds.map((recipientUserId) => this.notifications.create(
       recipientUserId,
       'brand_community_chat_message',
-      `${brand.brandName} wants to collaborate`,
-      `Tap to view the collaboration request from ${brand.brandName}`,
+      `${brand.brandName} is interested in ${domainLabel}`,
+      `Tap to view the ${domainLabel.toLowerCase()} request from ${brand.brandName}`,
       { brandCommunityInterestId: interest.id, interestId: interest.id, collaborationType: 'BRAND_COMMUNITY' },
     )))
 
-    return { message: 'Collaboration request sent', alreadyInterested: false, interestId: interest.id, chatStatus: interest.chatStatus }
+    return {
+      message: 'Collaboration request sent',
+      alreadyInterested: false,
+      interestId: interest.id,
+      chatStatus: interest.chatStatus,
+      interestDomain: domain,
+    }
   }
 
   private async findForUser(interestId: string, userId: string, preferredRole?: 'BRAND' | 'COMMUNITY') {
@@ -124,6 +161,7 @@ export class BrandCommunityCollaborationService {
       counterpartName,
       counterpartAvatarUrl: logoKey ? await this.storage.getPresignedDownloadUrl(logoKey) : null,
       chatStatus: interest.chatStatus,
+      interestDomain: interest.interestDomain || 'SPONSORSHIP',
       lastMessagePreview: last ? last.content || (last.mediaKey ? '📎 Attachment' : '') : null,
       lastMessageAt: interest.lastMessageAt,
       createdAt: interest.createdAt,

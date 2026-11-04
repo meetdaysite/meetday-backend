@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post, Query, Request, UseGuards, Patch, D
 import { CommunityCollaborationStatus } from '@prisma/client'
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard'
 import { CreateCollaborationMessageDto } from '../community-collaboration/dto/create-collaboration-message.dto'
+import { MarkBrandCommunityInterestDto } from './dto/mark-brand-community-interest.dto'
 import { BrandCommunityCollaborationService } from './brand-community-collaboration.service'
 
 @Controller('brand-community-collaboration')
@@ -13,9 +14,13 @@ export class BrandCommunityCollaborationController {
   listCommunities() { return this.service.listCommunities() }
 
   @Post('interest/:targetCommunityId')
-  async markInterest(@Param('targetCommunityId') targetCommunityId: string, @Request() req: any) {
+  async markInterest(
+    @Param('targetCommunityId') targetCommunityId: string,
+    @Body() dto: MarkBrandCommunityInterestDto,
+    @Request() req: any,
+  ) {
     const identity = await this.service.getIdentityByFirebaseUid(req.user.uid)
-    return this.service.markInterest(targetCommunityId, identity.id)
+    return this.service.markInterest(targetCommunityId, identity.id, dto)
   }
 
   @Get('chats')
