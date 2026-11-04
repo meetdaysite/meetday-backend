@@ -1597,6 +1597,13 @@ export class AdminService {
         user: { select: { id: true, firstName: true, lastName: true, email: true } },
       },
     },
+    brandProfile: {
+      select: {
+        id: true,
+        brandName: true,
+        user: { select: { id: true, firstName: true, lastName: true, email: true } },
+      },
+    },
   } as const;
 
   async listPendingSponsorships(page: number, limit: number) {
@@ -1765,8 +1772,25 @@ export class AdminService {
   // (e.g. creating it on behalf of a real host who asked the team to do it for them),
   // otherwise falls back to the "Meetday Official" system host.
   async createSponsorshipAsAdmin(adminId: string, dto: CreateAdminSponsorshipDto) {
-    let hostProfileId: string;
-    if (dto.hostProfileId) {
+    let hostProfileId: string | null = null;
+    let spaceProfileId: string | null = null;
+    let brandProfileId: string | null = null;
+
+    if (dto.brandProfileId) {
+      const brandProfile = await this.prisma.brandProfile.findUnique({
+        where: { id: dto.brandProfileId },
+        select: { id: true },
+      });
+      if (!brandProfile) throw new NotFoundException('Brand profile not found');
+      brandProfileId = brandProfile.id;
+    } else if (dto.spaceProfileId) {
+      const spaceProfile = await this.prisma.spaceProfile.findUnique({
+        where: { id: dto.spaceProfileId },
+        select: { id: true },
+      });
+      if (!spaceProfile) throw new NotFoundException('Space profile not found');
+      spaceProfileId = spaceProfile.id;
+    } else if (dto.hostProfileId) {
       const hostProfile = await this.prisma.hostProfile.findUnique({
         where: { id: dto.hostProfileId },
         select: { id: true },
@@ -1780,6 +1804,8 @@ export class AdminService {
     const proposal = await this.prisma.sponsorshipProposal.create({
       data: {
         hostProfileId,
+        spaceProfileId,
+        brandProfileId,
         name: dto.name,
         about: dto.about,
         imageKey: dto.imageKey,
@@ -1808,6 +1834,20 @@ export class AdminService {
           select: {
             id: true,
             displayName: true,
+            user: { select: { id: true, firstName: true, lastName: true, email: true } },
+          },
+        },
+        spaceProfile: {
+          select: {
+            id: true,
+            businessName: true,
+            user: { select: { id: true, firstName: true, lastName: true, email: true } },
+          },
+        },
+        brandProfile: {
+          select: {
+            id: true,
+            brandName: true,
             user: { select: { id: true, firstName: true, lastName: true, email: true } },
           },
         },
@@ -1845,11 +1885,27 @@ export class AdminService {
       });
       if (!hostProfile) throw new NotFoundException('Host profile not found');
     }
+    if (dto.spaceProfileId) {
+      const spaceProfile = await this.prisma.spaceProfile.findUnique({
+        where: { id: dto.spaceProfileId },
+        select: { id: true },
+      });
+      if (!spaceProfile) throw new NotFoundException('Space profile not found');
+    }
+    if (dto.brandProfileId) {
+      const brandProfile = await this.prisma.brandProfile.findUnique({
+        where: { id: dto.brandProfileId },
+        select: { id: true },
+      });
+      if (!brandProfile) throw new NotFoundException('Brand profile not found');
+    }
 
     const proposal = await this.prisma.sponsorshipProposal.update({
       where: { id },
       data: {
         ...(dto.hostProfileId !== undefined && { hostProfileId: dto.hostProfileId }),
+        ...(dto.spaceProfileId !== undefined && { spaceProfileId: dto.spaceProfileId }),
+        ...(dto.brandProfileId !== undefined && { brandProfileId: dto.brandProfileId }),
         ...(dto.name !== undefined && { name: dto.name }),
         ...(dto.about !== undefined && { about: dto.about }),
         ...(dto.imageKey !== undefined && { imageKey: dto.imageKey }),
@@ -1874,6 +1930,20 @@ export class AdminService {
           select: {
             id: true,
             displayName: true,
+            user: { select: { id: true, firstName: true, lastName: true, email: true } },
+          },
+        },
+        spaceProfile: {
+          select: {
+            id: true,
+            businessName: true,
+            user: { select: { id: true, firstName: true, lastName: true, email: true } },
+          },
+        },
+        brandProfile: {
+          select: {
+            id: true,
+            brandName: true,
             user: { select: { id: true, firstName: true, lastName: true, email: true } },
           },
         },
@@ -2469,8 +2539,21 @@ export class AdminService {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
 
+    const where: Prisma.BrandProfileWhereInput = {};
+    if (query.approvalStatus) where.approvalStatus = query.approvalStatus;
+    if (query.search?.trim()) {
+      const q = query.search.trim();
+      where.OR = [
+        { brandName: { contains: q, mode: 'insensitive' } },
+        { workEmail: { contains: q, mode: 'insensitive' } },
+        { user: { email: { contains: q, mode: 'insensitive' } } },
+        { user: { firstName: { contains: q, mode: 'insensitive' } } },
+        { user: { lastName: { contains: q, mode: 'insensitive' } } },
+      ];
+    }
+
     const profiles = await this.prisma.brandProfile.findMany({
-      where: query.approvalStatus ? { approvalStatus: query.approvalStatus } : undefined,
+      where,
       select: {
         id: true,
         brandName: true,
