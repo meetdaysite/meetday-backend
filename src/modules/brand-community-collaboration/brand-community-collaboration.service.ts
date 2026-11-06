@@ -459,14 +459,13 @@ export class BrandCommunityCollaborationService {
     })
 
     // Post system message into chat
-    const actionText = existing ? 'updated the deal terms' : 'locked the deal terms'
     await this.prisma.brandCommunityCollaborationMessage.create({
       data: {
         collaborationId: interest.id,
         senderType: 'TARGET',
         senderId: userId,
         messageType: 'SYSTEM' as any,
-        content: `[System] Community ${actionText} for ${domainLabel} Collaboration.`,
+        content: '📄 A new deal proposal was shared for approval.',
       },
     })
 
@@ -514,7 +513,7 @@ export class BrandCommunityCollaborationService {
         senderType: 'REQUESTER',
         senderId: userId,
         messageType: 'SYSTEM' as any,
-        content: 'Congratulations! The deal is locked.',
+        content: '🔒 The deal is officially locked and confirmed!',
       },
     })
 
@@ -562,14 +561,14 @@ export class BrandCommunityCollaborationService {
       include: { report: true },
     })
 
-    const noteSuffix = note?.trim() ? `: "${note.trim()}"` : ''
+    const noteSuffix = note?.trim() ? ` Note: "${note.trim()}"` : ''
     await this.prisma.brandCommunityCollaborationMessage.create({
       data: {
         collaborationId: interest.id,
         senderType: 'REQUESTER',
         senderId: userId,
         messageType: 'SYSTEM' as any,
-        content: `⚠️ Changes were requested on the deal${noteSuffix}`,
+        content: `⚠️ Changes were requested on the deal.${noteSuffix}`,
       },
     })
 
@@ -656,7 +655,7 @@ export class BrandCommunityCollaborationService {
         senderType: 'TARGET',
         senderId: userId,
         messageType: 'SYSTEM' as any,
-        content: `[System] Deliverables report was submitted by the community.`,
+        content: `📋 The deliverables report was submitted for review.`,
       },
     })
 
