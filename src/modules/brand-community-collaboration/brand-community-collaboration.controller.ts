@@ -65,4 +65,53 @@ export class BrandCommunityCollaborationController {
     const identity = await this.service.getIdentityByFirebaseUid(req.user.uid)
     return this.service.deleteMessage(interestId, identity.id, messageId, asRole)
   }
+
+  @Get('chats/:interestId/deal')
+  async getDeal(@Param('interestId') interestId: string, @Request() req: any, @Query('asRole') asRole?: 'BRAND' | 'COMMUNITY') {
+    const identity = await this.service.getIdentityByFirebaseUid(req.user.uid)
+    return this.service.getDeal(interestId, identity.id, asRole)
+  }
+
+  @Post('chats/:interestId/deal')
+  async lockDeal(
+    @Param('interestId') interestId: string,
+    @Body() dto: any,
+    @Request() req: any,
+    @Query('asRole') asRole?: 'BRAND' | 'COMMUNITY',
+  ) {
+    const identity = await this.service.getIdentityByFirebaseUid(req.user.uid)
+    return this.service.lockDeal(interestId, identity.id, dto, asRole)
+  }
+
+  @Post('chats/:interestId/deal/approve')
+  async approveDeal(
+    @Param('interestId') interestId: string,
+    @Request() req: any,
+    @Query('asRole') asRole?: 'BRAND' | 'COMMUNITY',
+  ) {
+    const identity = await this.service.getIdentityByFirebaseUid(req.user.uid)
+    return this.service.approveDeal(interestId, identity.id, asRole)
+  }
+
+  @Post('chats/:interestId/deal/request-changes')
+  async requestDealChanges(
+    @Param('interestId') interestId: string,
+    @Body() body: { note?: string },
+    @Request() req: any,
+    @Query('asRole') asRole?: 'BRAND' | 'COMMUNITY',
+  ) {
+    const identity = await this.service.getIdentityByFirebaseUid(req.user.uid)
+    return this.service.requestDealChanges(interestId, identity.id, body.note, asRole)
+  }
+
+  @Post('chats/:interestId/deal/report')
+  async submitDealReport(
+    @Param('interestId') interestId: string,
+    @Body() dto: any,
+    @Request() req: any,
+    @Query('asRole') asRole?: 'BRAND' | 'COMMUNITY',
+  ) {
+    const identity = await this.service.getIdentityByFirebaseUid(req.user.uid)
+    return this.service.submitDealReport(interestId, identity.id, dto, asRole)
+  }
 }

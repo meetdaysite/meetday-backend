@@ -364,4 +364,315 @@ export class BrandCommunityCollaborationService {
 
     return { message: 'Message deleted', deleted: true }
   }
+
+  // ─── Deal & Report Flow ──────────────────────────────────────────────────
+
+  async getDeal(interestId: string, userId: string, preferredRole?: 'BRAND' | 'COMMUNITY') {
+    await this.findForUser(interestId, userId, preferredRole)
+    return this.prisma.brandCommunityCollaborationDeal.findUnique({
+      where: { collaborationInterestId: interestId },
+      include: { report: true },
+    })
+  }
+
+  async lockDeal(
+    interestId: string,
+    userId: string,
+    dto: any,
+    preferredRole?: 'BRAND' | 'COMMUNITY',
+  ) {
+    const { interest, isBrand } = await this.findForUser(interestId, userId, preferredRole)
+    if (isBrand) {
+      throw new ForbiddenException('Only the community can lock a deal')
+    }
+    if (interest.chatStatus !== 'ACCEPTED') {
+      throw new BadRequestException('The chat must be accepted before locking a deal')
+    }
+
+    const domain = (dto.collaborationType || interest.interestDomain || 'SPONSORSHIP').toUpperCase()
+    const domainLabels: Record<string, string> = {
+      SPONSORSHIP: 'Sponsorship',
+      BRANDED_CONTENT: 'Branded Content',
+      SAMPLING: 'Sampling',
+    }
+    const domainLabel = domainLabels[domain] || domain
+
+    const existing = await this.prisma.brandCommunityCollaborationDeal.findUnique({
+      where: { collaborationInterestId: interestId },
+    })
+
+    let deal
+    if (existing) {
+      if (existing.status === 'APPROVED') {
+        throw new BadRequestException('This deal is already approved and locked')
+      }
+      deal = await this.prisma.brandCommunityCollaborationDeal.update({
+        where: { id: existing.id },
+        data: {
+          collaborationType: domain,
+          projectName: dto.projectName,
+          startDate: new Date(dto.startDate),
+          endDate: dto.endDate ? new Date(dto.endDate) : null,
+          time: dto.time,
+          sponsorshipCategory: dto.sponsorshipCategory,
+          sponsorshipAmount: dto.sponsorshipAmount ?? 0,
+          venue: dto.venue,
+          barterElements: dto.barterElements,
+          deliverables: dto.deliverables,
+          otherTerms: dto.otherTerms,
+          additionalNotes: dto.additionalNotes,
+          dealData: dto.dealData ?? existing.dealData,
+          status: 'PENDING_APPROVAL',
+          version: existing.version + 1,
+          changeRequestNote: null,
+        },
+        include: { report: true },
+      })
+    } else {
+      deal = await this.prisma.brandCommunityCollaborationDeal.create({
+        data: {
+          collaborationInterestId: interest.id,
+          collaborationType: domain,
+          projectName: dto.projectName,
+          startDate: new Date(dto.startDate),
+          endDate: dto.endDate ? new Date(dto.endDate) : null,
+          time: dto.time,
+          sponsorshipCategory: dto.sponsorshipCategory,
+          sponsorshipAmount: dto.sponsorshipAmount ?? 0,
+          venue: dto.venue,
+          barterElements: dto.barterElements,
+          deliverables: dto.deliverables,
+          otherTerms: dto.otherTerms,
+          additionalNotes: dto.additionalNotes,
+          dealData: dto.dealData,
+          createdById: userId,
+          status: 'PENDING_APPROVAL',
+        },
+        include: { report: true },
+      })
+    }
+
+    // Keep interest domain in sync
+    await this.prisma.brandCommunityCollaborationInterest.update({
+      where: { id: interest.id },
+      data: { interestDomain: domain },
+    })
+
+    // Post system message into chat
+    const actionText = existing ? 'updated the deal terms' : 'locked the deal terms'
+    await this.prisma.brandCommunityCollaborationMessage.create({
+      data: {
+        collaborationId: interest.id,
+        senderType: 'TARGET',
+        senderId: userId,
+        messageType: 'SYSTEM' as any,
+        content: `[System] Community ${actionText} for ${domainLabel} Collaboration.`,
+      },
+    })
+
+    const brandUserIds = await this.getBrandMemberUserIds(interest.requesterBrandId)
+    await Promise.all(
+      brandUserIds.map((uid) =>
+        this.notifications.create(
+          uid,
+          'brand_community_chat_message',
+          `Deal proposal: ${dto.projectName}`,
+          `The community shared a ${domainLabel.toLowerCase()} deal for your approval.`,
+          { brandCommunityInterestId: interest.id, interestId: interest.id, collaborationType: 'BRAND_COMMUNITY' },
+        ),
+      ),
+    )
+
+    return deal
+  }
+
+  async approveDeal(interestId: string, userId: string, preferredRole?: 'BRAND' | 'COMMUNITY') {
+    const { interest, isBrand } = await this.findForUser(interestId, userId, preferredRole)
+    if (!isBrand) {
+      throw new ForbiddenException('Only the brand can approve the deal')
+    }
+
+    const deal = await this.prisma.brandCommunityCollaborationDeal.findUnique({
+      where: { collaborationInterestId: interestId },
+    })
+    if (!deal) throw new NotFoundException('No deal found for this chat')
+    if (deal.status === 'APPROVED') return deal
+
+    const updated = await this.prisma.brandCommunityCollaborationDeal.update({
+      where: { id: deal.id },
+      data: {
+        status: 'APPROVED',
+        approvedAt: new Date(),
+        changeRequestNote: null,
+      },
+      include: { report: true },
+    })
+
+    await this.prisma.brandCommunityCollaborationMessage.create({
+      data: {
+        collaborationId: interest.id,
+        senderType: 'REQUESTER',
+        senderId: userId,
+        messageType: 'SYSTEM' as any,
+        content: 'Congratulations! The deal is locked.',
+      },
+    })
+
+    const hostUserIds = await this.getCommunityMemberUserIds(interest.targetCommunityId)
+    await Promise.all(
+      hostUserIds.map((uid) =>
+        this.notifications.create(
+          uid,
+          'brand_community_chat_message',
+          `Deal Approved: ${deal.projectName}`,
+          'The brand has approved and locked the deal terms.',
+          { brandCommunityInterestId: interest.id, interestId: interest.id, collaborationType: 'BRAND_COMMUNITY' },
+        ),
+      ),
+    )
+
+    return updated
+  }
+
+  async requestDealChanges(
+    interestId: string,
+    userId: string,
+    note?: string,
+    preferredRole?: 'BRAND' | 'COMMUNITY',
+  ) {
+    const { interest, isBrand } = await this.findForUser(interestId, userId, preferredRole)
+    if (!isBrand) {
+      throw new ForbiddenException('Only the brand can request changes to the deal')
+    }
+
+    const deal = await this.prisma.brandCommunityCollaborationDeal.findUnique({
+      where: { collaborationInterestId: interestId },
+    })
+    if (!deal) throw new NotFoundException('No deal found for this chat')
+    if (deal.status === 'APPROVED') {
+      throw new BadRequestException('This deal is already approved')
+    }
+
+    const updated = await this.prisma.brandCommunityCollaborationDeal.update({
+      where: { id: deal.id },
+      data: {
+        status: 'CHANGES_REQUESTED',
+        changeRequestNote: note?.trim() || null,
+      },
+      include: { report: true },
+    })
+
+    const noteSuffix = note?.trim() ? `: "${note.trim()}"` : ''
+    await this.prisma.brandCommunityCollaborationMessage.create({
+      data: {
+        collaborationId: interest.id,
+        senderType: 'REQUESTER',
+        senderId: userId,
+        messageType: 'SYSTEM' as any,
+        content: `⚠️ Changes were requested on the deal${noteSuffix}`,
+      },
+    })
+
+    const hostUserIds = await this.getCommunityMemberUserIds(interest.targetCommunityId)
+    await Promise.all(
+      hostUserIds.map((uid) =>
+        this.notifications.create(
+          uid,
+          'brand_community_chat_message',
+          `Changes Requested: ${deal.projectName}`,
+          note?.trim() ? `Note: ${note.trim()}` : 'The brand requested changes to the deal.',
+          { brandCommunityInterestId: interest.id, interestId: interest.id, collaborationType: 'BRAND_COMMUNITY' },
+        ),
+      ),
+    )
+
+    return updated
+  }
+
+  async submitDealReport(
+    interestId: string,
+    userId: string,
+    dto: any,
+    preferredRole?: 'BRAND' | 'COMMUNITY',
+  ) {
+    const { interest, isBrand } = await this.findForUser(interestId, userId, preferredRole)
+    if (isBrand) {
+      throw new ForbiddenException('Only the community can submit the deliverables report')
+    }
+
+    const deal = await this.prisma.brandCommunityCollaborationDeal.findUnique({
+      where: { collaborationInterestId: interestId },
+      include: { report: true },
+    })
+    if (!deal) throw new NotFoundException('No deal found')
+    if (deal.status !== 'APPROVED') {
+      throw new BadRequestException('The deal must be approved before submitting a report')
+    }
+
+    let report
+    if (deal.report) {
+      report = await this.prisma.brandCommunityCollaborationDealReport.update({
+        where: { id: deal.report.id },
+        data: {
+          projectName: dto.projectName || deal.projectName,
+          eventDate: dto.eventDate || deal.startDate.toISOString().slice(0, 10),
+          venue: dto.venue || deal.venue,
+          time: dto.time || deal.time,
+          guestCount: dto.guestCount,
+          ageRange: dto.ageRange,
+          deliverables: dto.deliverables ?? deal.report.deliverables,
+          videoLinks: dto.videoLinks ?? deal.report.videoLinks,
+          socialLinks: dto.socialLinks ?? deal.report.socialLinks,
+          mediaKeys: dto.mediaKeys ?? deal.report.mediaKeys,
+          summary: dto.summary ?? deal.report.summary,
+          reportData: dto.reportData ?? deal.report.reportData,
+          status: 'APPROVED',
+        },
+      })
+    } else {
+      report = await this.prisma.brandCommunityCollaborationDealReport.create({
+        data: {
+          dealId: deal.id,
+          projectName: dto.projectName || deal.projectName,
+          eventDate: dto.eventDate || deal.startDate.toISOString().slice(0, 10),
+          venue: dto.venue || deal.venue,
+          time: dto.time || deal.time,
+          guestCount: dto.guestCount,
+          ageRange: dto.ageRange,
+          deliverables: dto.deliverables ?? [],
+          videoLinks: dto.videoLinks ?? [],
+          socialLinks: dto.socialLinks ?? [],
+          mediaKeys: dto.mediaKeys ?? [],
+          summary: dto.summary,
+          reportData: dto.reportData,
+          status: 'APPROVED',
+        },
+      })
+    }
+
+    await this.prisma.brandCommunityCollaborationMessage.create({
+      data: {
+        collaborationId: interest.id,
+        senderType: 'TARGET',
+        senderId: userId,
+        messageType: 'SYSTEM' as any,
+        content: `[System] Deliverables report was submitted by the community.`,
+      },
+    })
+
+    const brandUserIds = await this.getBrandMemberUserIds(interest.requesterBrandId)
+    await Promise.all(
+      brandUserIds.map((uid) =>
+        this.notifications.create(
+          uid,
+          'brand_community_chat_message',
+          `Report Submitted: ${deal.projectName}`,
+          'The community has submitted the deliverables report.',
+          { brandCommunityInterestId: interest.id, interestId: interest.id, collaborationType: 'BRAND_COMMUNITY' },
+        ),
+      ),
+    )
+
+    return report
+  }
 }

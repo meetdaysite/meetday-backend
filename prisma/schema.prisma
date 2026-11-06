@@ -118,6 +118,7 @@ model User {
 
   communityCollaborationMessages CommunityCollaborationMessage[] @relation("CommunityChatMessageSender")
   brandCommunityCollaborationMessages BrandCommunityCollaborationMessage[] @relation("BrandCommunityChatMessageSender")
+  brandCommunityDealsCreated BrandCommunityCollaborationDeal[] @relation("BrandCommunityDealCreatedBy")
 
   meetdayChatThreads  MeetdayChatThread[]  @relation("MeetdayChatThreadUser")
   meetdayChatMessages MeetdayChatMessage[] @relation("MeetdayChatMessageSender")
@@ -3604,6 +3605,7 @@ model BrandCommunityCollaborationInterest {
   requesterLastReadAt DateTime?
   targetLastReadAt    DateTime?
   chatMessages        BrandCommunityCollaborationMessage[]
+  deal                BrandCommunityCollaborationDeal?
   createdAt           DateTime @default(now())
 
   @@unique([requesterBrandId, targetCommunityId])
@@ -3630,4 +3632,67 @@ model BrandCommunityCollaborationMessage {
 
   @@index([collaborationId, createdAt])
   @@map("brand_community_collaboration_messages")
+}
+
+model BrandCommunityCollaborationDeal {
+  id                    String              @id @default(uuid())
+  collaborationInterestId String            @unique
+  collaborationInterest   BrandCommunityCollaborationInterest @relation(fields: [collaborationInterestId], references: [id], onDelete: Cascade)
+
+  collaborationType     String              @default("SPONSORSHIP") // "SPONSORSHIP" | "BRANDED_CONTENT" | "SAMPLING"
+  projectName           String
+  startDate             DateTime
+  endDate               DateTime?
+  time                  String?
+  sponsorshipCategory   String?
+  sponsorshipAmount     Decimal             @default(0)
+  venue                 String
+  barterElements        String?
+  deliverables          String              @db.Text
+  otherTerms            String?             @db.Text
+  additionalNotes       String?             @db.Text
+  dealData              Json?               // Domain-specific custom fields payload
+
+  status                SponsorshipDealStatus @default(PENDING_APPROVAL)
+  version               Int                 @default(1)
+  changeRequestNote     String?             @db.Text
+
+  createdById           String
+  createdBy             User                @relation("BrandCommunityDealCreatedBy", fields: [createdById], references: [id])
+
+  approvedAt            DateTime?
+
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  report                BrandCommunityCollaborationDealReport?
+
+  @@index([status])
+  @@map("brand_community_collaboration_deals")
+}
+
+model BrandCommunityCollaborationDealReport {
+  id                    String                          @id @default(uuid())
+  dealId                String                          @unique
+  deal                  BrandCommunityCollaborationDeal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  projectName           String
+  eventDate             String
+  venue                 String
+  time                  String?
+  guestCount            String?
+  ageRange              String?
+  deliverables          Json                            @default("[]")
+  videoLinks            String[]                        @default([])
+  socialLinks           String[]                        @default([])
+  mediaKeys             String[]                        @default([])
+  summary               String?                         @db.Text
+  reportData            Json?
+  status                String                          @default("PENDING") // PENDING, APPROVED, REVISION_REQUESTED
+  revisionNote          String?
+
+  createdAt             DateTime                        @default(now())
+  updatedAt             DateTime                        @updatedAt
+
+  @@map("brand_community_collaboration_deal_reports")
 }
