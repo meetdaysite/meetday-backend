@@ -645,6 +645,9 @@ export class BrandCommunityCollaborationService {
     if (deal.status !== 'APPROVED') {
       throw new BadRequestException('The deal must be approved before submitting a report')
     }
+    if (deal.report && deal.report.status === 'APPROVED') {
+      throw new BadRequestException('This deliverables report has already been approved and cannot be resubmitted.')
+    }
 
     const nextStatus = isBrand ? (dto.status ?? 'PENDING') : 'PENDING'
     const nextRevisionNote = isBrand && dto.status === 'REVISION_REQUESTED' ? (dto.revisionNote ?? null) : null
