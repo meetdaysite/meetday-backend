@@ -401,6 +401,9 @@ export class BrandCommunityCollaborationService {
       where: { collaborationInterestId: interestId },
     })
 
+    const defaultProjectName = dto.projectName?.trim() || `${domainLabel} Deal`;
+    const defaultVenue = dto.venue?.trim() || (domain === 'BRANDED_CONTENT' ? 'Online / Content' : 'TBD');
+
     let deal
     if (existing) {
       if (existing.status === 'APPROVED') {
@@ -410,13 +413,13 @@ export class BrandCommunityCollaborationService {
         where: { id: existing.id },
         data: {
           collaborationType: domain,
-          projectName: dto.projectName,
+          projectName: defaultProjectName,
           startDate: new Date(dto.startDate),
           endDate: dto.endDate ? new Date(dto.endDate) : null,
           time: dto.time,
           sponsorshipCategory: dto.sponsorshipCategory,
           sponsorshipAmount: dto.sponsorshipAmount ?? 0,
-          venue: dto.venue,
+          venue: defaultVenue,
           barterElements: dto.barterElements,
           deliverables: dto.deliverables,
           otherTerms: dto.otherTerms,
@@ -433,13 +436,13 @@ export class BrandCommunityCollaborationService {
         data: {
           collaborationInterestId: interest.id,
           collaborationType: domain,
-          projectName: dto.projectName,
+          projectName: defaultProjectName,
           startDate: new Date(dto.startDate),
           endDate: dto.endDate ? new Date(dto.endDate) : null,
           time: dto.time,
           sponsorshipCategory: dto.sponsorshipCategory,
           sponsorshipAmount: dto.sponsorshipAmount ?? 0,
-          venue: dto.venue,
+          venue: defaultVenue,
           barterElements: dto.barterElements,
           deliverables: dto.deliverables,
           otherTerms: dto.otherTerms,

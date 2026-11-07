@@ -8,10 +8,11 @@ export class UpsertBrandCommunityDealDto {
   @IsString()
   collaborationType?: string;
 
-  @ApiProperty({ example: 'Brand & Community Offline Activation' })
+  @ApiPropertyOptional({ example: 'Brand & Community Offline Activation' })
+  @IsOptional()
   @IsString()
   @MaxLength(200)
-  projectName: string;
+  projectName?: string;
 
   @ApiProperty({ example: '2026-12-05T00:00:00.000Z' })
   @IsISO8601()
@@ -34,10 +35,11 @@ export class UpsertBrandCommunityDealDto {
   @MaxLength(500)
   sponsorshipCategory?: string;
 
-  @ApiProperty({ example: 'Bengaluru' })
+  @ApiPropertyOptional({ example: 'Bengaluru' })
+  @IsOptional()
   @IsString()
   @MaxLength(300)
-  venue: string;
+  venue?: string;
 
   @ApiPropertyOptional({ example: '100 samples distributed' })
   @IsOptional()
