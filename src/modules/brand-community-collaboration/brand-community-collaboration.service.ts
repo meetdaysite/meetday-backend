@@ -367,12 +367,43 @@ export class BrandCommunityCollaborationService {
 
   // ─── Deal & Report Flow ──────────────────────────────────────────────────
 
+  private async attachProofUrls<T>(dealOrReport: T): Promise<T> {
+    if (!dealOrReport) return dealOrReport
+    const report = (dealOrReport as any).report !== undefined ? (dealOrReport as any).report : dealOrReport
+    if (!report || !Array.isArray(report.mediaKeys)) return dealOrReport
+
+    const proofUrls = await Promise.all(
+      (report.mediaKeys as string[]).filter(Boolean).map(async (key) => {
+        try {
+          return await this.storage.getPresignedDownloadUrl(key)
+        } catch {
+          return ''
+        }
+      }),
+    )
+
+    if ((dealOrReport as any).report !== undefined) {
+      return {
+        ...dealOrReport,
+        report: {
+          ...report,
+          proofUrls,
+        },
+      }
+    }
+    return {
+      ...dealOrReport,
+      proofUrls,
+    }
+  }
+
   async getDeal(interestId: string, userId: string, preferredRole?: 'BRAND' | 'COMMUNITY') {
     await this.findForUser(interestId, userId, preferredRole)
-    return this.prisma.brandCommunityCollaborationDeal.findUnique({
+    const deal = await this.prisma.brandCommunityCollaborationDeal.findUnique({
       where: { collaborationInterestId: interestId },
       include: { report: true },
     })
+    return this.attachProofUrls(deal)
   }
 
   async lockDeal(
@@ -485,7 +516,7 @@ export class BrandCommunityCollaborationService {
       ),
     )
 
-    return deal
+    return this.attachProofUrls(deal)
   }
 
   async approveDeal(interestId: string, userId: string, preferredRole?: 'BRAND' | 'COMMUNITY') {
@@ -496,9 +527,10 @@ export class BrandCommunityCollaborationService {
 
     const deal = await this.prisma.brandCommunityCollaborationDeal.findUnique({
       where: { collaborationInterestId: interestId },
+      include: { report: true },
     })
     if (!deal) throw new NotFoundException('No deal found for this chat')
-    if (deal.status === 'APPROVED') return deal
+    if (deal.status === 'APPROVED') return this.attachProofUrls(deal)
 
     const updated = await this.prisma.brandCommunityCollaborationDeal.update({
       where: { id: deal.id },
@@ -533,7 +565,7 @@ export class BrandCommunityCollaborationService {
       ),
     )
 
-    return updated
+    return this.attachProofUrls(updated)
   }
 
   async requestDealChanges(
@@ -549,6 +581,7 @@ export class BrandCommunityCollaborationService {
 
     const deal = await this.prisma.brandCommunityCollaborationDeal.findUnique({
       where: { collaborationInterestId: interestId },
+      include: { report: true },
     })
     if (!deal) throw new NotFoundException('No deal found for this chat')
     if (deal.status === 'APPROVED') {
@@ -588,7 +621,7 @@ export class BrandCommunityCollaborationService {
       ),
     )
 
-    return updated
+    return this.attachProofUrls(updated)
   }
 
   async submitDealReport(
@@ -709,6 +742,6 @@ export class BrandCommunityCollaborationService {
       )
     }
 
-    return report
+    return this.attachProofUrls(report)
   }
 }
