@@ -598,7 +598,9 @@ export class BrandCommunityCollaborationService {
     preferredRole?: 'BRAND' | 'COMMUNITY',
   ) {
     const { interest, isBrand } = await this.findForUser(interestId, userId, preferredRole)
-    if (isBrand) {
+    const isReviewAction = dto.status === 'APPROVED' || dto.status === 'REVISION_REQUESTED'
+
+    if (isBrand && !isReviewAction) {
       throw new ForbiddenException('Only the community can submit the deliverables report')
     }
 
@@ -610,6 +612,9 @@ export class BrandCommunityCollaborationService {
     if (deal.status !== 'APPROVED') {
       throw new BadRequestException('The deal must be approved before submitting a report')
     }
+
+    const nextStatus = isBrand ? (dto.status ?? 'PENDING') : 'PENDING'
+    const nextRevisionNote = isBrand && dto.status === 'REVISION_REQUESTED' ? (dto.revisionNote ?? null) : null
 
     let report
     if (deal.report) {
@@ -628,7 +633,8 @@ export class BrandCommunityCollaborationService {
           mediaKeys: dto.mediaKeys ?? deal.report.mediaKeys,
           summary: dto.summary ?? deal.report.summary,
           reportData: dto.reportData ?? deal.report.reportData,
-          status: 'APPROVED',
+          status: nextStatus,
+          revisionNote: nextRevisionNote,
         },
       })
     } else {
@@ -647,33 +653,61 @@ export class BrandCommunityCollaborationService {
           mediaKeys: dto.mediaKeys ?? [],
           summary: dto.summary,
           reportData: dto.reportData,
-          status: 'APPROVED',
+          status: nextStatus,
+          revisionNote: nextRevisionNote,
         },
       })
     }
 
-    await this.prisma.brandCommunityCollaborationMessage.create({
-      data: {
-        collaborationId: interest.id,
-        senderType: 'TARGET',
-        senderId: userId,
-        messageType: 'SYSTEM' as any,
-        content: `📋 The deliverables report was submitted for review.`,
-      },
-    })
-
-    const brandUserIds = await this.getBrandMemberUserIds(interest.requesterBrandId)
-    await Promise.all(
-      brandUserIds.map((uid) =>
-        this.notifications.create(
-          uid,
+    if (isBrand) {
+      const isApproved = nextStatus === 'APPROVED'
+      await this.prisma.brandCommunityCollaborationMessage.create({
+        data: {
+          collaborationId: interest.id,
+          senderType: 'REQUESTER',
+          senderId: userId,
+          messageType: 'SYSTEM' as any,
+          content: isApproved
+            ? `🎉 The brand approved the deliverables report! Deal is closed.`
+            : `⚠️ The brand requested changes on the deliverables report: "${nextRevisionNote || 'Please review deliverables'}"`,
+        },
+      })
+      const communityUserId = interest.targetCommunity?.hostProfile?.userId
+      if (communityUserId) {
+        await this.notifications.create(
+          communityUserId,
           'brand_community_chat_message',
-          `Report Submitted: ${deal.projectName}`,
-          'The community has submitted the deliverables report.',
+          isApproved ? 'Report Approved' : 'Report Revision Requested',
+          isApproved
+            ? 'The brand approved your deliverables report. Deal closed!'
+            : `The brand requested changes: ${nextRevisionNote || 'Please review.'}`,
           { brandCommunityInterestId: interest.id, interestId: interest.id, collaborationType: 'BRAND_COMMUNITY' },
+        )
+      }
+    } else {
+      await this.prisma.brandCommunityCollaborationMessage.create({
+        data: {
+          collaborationId: interest.id,
+          senderType: 'TARGET',
+          senderId: userId,
+          messageType: 'SYSTEM' as any,
+          content: `📋 The deliverables report was submitted for review.`,
+        },
+      })
+
+      const brandUserIds = await this.getBrandMemberUserIds(interest.requesterBrandId)
+      await Promise.all(
+        brandUserIds.map((uid) =>
+          this.notifications.create(
+            uid,
+            'brand_community_chat_message',
+            `Report Submitted: ${deal.projectName}`,
+            'The community has submitted the deliverables report.',
+            { brandCommunityInterestId: interest.id, interestId: interest.id, collaborationType: 'BRAND_COMMUNITY' },
+          ),
         ),
-      ),
-    )
+      )
+    }
 
     return report
   }

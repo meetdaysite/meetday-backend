@@ -69,6 +69,7 @@ const CONTEXT_CONTENT_TYPES: Record<UploadContext, readonly string[]> = {
   [UploadContext.COMMUNITY_BRAND_LOGO_MEDIA]: LOGO_IMAGE_TYPES,
   [UploadContext.ADMIN_ANNOUNCEMENT_ATTACHMENT]: [...IMAGE_TYPES, 'application/pdf'],
   [UploadContext.COMMUNITY_COLLABORATION_CHAT_MEDIA]: [...IMAGE_TYPES, 'application/pdf'],
+  [UploadContext.BRAND_COMMUNITY_DEAL_REPORT_MEDIA]: IMAGE_TYPES,
 };
 
 // Platform-admin roles required by the admin-only contexts.
@@ -606,6 +607,26 @@ export class StorageService {
           spaceHostReportInterest.spaceProfile.userId === userId || SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '');
         if (!isSpaceHostReportOwner) throw new ForbiddenException('You do not own this deal');
         key = `space-host-deal-reports/${dto.resourceId}/${randomUUID()}.${ext}`;
+        break;
+      }
+
+      case UploadContext.BRAND_COMMUNITY_DEAL_REPORT_MEDIA: {
+        if (!dto.resourceId) {
+          throw new BadRequestException('resourceId (brand-community collaboration interest UUID) is required for BRAND_COMMUNITY_DEAL_REPORT_MEDIA');
+        }
+        const bcInterest = await this.prisma.brandCommunityCollaborationInterest.findUnique({
+          where: { id: dto.resourceId },
+          select: {
+            targetCommunity: { select: { hostProfileId: true } },
+          },
+        });
+        if (!bcInterest) throw new NotFoundException('Brand community collaboration not found');
+        const bcHostProfileIds = await this.teamAccessService.getHostProfileIds(userId);
+        const isBcOwner =
+          bcHostProfileIds.includes(bcInterest.targetCommunity.hostProfileId) ||
+          SPONSORSHIP_ADMIN_ROLES.includes(roleName ?? '');
+        if (!isBcOwner) throw new ForbiddenException('You do not own this deal');
+        key = `brand-community-deal-reports/${dto.resourceId}/${randomUUID()}.${ext}`;
         break;
       }
 
