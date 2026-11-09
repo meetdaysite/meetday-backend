@@ -3605,7 +3605,7 @@ model BrandCommunityCollaborationInterest {
   requesterLastReadAt DateTime?
   targetLastReadAt    DateTime?
   chatMessages        BrandCommunityCollaborationMessage[]
-  deal                BrandCommunityCollaborationDeal?
+  deals               BrandCommunityCollaborationDeal[]
   createdAt           DateTime @default(now())
 
   @@unique([requesterBrandId, targetCommunityId])
@@ -3636,7 +3636,7 @@ model BrandCommunityCollaborationMessage {
 
 model BrandCommunityCollaborationDeal {
   id                    String              @id @default(uuid())
-  collaborationInterestId String            @unique
+  collaborationInterestId String
   collaborationInterest   BrandCommunityCollaborationInterest @relation(fields: [collaborationInterestId], references: [id], onDelete: Cascade)
 
   collaborationType     String              @default("SPONSORSHIP") // "SPONSORSHIP" | "BRANDED_CONTENT" | "SAMPLING"
@@ -3667,6 +3667,7 @@ model BrandCommunityCollaborationDeal {
 
   report                BrandCommunityCollaborationDealReport?
 
+  @@index([collaborationInterestId])
   @@index([status])
   @@map("brand_community_collaboration_deals")
 }

@@ -72,6 +72,12 @@ export class BrandCommunityCollaborationController {
     return this.service.getDeal(interestId, identity.id, asRole)
   }
 
+  @Get('chats/:interestId/deals/archive')
+  async getPastDeals(@Param('interestId') interestId: string, @Request() req: any, @Query('asRole') asRole?: 'BRAND' | 'COMMUNITY') {
+    const identity = await this.service.getIdentityByFirebaseUid(req.user.uid)
+    return this.service.getPastDeals(interestId, identity.id, asRole)
+  }
+
   @Post('chats/:interestId/deal')
   async lockDeal(
     @Param('interestId') interestId: string,

@@ -399,11 +399,26 @@ export class BrandCommunityCollaborationService {
 
   async getDeal(interestId: string, userId: string, preferredRole?: 'BRAND' | 'COMMUNITY') {
     await this.findForUser(interestId, userId, preferredRole)
-    const deal = await this.prisma.brandCommunityCollaborationDeal.findUnique({
+    const deals = await this.prisma.brandCommunityCollaborationDeal.findMany({
       where: { collaborationInterestId: interestId },
       include: { report: true },
+      orderBy: { createdAt: 'desc' },
     })
-    return this.attachProofUrls(deal)
+    const activeDeal = deals.find((d) => d.report?.status !== 'APPROVED') || null
+    return this.attachProofUrls(activeDeal)
+  }
+
+  async getPastDeals(interestId: string, userId: string, preferredRole?: 'BRAND' | 'COMMUNITY') {
+    await this.findForUser(interestId, userId, preferredRole)
+    const deals = await this.prisma.brandCommunityCollaborationDeal.findMany({
+      where: {
+        collaborationInterestId: interestId,
+        report: { status: 'APPROVED' },
+      },
+      include: { report: true },
+      orderBy: { createdAt: 'desc' },
+    })
+    return Promise.all(deals.map((d) => this.attachProofUrls(d)))
   }
 
   async lockDeal(
@@ -428,9 +443,12 @@ export class BrandCommunityCollaborationService {
     }
     const domainLabel = domainLabels[domain] || domain
 
-    const existing = await this.prisma.brandCommunityCollaborationDeal.findUnique({
+    const deals = await this.prisma.brandCommunityCollaborationDeal.findMany({
       where: { collaborationInterestId: interestId },
+      include: { report: true },
+      orderBy: { createdAt: 'desc' },
     })
+    const existing = deals.find((d) => d.report?.status !== 'APPROVED') || null
 
     const defaultProjectName = dto.projectName?.trim() || `${domainLabel} Deal`;
     const defaultVenue = dto.venue?.trim() || (domain === 'BRANDED_CONTENT' ? 'Online / Content' : 'TBD');
@@ -525,11 +543,13 @@ export class BrandCommunityCollaborationService {
       throw new ForbiddenException('Only the brand can approve the deal')
     }
 
-    const deal = await this.prisma.brandCommunityCollaborationDeal.findUnique({
+    const deals = await this.prisma.brandCommunityCollaborationDeal.findMany({
       where: { collaborationInterestId: interestId },
       include: { report: true },
+      orderBy: { createdAt: 'desc' },
     })
-    if (!deal) throw new NotFoundException('No deal found for this chat')
+    const deal = deals.find((d) => d.report?.status !== 'APPROVED')
+    if (!deal) throw new NotFoundException('No active deal found for this chat')
     if (deal.status === 'APPROVED') return this.attachProofUrls(deal)
 
     const updated = await this.prisma.brandCommunityCollaborationDeal.update({
@@ -579,11 +599,13 @@ export class BrandCommunityCollaborationService {
       throw new ForbiddenException('Only the brand can request changes to the deal')
     }
 
-    const deal = await this.prisma.brandCommunityCollaborationDeal.findUnique({
+    const deals = await this.prisma.brandCommunityCollaborationDeal.findMany({
       where: { collaborationInterestId: interestId },
       include: { report: true },
+      orderBy: { createdAt: 'desc' },
     })
-    if (!deal) throw new NotFoundException('No deal found for this chat')
+    const deal = deals.find((d) => d.report?.status !== 'APPROVED')
+    if (!deal) throw new NotFoundException('No active deal found for this chat')
     if (deal.status === 'APPROVED') {
       throw new BadRequestException('This deal is already approved')
     }
@@ -637,11 +659,13 @@ export class BrandCommunityCollaborationService {
       throw new ForbiddenException('Only the community can submit the deliverables report')
     }
 
-    const deal = await this.prisma.brandCommunityCollaborationDeal.findUnique({
+    const deals = await this.prisma.brandCommunityCollaborationDeal.findMany({
       where: { collaborationInterestId: interestId },
       include: { report: true },
+      orderBy: { createdAt: 'desc' },
     })
-    if (!deal) throw new NotFoundException('No deal found')
+    const deal = deals.find((d) => d.report?.status !== 'APPROVED')
+    if (!deal) throw new NotFoundException('No active deal found')
     if (deal.status !== 'APPROVED') {
       throw new BadRequestException('The deal must be approved before submitting a report')
     }
@@ -704,7 +728,7 @@ export class BrandCommunityCollaborationService {
           senderId: userId,
           messageType: 'SYSTEM' as any,
           content: isApproved
-            ? `🎉 The brand approved the deliverables report! Deal is closed.`
+            ? `🎉 The brand approved the deliverables report! Deal completed and moved to archive.`
             : `⚠️ The brand requested changes on the deliverables report: "${nextRevisionNote || 'Please review deliverables'}"`,
         },
       })
@@ -715,7 +739,7 @@ export class BrandCommunityCollaborationService {
           'brand_community_chat_message',
           isApproved ? 'Report Approved' : 'Report Revision Requested',
           isApproved
-            ? 'The brand approved your deliverables report. Deal closed!'
+            ? 'The brand approved your deliverables report. Deal completed and moved to archive!'
             : `The brand requested changes: ${nextRevisionNote || 'Please review.'}`,
           { brandCommunityInterestId: interest.id, interestId: interest.id, collaborationType: 'BRAND_COMMUNITY' },
         )
