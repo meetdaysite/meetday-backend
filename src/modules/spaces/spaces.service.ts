@@ -397,8 +397,28 @@ export class SpacesService {
           : { spaceCommunityProfileId_hostProfileId: { spaceCommunityProfileId, hostProfileId: hostProfileId! } },
     });
     if (existing) {
-      return { message: 'Already interested', alreadyInterested: true, interestId: existing.id, chatStatus: existing.chatStatus };
+      if (dto.interestType && (existing as any).interestType !== dto.interestType) {
+        await this.prisma.spaceInterest.update({
+          where: { id: existing.id },
+          data: { interestType: dto.interestType } as any,
+        });
+      }
+      return {
+        message: 'Already interested',
+        alreadyInterested: true,
+        interestId: existing.id,
+        chatStatus: existing.chatStatus,
+        interestType: dto.interestType || (existing as any).interestType || null,
+      };
     }
+
+    const typeLabels: Record<string, string> = {
+      NAMING_RIGHTS: 'Naming Rights',
+      PHYSICAL_BRANDING: 'Physical Branding',
+      SAMPLING_DEMO: 'Sampling & Demo',
+      POPUPS_EXPERIENCES: 'Pop-ups & Experiences',
+    };
+    const typeLabel = (dto.interestType && typeLabels[dto.interestType]) || 'Collaboration';
 
     const interest = await this.prisma.spaceInterest.create({
       data: {
@@ -407,28 +427,38 @@ export class SpacesService {
         brandProfileId: requesterType === 'BRAND' ? brandProfileId : null,
         hostProfileId: requesterType === 'COMMUNITY' ? hostProfileId : null,
         message: dto.message?.trim() || null,
-      },
+        interestType: dto.interestType || null,
+      } as any,
     });
+
+    let requesterName = requesterType === 'BRAND' ? 'A brand' : 'A community';
+    if (requesterType === 'BRAND' && brandProfileId) {
+      const bp = await this.prisma.brandProfile.findUnique({ where: { id: brandProfileId }, select: { brandName: true } });
+      if (bp?.brandName) requesterName = bp.brandName;
+    } else if (requesterType === 'COMMUNITY' && hostProfileId) {
+      const hp = await this.prisma.hostProfile.findUnique({ where: { id: hostProfileId }, select: { displayName: true } });
+      if (hp?.displayName) requesterName = hp.displayName;
+    }
 
     if (space.spaceProfile.userId !== userId) {
       void this.notificationsService
         .create(
           space.spaceProfile.userId,
           'space_interest_requested',
-          'New interest in your Community Space',
-          `A ${requesterType === 'BRAND' ? 'brand' : 'community'} is interested — check your Chats to respond.`,
+          `${requesterName} is interested in ${typeLabel}`,
+          `${requesterName} expressed interest in ${typeLabel.toLowerCase()} with your hub — check your Chats to respond.`,
           { spaceInterestId: interest.id, spaceCommunityProfileId },
         )
         .catch(() => undefined);
     }
 
     void this.notificationsService
-      .create(userId, 'space_interest_confirmed', 'Interest sent!', `${space.name} has been notified of your interest.`, {
+      .create(userId, 'space_interest_confirmed', 'Interest sent!', `${space.name} has been notified of your interest in ${typeLabel.toLowerCase()}.`, {
         spaceInterestId: interest.id,
       })
       .catch(() => undefined);
 
-    return { message: 'Interest recorded', alreadyInterested: false, interestId: interest.id, chatStatus: interest.chatStatus };
+    return { message: 'Interest recorded', alreadyInterested: false, interestId: interest.id, chatStatus: interest.chatStatus, interestType: (interest as any).interestType ?? null };
   }
 
   async listMySpaceChats(userId: string, query: ListSpaceChatsQueryDto) {
@@ -500,6 +530,7 @@ export class SpacesService {
           hostProfileId: i.hostProfileId,
           brandProfileId: i.brandProfileId,
           chatStatus: i.chatStatus,
+          interestType: (i as any).interestType ?? null,
           createdAt: i.createdAt,
           chatAcceptedAt: i.chatAcceptedAt,
           lastMessageAt: i.lastMessageAt,

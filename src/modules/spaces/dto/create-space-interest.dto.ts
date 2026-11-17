@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsEnum, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateSpaceInterestDto {
@@ -17,4 +17,13 @@ export class CreateSpaceInterestDto {
   @IsOptional()
   @IsEnum(['BRAND', 'COMMUNITY'])
   asRole?: 'BRAND' | 'COMMUNITY';
+
+  @ApiPropertyOptional({
+    enum: ['NAMING_RIGHTS', 'PHYSICAL_BRANDING', 'SAMPLING_DEMO', 'POPUPS_EXPERIENCES'],
+    description: 'Specific interest type from the brand',
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(['NAMING_RIGHTS', 'PHYSICAL_BRANDING', 'SAMPLING_DEMO', 'POPUPS_EXPERIENCES'])
+  interestType?: 'NAMING_RIGHTS' | 'PHYSICAL_BRANDING' | 'SAMPLING_DEMO' | 'POPUPS_EXPERIENCES';
 }

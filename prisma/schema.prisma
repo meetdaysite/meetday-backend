@@ -660,6 +660,7 @@ model SpaceInterest {
   hostProfile    HostProfile?               @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
 
   message String? @db.Text // optional note sent along with the interest request
+  interestType String? // "NAMING_RIGHTS" | "PHYSICAL_BRANDING" | "SAMPLING_DEMO" | "POPUPS_EXPERIENCES"
 
   chatStatus     SpaceChatStatus @default(REQUESTED)
   chatAcceptedAt DateTime?
