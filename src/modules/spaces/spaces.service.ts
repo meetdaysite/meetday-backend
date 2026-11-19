@@ -765,9 +765,11 @@ export class SpacesService {
     const deal = await this.prisma.spaceDeal.create({
       data: {
         spaceInterestId: interest.id,
+        collaborationType: dto.collaborationType || (interest as any).interestType || 'NAMING_RIGHTS',
+        dealData: dto.dealData ?? Prisma.JsonNull,
         projectName: dto.projectName,
         goals: dto.goals ?? Prisma.JsonNull,
-        venue: dto.venue,
+        venue: dto.venue || dto.dealData?.cities || interest.spaceCommunityProfile.name || 'Hub Venue',
         time: dto.time,
         targetAudience: dto.targetAudience ?? Prisma.JsonNull,
         startDate: new Date(dto.startDate),
@@ -778,7 +780,7 @@ export class SpacesService {
         otherTerms: dto.otherTerms,
         additionalNotes: dto.additionalNotes,
         createdById: userId,
-      },
+      } as any,
     });
 
     const recipientUserId = this.recipientForCounterpart(interest);
@@ -806,9 +808,11 @@ export class SpacesService {
     const updated = await this.prisma.spaceDeal.update({
       where: { spaceInterestId: interest.id },
       data: {
+        collaborationType: dto.collaborationType ?? (existing as any).collaborationType,
+        dealData: dto.dealData ?? (existing as any).dealData ?? Prisma.JsonNull,
         projectName: dto.projectName,
         goals: dto.goals ?? Prisma.JsonNull,
-        venue: dto.venue,
+        venue: dto.venue || dto.dealData?.cities || existing.venue || 'Hub Venue',
         time: dto.time,
         targetAudience: dto.targetAudience ?? Prisma.JsonNull,
         startDate: new Date(dto.startDate),
@@ -820,7 +824,7 @@ export class SpacesService {
         additionalNotes: dto.additionalNotes,
         status: 'PENDING_APPROVAL',
         changeRequestNote: null,
-      },
+      } as any,
     });
 
     const recipientUserId = this.recipientForCounterpart(interest);
@@ -984,6 +988,7 @@ export class SpacesService {
         spaceDealId: deal.id,
         projectName: dto.projectName ?? 'Project',
         eventDate: dto.eventDate ?? '',
+        endDate: dto.endDate ?? null,
         venue: dto.venue ?? '',
         time: dto.time,
         guestCount: dto.guestCount,
@@ -994,13 +999,15 @@ export class SpacesService {
         status: finalStatus,
         revisionNote: finalRevisionNote,
         summary: dto.summary,
+        reportData: dto.reportData ?? Prisma.JsonNull,
         proofKeys: dto.proofKeys ?? [],
         notes: dto.notes,
         submittedById: userId,
-      },
+      } as any,
       update: {
         projectName: dto.projectName ?? 'Project',
         eventDate: dto.eventDate ?? '',
+        endDate: dto.endDate ?? null,
         venue: dto.venue ?? '',
         time: dto.time,
         guestCount: dto.guestCount,
@@ -1011,10 +1018,11 @@ export class SpacesService {
         status: finalStatus,
         revisionNote: finalRevisionNote,
         summary: dto.summary,
+        reportData: dto.reportData ?? Prisma.JsonNull,
         proofKeys: dto.proofKeys ?? [],
         notes: dto.notes,
         submittedById: userId,
-      },
+      } as any,
     });
 
     const requesterUserId = interest.requesterType === 'BRAND' ? interest.brandProfile?.userId : interest.hostProfile?.userId;

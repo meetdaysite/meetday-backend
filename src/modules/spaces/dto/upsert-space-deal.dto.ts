@@ -3,6 +3,19 @@ import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpsertSpaceDealDto {
+  @ApiPropertyOptional({
+    enum: ['NAMING_RIGHTS', 'PHYSICAL_BRANDING', 'SAMPLING_DEMO', 'POPUPS_EXPERIENCES'],
+    default: 'NAMING_RIGHTS',
+    description: 'Specific collaboration type',
+  })
+  @IsOptional()
+  @IsString()
+  collaborationType?: string;
+
+  @ApiPropertyOptional({ description: 'Category-specific custom fields payload' })
+  @IsOptional()
+  dealData?: any;
+
   @ApiProperty({ example: 'Summer Space Activation' })
   @IsString()
   @MaxLength(200)
@@ -12,10 +25,11 @@ export class UpsertSpaceDealDto {
   @IsOptional()
   goals?: string | string[];
 
-  @ApiProperty({ example: 'Level 3, Phoenix Marketcity, Bengaluru' })
+  @ApiPropertyOptional({ example: 'Level 3, Phoenix Marketcity, Bengaluru' })
+  @IsOptional()
   @IsString()
   @MaxLength(300)
-  venue: string;
+  venue?: string;
 
   @ApiPropertyOptional({ example: '6:00 PM onwards' })
   @IsOptional()

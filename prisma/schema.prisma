@@ -723,6 +723,9 @@ model SpaceDeal {
   spaceInterestId String        @unique
   spaceInterest   SpaceInterest @relation(fields: [spaceInterestId], references: [id], onDelete: Cascade)
 
+  collaborationType String?         @default("NAMING_RIGHTS")
+  dealData          Json?
+
   projectName       String
   goals             Json? // string[] or string, free-form from the form
   venue             String
@@ -762,6 +765,7 @@ model SpaceDealReport {
 
   projectName  String
   eventDate    String
+  endDate      String?
   venue        String
   time         String?
   guestCount   String?
@@ -772,9 +776,10 @@ model SpaceDealReport {
   status       String   @default("PENDING") // PENDING, APPROVED, REVISION_REQUESTED
   revisionNote String?
 
-  summary   String   @db.Text
-  proofKeys String[]
-  notes     String?  @db.Text
+  summary    String   @db.Text
+  proofKeys  String[]
+  notes      String?  @db.Text
+  reportData Json?
 
   submittedById String
   submittedBy   User     @relation("SpaceDealReportSubmittedBy", fields: [submittedById], references: [id])

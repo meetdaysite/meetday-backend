@@ -19,6 +19,16 @@ export class UpsertSpaceDealReportDto {
   @MaxLength(100)
   eventDate?: string;
 
+  @ApiPropertyOptional({ example: '2026-08-27' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  endDate?: string;
+
+  @ApiPropertyOptional({ description: 'Category-specific custom report fields payload' })
+  @IsOptional()
+  reportData?: any;
+
   @ApiPropertyOptional({ example: 'Convention Center, Hall A' })
   @IsOptional()
   @IsString()
