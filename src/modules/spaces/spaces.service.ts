@@ -524,6 +524,7 @@ export class SpacesService {
         return {
           id: i.id,
           spaceCommunityProfileId: i.spaceCommunityProfileId,
+          spaceName: i.spaceCommunityProfile?.name ?? null,
           requesterType: i.requesterType,
           // Raw requester ids — lets a caller cross-reference this thread against the reverse
           // (Space -> Community) SpaceHostInterest feature to detect an existing channel.
