@@ -159,6 +159,18 @@ export class SpacesController {
     return this.spacesService.getSpaceDeal(userId, interestId);
   }
 
+  @Get('chats/:interestId/deals/archive')
+  @Roles('BRAND', 'HOST', 'SPACE_PARTNER')
+  @ApiOperation({ summary: 'Get archived/completed deals for this chat' })
+  @ApiOkResponse({ description: 'List of past deals with approved reports.' })
+  getPastDeals(
+    @GetUser('id') userId: string,
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Query('role') role?: 'BRAND' | 'COMMUNITY' | 'SPACE',
+  ) {
+    return this.spacesService.getPastSpaceDeals(userId, interestId, role);
+  }
+
   @Post('chats/:interestId/deal')
   @Roles('SPACE_PARTNER')
   @HttpCode(HttpStatus.CREATED)
@@ -212,8 +224,9 @@ export class SpacesController {
     @GetUser('id') userId: string,
     @Param('interestId', ParseUUIDPipe) interestId: string,
     @Query('role') role?: 'BRAND' | 'COMMUNITY' | 'SPACE',
+    @Query('dealId') dealId?: string,
   ) {
-    return this.spacesService.getSpaceDealReport(userId, interestId, role);
+    return this.spacesService.getSpaceDealReport(userId, interestId, role, dealId);
   }
 
   @Put('chats/:interestId/deal/report')
@@ -235,10 +248,14 @@ export class SpacesController {
   @Roles('BRAND', 'HOST', 'SPACE_PARTNER')
   @ApiOperation({ summary: 'Get a presigned download URL for the deliverables report as a PDF' })
   @ApiOkResponse({ description: 'Presigned report PDF URL.' })
-  async getDealReportPdfUrl(@GetUser('id') userId: string, @Param('interestId', ParseUUIDPipe) interestId: string) {
+  async getDealReportPdfUrl(
+    @GetUser('id') userId: string,
+    @Param('interestId', ParseUUIDPipe) interestId: string,
+    @Query('dealId') dealId?: string,
+  ) {
     // Reuses getSpaceDeal's participant access check before generating the PDF.
     await this.spacesService.getSpaceDeal(userId, interestId);
-    const url = await this.spaceReportPdfService.getDownloadUrl(interestId);
+    const url = await this.spaceReportPdfService.getDownloadUrl(interestId, dealId);
     return { url };
   }
 }

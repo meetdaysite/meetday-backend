@@ -31,14 +31,14 @@ export class SpaceReportPdfService {
     private readonly configService: ConfigService,
   ) {}
 
-  async getDownloadUrl(interestId: string): Promise<string> {
-    const buffer = await this.generateForReport(interestId);
+  async getDownloadUrl(interestId: string, dealId?: string): Promise<string> {
+    const buffer = await this.generateForReport(interestId, dealId);
     const key = `space-deal-reports/${interestId}/report-${Date.now()}.pdf`;
     await this.storageService.uploadBuffer(key, buffer, 'application/pdf');
     return this.storageService.getPresignedDownloadUrl(key);
   }
 
-  async generateForReport(interestId: string): Promise<Buffer> {
+  async generateForReport(interestId: string, dealId?: string): Promise<Buffer> {
     const interest = await this.prisma.spaceInterest.findUnique({
       where: { id: interestId },
       include: {
@@ -49,7 +49,9 @@ export class SpaceReportPdfService {
     });
     if (!interest) throw new NotFoundException('Chat thread not found');
 
-    const deal = await this.prisma.spaceDeal.findUnique({ where: { spaceInterestId: interestId } });
+    const deal = dealId
+      ? await this.prisma.spaceDeal.findFirst({ where: { id: dealId, spaceInterestId: interestId } })
+      : await this.prisma.spaceDeal.findFirst({ where: { spaceInterestId: interestId }, orderBy: { createdAt: 'desc' } });
     if (!deal) throw new NotFoundException('No deal found for this chat');
 
     const report = await this.prisma.spaceDealReport.findUnique({ where: { spaceDealId: deal.id } });

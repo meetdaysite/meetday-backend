@@ -748,7 +748,40 @@ export class SpacesService {
 
   async getSpaceDeal(userId: string, interestId: string) {
     const { interest } = await this.getSpaceInterestForParticipant(userId, interestId);
-    return this.prisma.spaceDeal.findUnique({ where: { spaceInterestId: interest.id } });
+    const deals = await this.prisma.spaceDeal.findMany({
+      where: { spaceInterestId: interest.id },
+      include: { report: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    const activeDeal = deals.find((d) => d.report?.status !== 'APPROVED') || null;
+    return activeDeal;
+  }
+
+  async getPastSpaceDeals(userId: string, interestId: string, preferredRole?: 'BRAND' | 'COMMUNITY' | 'SPACE') {
+    const { interest } = await this.getSpaceInterestForParticipant(userId, interestId, preferredRole);
+    const deals = await this.prisma.spaceDeal.findMany({
+      where: {
+        spaceInterestId: interest.id,
+        report: { status: 'APPROVED' },
+      },
+      include: { report: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    return Promise.all(
+      deals.map(async (d) => {
+        if (!d.report) return d;
+        const proofUrls = await Promise.all(
+          (d.report.proofKeys ?? []).filter(Boolean).map(async (key) => {
+            try {
+              return await this.storageService.getPresignedDownloadUrl(key);
+            } catch {
+              return '';
+            }
+          }),
+        );
+        return { ...d, report: { ...d.report, proofUrls } };
+      }),
+    );
   }
 
   private recipientForCounterpart(interest: { requesterType: string; brandProfile: { userId: string } | null; hostProfile: { userId: string } | null }) {
@@ -760,8 +793,13 @@ export class SpacesService {
     if (effectiveRole !== 'SPACE') throw new ForbiddenException('Only the space can lock in deal terms');
     if (interest.chatStatus !== 'ACCEPTED') throw new BadRequestException('The chat must be accepted before locking a deal');
 
-    const existing = await this.prisma.spaceDeal.findUnique({ where: { spaceInterestId: interest.id } });
-    if (existing) throw new BadRequestException('A deal already exists for this chat — edit it instead');
+    const deals = await this.prisma.spaceDeal.findMany({
+      where: { spaceInterestId: interest.id },
+      include: { report: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    const existing = deals.find((d) => d.report?.status !== 'APPROVED');
+    if (existing) throw new BadRequestException('A deal is already active for this chat — edit it instead');
 
     const deal = await this.prisma.spaceDeal.create({
       data: {
@@ -802,12 +840,17 @@ export class SpacesService {
     const { interest, effectiveRole } = await this.getSpaceInterestForParticipant(userId, interestId, dto.asRole);
     if (effectiveRole !== 'SPACE') throw new ForbiddenException('Only the space can edit deal terms');
 
-    const existing = await this.prisma.spaceDeal.findUnique({ where: { spaceInterestId: interest.id } });
-    if (!existing) throw new NotFoundException('No deal exists for this chat yet');
+    const deals = await this.prisma.spaceDeal.findMany({
+      where: { spaceInterestId: interest.id },
+      include: { report: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    const existing = deals.find((d) => d.report?.status !== 'APPROVED');
+    if (!existing) throw new NotFoundException('No active deal exists for this chat yet');
     if (existing.status === 'APPROVED') throw new BadRequestException('An approved deal cannot be edited');
 
     const updated = await this.prisma.spaceDeal.update({
-      where: { spaceInterestId: interest.id },
+      where: { id: existing.id },
       data: {
         collaborationType: dto.collaborationType ?? (existing as any).collaborationType,
         dealData: dto.dealData ?? (existing as any).dealData ?? Prisma.JsonNull,
@@ -846,11 +889,16 @@ export class SpacesService {
     const { interest, effectiveRole } = await this.getSpaceInterestForParticipant(userId, interestId, preferredRole);
     if (effectiveRole === 'SPACE') throw new ForbiddenException('Only the counterpart can approve the deal');
 
-    const existing = await this.prisma.spaceDeal.findUnique({ where: { spaceInterestId: interest.id } });
-    if (!existing) throw new NotFoundException('No deal exists for this chat yet');
+    const deals = await this.prisma.spaceDeal.findMany({
+      where: { spaceInterestId: interest.id },
+      include: { report: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    const existing = deals.find((d) => d.report?.status !== 'APPROVED');
+    if (!existing) throw new NotFoundException('No active deal exists for this chat yet');
 
     const updated = await this.prisma.spaceDeal.update({
-      where: { spaceInterestId: interest.id },
+      where: { id: existing.id },
       data: { status: 'APPROVED', approvedAt: new Date(), changeRequestNote: null },
     });
 
@@ -880,11 +928,17 @@ export class SpacesService {
     const { interest, effectiveRole } = await this.getSpaceInterestForParticipant(userId, interestId, dto.asRole);
     if (effectiveRole === 'SPACE') throw new ForbiddenException('Only the counterpart can request changes to the deal');
 
-    const existing = await this.prisma.spaceDeal.findUnique({ where: { spaceInterestId: interest.id } });
-    if (!existing) throw new NotFoundException('No deal exists for this chat yet');
+    const deals = await this.prisma.spaceDeal.findMany({
+      where: { spaceInterestId: interest.id },
+      include: { report: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    const existing = deals.find((d) => d.report?.status !== 'APPROVED');
+    if (!existing) throw new NotFoundException('No active deal exists for this chat yet');
+    if (existing.status === 'APPROVED') throw new BadRequestException('This deal is already approved');
 
     const updated = await this.prisma.spaceDeal.update({
-      where: { spaceInterestId: interest.id },
+      where: { id: existing.id },
       data: { status: 'CHANGES_REQUESTED', changeRequestNote: dto.note ?? null },
     });
 
@@ -932,9 +986,19 @@ export class SpacesService {
 
   // ── Submit Report: space reports on completed deliverables once the deal is locked ──────
 
-  async getSpaceDealReport(userId: string, interestId: string, preferredRole?: 'BRAND' | 'COMMUNITY' | 'SPACE') {
+  async getSpaceDealReport(userId: string, interestId: string, preferredRole?: 'BRAND' | 'COMMUNITY' | 'SPACE', dealId?: string) {
     const { interest } = await this.getSpaceInterestForParticipant(userId, interestId, preferredRole);
-    const deal = await this.prisma.spaceDeal.findUnique({ where: { spaceInterestId: interest.id } });
+    let deal: any;
+    if (dealId) {
+      deal = await this.prisma.spaceDeal.findFirst({ where: { id: dealId, spaceInterestId: interest.id } });
+    } else {
+      const deals = await this.prisma.spaceDeal.findMany({
+        where: { spaceInterestId: interest.id },
+        include: { report: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      deal = deals.find((d) => d.report?.status !== 'APPROVED') || deals[0] || null;
+    }
     if (!deal) throw new NotFoundException('No deal found for this chat');
 
     const report = await this.prisma.spaceDealReport.findUnique({ where: { spaceDealId: deal.id } });
@@ -952,11 +1016,21 @@ export class SpacesService {
     return { ...report, proofUrls };
   }
 
-  async upsertSpaceDealReport(userId: string, interestId: string, dto: UpsertSpaceDealReportDto) {
+  async upsertSpaceDealReport(userId: string, interestId: string, dto: UpsertSpaceDealReportDto, dealId?: string) {
     const { interest, effectiveRole } = await this.getSpaceInterestForParticipant(userId, interestId, dto.asRole);
 
-    const deal = await this.prisma.spaceDeal.findUnique({ where: { spaceInterestId: interest.id } });
-    if (!deal) throw new NotFoundException('No deal found for this chat');
+    let deal: any;
+    if (dealId) {
+      deal = await this.prisma.spaceDeal.findFirst({ where: { id: dealId, spaceInterestId: interest.id } });
+    } else {
+      const deals = await this.prisma.spaceDeal.findMany({
+        where: { spaceInterestId: interest.id },
+        include: { report: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      deal = deals.find((d) => d.report?.status !== 'APPROVED');
+    }
+    if (!deal) throw new NotFoundException('No active deal found for this chat');
     if (deal.status !== 'APPROVED') {
       throw new BadRequestException('The deal must be locked and approved before submitting a report');
     }

@@ -671,7 +671,7 @@ model SpaceInterest {
   adminLastReadAt     DateTime?
 
   chatMessages SpaceChatMessage[]
-  deal         SpaceDeal?
+  deals        SpaceDeal[]
 
   createdAt DateTime @default(now())
 
@@ -720,7 +720,7 @@ enum SpaceDealStatus {
 // (spaces are booked/paid for entirely outside the platform for now).
 model SpaceDeal {
   id              String        @id @default(uuid())
-  spaceInterestId String        @unique
+  spaceInterestId String
   spaceInterest   SpaceInterest @relation(fields: [spaceInterestId], references: [id], onDelete: Cascade)
 
   collaborationType String?         @default("NAMING_RIGHTS")
@@ -751,6 +751,7 @@ model SpaceDeal {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([spaceInterestId])
   @@index([status])
   @@map("space_deals")
 }
